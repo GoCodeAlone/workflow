@@ -68,8 +68,8 @@ service IaCProviderRegionLister {
 // IaCProviderOwnership is an optional service for providers that can read,
 // write, and enumerate cloud-side resource ownership metadata. Providers map
 // this contract to native tags, labels, or other provider-appropriate metadata.
-// DNS ownership remains handled by wfctl dns-policy and is intentionally not
-// generalized through this service.
+// DNS ownership remains handled by the DNS orchestration plugin and is
+// intentionally not generalized through this service.
 service IaCProviderOwnership {
   rpc GetOwner(GetOwnerRequest) returns (GetOwnerResponse);
   rpc SetOwner(SetOwnerRequest) returns (SetOwnerResponse);

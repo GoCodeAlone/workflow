@@ -69,8 +69,6 @@ workflows:
         description: Convert Go template expressions to expr syntax
       - name: infra
         description: Manage infrastructure lifecycle
-      - name: dns-policy
-        description: Manage cross-provider DNS ownership policy (show/set/transfer-ownership/drift)
       - name: docs
         description: Generate documentation from workflow configs
       - name: editor-schemas
@@ -241,10 +239,6 @@ pipelines:
     trigger: {type: cli, config: {command: infra}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: infra}}
-  cmd-dns-policy:
-    trigger: {type: cli, config: {command: dns-policy}}
-    steps:
-      - {name: run, type: step.cli_invoke, config: {command: dns-policy}}
   cmd-docs:
     trigger: {type: cli, config: {command: docs}}
     steps:

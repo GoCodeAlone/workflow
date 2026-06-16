@@ -129,7 +129,8 @@ type OwnerFilter struct {
 // Implementations map this provider-neutral contract to native tags, labels, or
 // other safe metadata. `GetOwner` returns Owner="" when the resource is
 // unowned. `SetOwner` must be idempotent for the same owner. DNS ownership is
-// intentionally out of scope because wfctl dns-policy owns DNS TXT policy.
+// intentionally out of scope because the DNS orchestration plugin owns DNS TXT
+// policy.
 type OwnershipProvider interface {
 	GetOwner(ctx context.Context, ref ResourceRef) (*ResourceOwner, error)
 	SetOwner(ctx context.Context, ref ResourceRef, owner string) error

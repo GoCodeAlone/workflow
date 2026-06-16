@@ -1002,8 +1002,8 @@ const (
 // IaCProviderOwnership is an optional service for providers that can read,
 // write, and enumerate cloud-side resource ownership metadata. Providers map
 // this contract to native tags, labels, or other provider-appropriate metadata.
-// DNS ownership remains handled by wfctl dns-policy and is intentionally not
-// generalized through this service.
+// DNS ownership remains handled by the DNS orchestration plugin and is
+// intentionally not generalized through this service.
 type IaCProviderOwnershipClient interface {
 	GetOwner(ctx context.Context, in *GetOwnerRequest, opts ...grpc.CallOption) (*GetOwnerResponse, error)
 	SetOwner(ctx context.Context, in *SetOwnerRequest, opts ...grpc.CallOption) (*SetOwnerResponse, error)
@@ -1055,8 +1055,8 @@ func (c *iaCProviderOwnershipClient) ListOwners(ctx context.Context, in *ListOwn
 // IaCProviderOwnership is an optional service for providers that can read,
 // write, and enumerate cloud-side resource ownership metadata. Providers map
 // this contract to native tags, labels, or other provider-appropriate metadata.
-// DNS ownership remains handled by wfctl dns-policy and is intentionally not
-// generalized through this service.
+// DNS ownership remains handled by the DNS orchestration plugin and is
+// intentionally not generalized through this service.
 type IaCProviderOwnershipServer interface {
 	GetOwner(context.Context, *GetOwnerRequest) (*GetOwnerResponse, error)
 	SetOwner(context.Context, *SetOwnerRequest) (*SetOwnerResponse, error)
