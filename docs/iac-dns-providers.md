@@ -133,51 +133,48 @@ a custom detector via the plugin SDK.
 
 ## Ownership policy
 
-DNS ownership is enforced through the cross-provider `wfctl dns-policy`
-surface, not through per-record `_dns-managed-by` TXT records.
+DNS ownership is enforced through the infra plugin's `wfctl dns policy`
+surface and the `wfctl dns intent reconcile` apply path, not through
+per-record `_dns-managed-by` TXT records.
 
-`wfctl dns-policy` stores a zone-level TXT policy at:
+The policy is stored as zone-level TXT at:
 
 ```text
 _workflow-dns-policy.<zone>
 ```
 
 Each policy entry declares an owner, optional record-name patterns, optional
-record types, and at most one default owner. During `wfctl infra apply`,
-`infra.dns` actions pass through a pre-dispatch gate when `WORKFLOW_DNS_OWNER`
-is set. The gate reads the policy through the active provider's
-`ResourceDriver("infra.dns")` and denies changes where the caller's owner is
-not delegated for the `(record name, record type)` tuple.
+record types, and at most one default owner. During
+`wfctl dns intent reconcile --mode apply`, generated `infra.dns` actions are
+checked when `WORKFLOW_DNS_OWNER` is set. The infra plugin reads the policy
+from DNS portfolio exports and denies changes where the caller's owner is not
+delegated for the `(record name, record type)` tuple before invoking generic
+`wfctl infra apply`.
 
 Common operations:
 
 ```sh
-wfctl dns-policy show --config infra.yaml --provider do-prod --zone example.com
+wfctl dns policy show --portfolio 'zones/*.portfolio.json' --provider do-prod --zone example.com
 
-wfctl dns-policy set \
-  --config infra.yaml \
-  --provider do-prod \
-  --zone example.com \
+wfctl dns policy check \
+  --portfolio 'zones/*.portfolio.json' \
+  --config infra/domain-reconcile.generated.wfctl.yaml \
   --owner sre \
-  --patterns 'www,api,_acme-challenge,_acme-challenge.*' \
-  --types 'A,CNAME,TXT'
 
-wfctl dns-policy transfer-ownership \
-  --config infra.yaml \
-  --provider do-prod \
-  --zone example.com \
-  --name api \
-  --new-owner platform
-
-WORKFLOW_DNS_OWNER=platform wfctl infra apply --config infra.yaml --env prod
+WORKFLOW_DNS_OWNER=platform wfctl dns intent reconcile \
+  --intent domains.json \
+  --portfolio 'zones/*.portfolio.json' \
+  --domain example.com \
+  --mode apply \
+  --auto-approve
 ```
 
 Operational rules:
 
-- Missing policy fails closed when `WORKFLOW_DNS_OWNER` is set and an
-  `infra.dns` action is checked.
+- Missing policy fails closed when `WORKFLOW_DNS_OWNER` is set and generated
+  `infra.dns` records are checked by DNS intent reconciliation.
 - Missing `WORKFLOW_DNS_OWNER` logs a warning and skips DNS policy enforcement
-  for compatibility with older applies.
+  for compatibility with adoption/backfill workflows.
 - `SOA` and `NS` are protected unless explicitly delegated by type.
 - The policy TXT is preserved by DNS record sanitizers so ownership metadata is
   visible in audits.

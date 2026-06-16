@@ -25,7 +25,6 @@ var reservedCLICommands = map[string]struct{}{
 	"deploy":          {},
 	"dev":             {},
 	"diff":            {},
-	"dns-policy":      {},
 	"docs":            {},
 	"dsl-reference":   {},
 	"editor-bundle":   {},

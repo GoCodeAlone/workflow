@@ -1832,7 +1832,7 @@ wfctl infra owners --owner NAME [-c CONFIG] [--env ENV] [--type RESOURCE_TYPE]
 | `--env` | `` | Environment name for config and state resolution |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. |
 
-Provider plugins map ownership to their native mechanism, such as `managed-by:<owner>` tags, `managed-by=<owner>` labels, or provider-specific metadata. DNS ownership is separate and remains governed by `wfctl dns-policy`.
+Provider plugins map ownership to their native mechanism, such as `managed-by:<owner>` tags, `managed-by=<owner>` labels, or provider-specific metadata. DNS ownership is separate and remains governed by the DNS orchestration plugin (`wfctl dns policy`).
 
 #### `infra apply`
 
@@ -1864,7 +1864,7 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
-Generic ownership checks do not replace authentication or provider IAM. They are a pre-dispatch safety gate to avoid accidental cross-owner mutation where provider plugins can read/write ownership metadata. DNS resources are excluded from this generic gate and continue to use `wfctl dns-policy`.
+Generic ownership checks do not replace authentication or provider IAM. They are a pre-dispatch safety gate to avoid accidental cross-owner mutation where provider plugins can read/write ownership metadata. DNS resources are excluded from this generic gate and use plugin-owned DNS policy checks during DNS intent reconciliation.
 
 #### Plugin-owned `dns intent compile`
 

@@ -92,9 +92,8 @@ type ApplyPlanHooks struct {
 	// OnBeforeAction fires PRE-DISPATCH for every PlanAction, after the
 	// per-iteration ctx.Err() check but before JIT substitution / driver
 	// resolution / cloud-side mutation. The intended use case is policy /
-	// ownership gates that can deny a record-level change before any
-	// cloud-side state moves (see workflow/dns/gate + the wfctl dns-policy
-	// surface).
+	// ownership gates that can deny a resource-level change before any
+	// cloud-side state moves.
 	//
 	// FATAL semantics (cycle 3.5 I-NEW-2): a non-nil return aborts the
 	// per-action loop with a wrapped error — no further actions dispatch,
