@@ -326,6 +326,8 @@ func TestFromResourceStatesCanonicalizesRecordAndAuthorityOrder(t *testing.T) {
 					map[string]any{"type": "TXT", "name": "z", "address": "last", "ttl": 300},
 					map[string]any{"type": "MX", "name": "@", "address": "mail.example.com.", "ttl": 300, "priority": 10},
 					map[string]any{"type": "TXT", "name": "_dmarc", "address": "v=DMARC1; p=none", "ttl": 300},
+					map[string]any{"type": "A", "name": "www", "address": "192.0.2.12", "ttl": 300},
+					map[string]any{"type": "A", "name": "WWW", "address": "192.0.2.11", "ttl": 300},
 					map[string]any{"type": "A", "name": "@", "address": "192.0.2.10", "ttl": 300},
 				},
 				"authority": map[string]any{
@@ -356,6 +358,8 @@ func TestFromResourceStatesCanonicalizesRecordAndAuthorityOrder(t *testing.T) {
 	}
 	wantRecords := []string{
 		"A @ 192.0.2.10",
+		"A WWW 192.0.2.11",
+		"A www 192.0.2.12",
 		"MX @ mail.example.com.",
 		"TXT _dmarc v=DMARC1; p=none",
 		"TXT z last",

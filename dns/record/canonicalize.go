@@ -130,7 +130,9 @@ func canonicalizeSnapshot(snap *Snapshot) {
 func recordLess(a, b Record) bool {
 	for _, cmp := range []struct{ a, b string }{
 		{strings.ToUpper(a.Type), strings.ToUpper(b.Type)},
+		{a.Type, b.Type},
 		{strings.ToLower(a.Name), strings.ToLower(b.Name)},
+		{a.Name, b.Name},
 		{strings.ToLower(a.Value), strings.ToLower(b.Value)},
 		{a.Value, b.Value},
 	} {
