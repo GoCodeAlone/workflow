@@ -37,7 +37,7 @@
 | 6 | Multisite Blackorchid tenant route | Task 6 | `codex/multisite-blackorchid` |
 | 7 | Blackorchid DNS cutover | Task 7 | `codex/blackorchid-dns-cutover` |
 
-**Status:** Draft
+**Status:** Locked 2026-06-16T15:06:45Z
 
 ### Task 1: wfctl plugin lock CI semantics
 
