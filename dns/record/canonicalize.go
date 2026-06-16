@@ -154,7 +154,7 @@ func recordLess(a, b Record) bool {
 	if less, ok := optionalIntLess(a.Flags, b.Flags); ok {
 		return less
 	}
-	if strings.ToLower(a.Tag) != strings.ToLower(b.Tag) {
+	if !strings.EqualFold(a.Tag, b.Tag) {
 		return strings.ToLower(a.Tag) < strings.ToLower(b.Tag)
 	}
 	return a.Tag < b.Tag
