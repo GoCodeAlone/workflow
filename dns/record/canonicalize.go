@@ -13,8 +13,9 @@ import (
 // AppliedConfig), renaming provider-specific value keys to the canonical "value".
 // If an infra.dns state includes provider-supplied authority metadata in
 // Outputs["authority"], safe keys are copied into Snapshot.Authority.
-// Each infra.dns_delegation state populates Snapshot.Authority with
-// registrar_nameservers and live_nameservers for the matching domain.
+// Each infra.dns_delegation state populates Snapshot.Authority for the matching
+// domain from safe Outputs["authority"] keys, plus top-level
+// registrar_nameservers and live_nameservers values when present.
 // States of other types are silently skipped.
 //
 // Snapshots are grouped by (Provider, Domain) so that infra.dns and
@@ -86,6 +87,7 @@ func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 				continue
 			}
 			snap := getOrCreate(st.Provider, domain)
+			mergeAuthority(snap, st.Outputs["authority"])
 			for _, nsKey := range []string{"registrar_nameservers", "live_nameservers"} {
 				if v, ok := st.Outputs[nsKey]; ok {
 					if cloned, ok := cloneNameserverAuthorityValue(v); ok {
