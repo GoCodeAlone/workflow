@@ -86,6 +86,7 @@ func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 				continue
 			}
 			snap := getOrCreate(st.Provider, domain)
+			mergeAuthority(snap, st.Outputs["authority"])
 			for _, nsKey := range []string{"registrar_nameservers", "live_nameservers"} {
 				if v, ok := st.Outputs[nsKey]; ok {
 					if cloned, ok := cloneNameserverAuthorityValue(v); ok {
