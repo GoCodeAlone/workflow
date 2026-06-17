@@ -1,6 +1,7 @@
 package module
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -64,5 +65,35 @@ func TestDockerBuildStep_BuildArgs(t *testing.T) {
 	args := step.(*DockerBuildStep).buildArgs
 	if v, ok := args["VERSION"]; !ok || *v != "1.0" {
 		t.Errorf("expected build_arg VERSION=1.0, got %v", args)
+	}
+}
+
+func TestDockerBuildStep_DockerfilePathRelativeToContext(t *testing.T) {
+	step, err := NewDockerBuildStepFactory()("build", map[string]any{
+		"context":    "app",
+		"dockerfile": "deploy/Dockerfile",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := step.(*DockerBuildStep).dockerfilePath("/repo/app")
+	want := filepath.Join("/repo/app", "deploy", "Dockerfile")
+	if got != want {
+		t.Fatalf("expected dockerfile path %q, got %q", want, got)
+	}
+}
+
+func TestDockerBuildStep_DockerfilePathKeepsAbsolutePath(t *testing.T) {
+	step, err := NewDockerBuildStepFactory()("build", map[string]any{
+		"context":    "app",
+		"dockerfile": "/tmp/Dockerfile",
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := step.(*DockerBuildStep).dockerfilePath("/repo/app"); got != "/tmp/Dockerfile" {
+		t.Fatalf("expected absolute dockerfile path to be preserved, got %q", got)
 	}
 }

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
+	"regexp"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/docker/docker/api/types/image"
-	dockerclient "github.com/docker/docker/client"
 )
 
 // DockerPushStep pushes a Docker image to a remote registry.
@@ -42,13 +43,11 @@ func NewDockerPushStepFactory() StepFactory {
 // Name returns the step name.
 func (s *DockerPushStep) Name() string { return s.name }
 
-// Execute pushes the image to the configured registry.
+// Execute pushes the image to the configured registry using the Docker CLI.
 func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
-	if err != nil {
-		return nil, fmt.Errorf("docker_push step %q: failed to create Docker client: %w", s.name, err)
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker_push step %q: docker CLI not found: %w", s.name, err)
 	}
-	defer cli.Close()
 
 	// Determine the full image reference
 	ref := s.image
@@ -56,16 +55,14 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 		ref = s.registry + "/" + s.image
 	}
 
-	opts := image.PushOptions{}
-
-	reader, err := cli.ImagePush(ctx, ref, opts)
+	cmd := exec.CommandContext(ctx, "docker", "push", ref) // #nosec G204,G702 - workflow docker_push intentionally pushes the configured image reference.
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker_push step %q: push failed: %w", s.name, err)
+		return nil, fmt.Errorf("docker_push step %q: push failed: %w: %s", s.name, err, string(out))
 	}
-	defer reader.Close()
 
 	// Read push output to completion and extract the digest
-	digest, err := parsePushOutput(reader)
+	digest, err := parsePushOutput(strings.NewReader(string(out)))
 	if err != nil {
 		return nil, fmt.Errorf("docker_push step %q: %w", s.name, err)
 	}
@@ -80,9 +77,27 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 	}, nil
 }
 
-// parsePushOutput reads the Docker push JSON stream and extracts the digest.
+var dockerPushDigestPattern = regexp.MustCompile(`(?i)\bdigest:\s*([a-z0-9_+.-]+:[a-f0-9]+)\b`)
+
+// parsePushOutput extracts the digest from Docker CLI text output or a JSON stream.
 func parsePushOutput(r io.Reader) (string, error) {
-	decoder := json.NewDecoder(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		match := dockerPushDigestPattern.FindStringSubmatch(trimmed)
+		if len(match) == 2 {
+			return match[1], nil
+		}
+		return "", nil
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	var digest string
 
 	for {

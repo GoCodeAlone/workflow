@@ -1,17 +1,14 @@
 package module
 
 import (
-	"archive/tar"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/docker/docker/api/types/build"
-	dockerclient "github.com/docker/docker/client"
 )
 
 // DockerBuildStep builds a Docker image from a context directory and Dockerfile.
@@ -79,40 +76,52 @@ func NewDockerBuildStepFactory() StepFactory {
 // Name returns the step name.
 func (s *DockerBuildStep) Name() string { return s.name }
 
-// Execute builds a Docker image using the Docker SDK.
+// Execute builds a Docker image using the Docker CLI.
 func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker_build step %q: docker CLI not found: %w", s.name, err)
+	}
+
+	contextPath, err := filepath.Abs(s.contextPath)
 	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: failed to create Docker client: %w", s.name, err)
+		return nil, fmt.Errorf("docker_build step %q: resolve context path: %w", s.name, err)
 	}
-	defer cli.Close()
+	dockerfile := s.dockerfilePath(contextPath)
 
-	// Create a tar of the build context directory
-	buildCtx, err := createBuildContext(s.contextPath)
+	iidFile, err := os.CreateTemp("", "workflow-docker-build-iid-*")
 	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: failed to create build context: %w", s.name, err)
+		return nil, fmt.Errorf("docker_build step %q: create iidfile: %w", s.name, err)
 	}
+	iidPath := iidFile.Name()
+	_ = iidFile.Close()
+	defer os.Remove(iidPath)
 
-	opts := build.ImageBuildOptions{
-		Tags:       s.tags,
-		Dockerfile: s.dockerfile,
-		BuildArgs:  s.buildArgs,
-		CacheFrom:  s.cacheFrom,
-		Remove:     true,
+	args := []string{"build", "--rm", "--iidfile", iidPath, "-f", dockerfile}
+	for _, tag := range s.tags {
+		args = append(args, "-t", tag)
 	}
+	for key, value := range s.buildArgs {
+		arg := key + "="
+		if value != nil {
+			arg += *value
+		}
+		args = append(args, "--build-arg", arg)
+	}
+	for _, ref := range s.cacheFrom {
+		args = append(args, "--cache-from", ref)
+	}
+	args = append(args, contextPath)
 
-	resp, err := cli.ImageBuild(ctx, buildCtx, opts)
+	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec G204,G702 - workflow docker_build intentionally executes user-configured Docker CLI args.
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: build failed: %w", s.name, err)
-	}
-	defer resp.Body.Close()
-
-	// Read the build output to completion and extract the image ID
-	imageID, err := parseBuildOutput(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: %w", s.name, err)
+		return nil, fmt.Errorf("docker_build step %q: build failed: %w: %s", s.name, err, string(out))
 	}
 
+	imageID := readDockerIIDFile(iidPath)
+	if imageID == "" && len(s.tags) > 0 {
+		imageID = inspectDockerImageID(ctx, s.tags[0])
+	}
 	return &StepResult{
 		Output: map[string]any{
 			"image_id": imageID,
@@ -122,98 +131,25 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 	}, nil
 }
 
-// createBuildContext creates a tar archive of the build context directory.
-func createBuildContext(contextPath string) (io.Reader, error) {
-	absPath, err := filepath.Abs(contextPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve context path: %w", err)
+func (s *DockerBuildStep) dockerfilePath(absContextPath string) string {
+	if filepath.IsAbs(s.dockerfile) {
+		return s.dockerfile
 	}
-
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("context path %q does not exist: %w", absPath, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("context path %q is not a directory", absPath)
-	}
-
-	pr, pw := io.Pipe()
-	go func() {
-		pw.CloseWithError(archiveDirectory(absPath, pw))
-	}()
-
-	return pr, nil
+	return filepath.Join(absContextPath, s.dockerfile)
 }
 
-// archiveDirectory creates a tar archive of a directory and writes it to w.
-func archiveDirectory(dir string, w io.Writer) error {
-	tw := tar.NewWriter(w)
-	defer tw.Close()
-
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-
-		// Use forward slashes for tar paths
-		relPath = filepath.ToSlash(relPath)
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		_, err = io.Copy(tw, f)
-		return err
-	})
+func readDockerIIDFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
-// parseBuildOutput reads the Docker build JSON stream and extracts the image ID.
-func parseBuildOutput(r io.Reader) (string, error) {
-	decoder := json.NewDecoder(r)
-	var imageID string
-
-	for {
-		var msg struct {
-			Stream string `json:"stream"`
-			Aux    struct {
-				ID string `json:"ID"`
-			} `json:"aux"`
-			Error string `json:"error"`
-		}
-		if err := decoder.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return "", fmt.Errorf("failed to parse build output: %w", err)
-		}
-		if msg.Error != "" {
-			return "", fmt.Errorf("build error: %s", msg.Error)
-		}
-		if msg.Aux.ID != "" {
-			imageID = msg.Aux.ID
-		}
+func inspectDockerImageID(ctx context.Context, ref string) string {
+	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", ref).Output() // #nosec G204,G702 - ref is the configured image tag passed to Docker.
+	if err != nil {
+		return ""
 	}
-
-	return imageID, nil
+	return strings.TrimSpace(string(out))
 }
