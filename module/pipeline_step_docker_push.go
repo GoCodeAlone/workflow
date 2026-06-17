@@ -1,12 +1,13 @@
 package module
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
 )
@@ -61,7 +62,7 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 	}
 
 	// Read push output to completion and extract the digest
-	digest, err := parsePushOutput(bytes.NewReader(out))
+	digest, err := parsePushOutput(strings.NewReader(string(out)))
 	if err != nil {
 		return nil, fmt.Errorf("docker_push step %q: %w", s.name, err)
 	}
@@ -76,9 +77,27 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 	}, nil
 }
 
+var dockerPushDigestPattern = regexp.MustCompile(`(?i)\bdigest:\s*([a-z0-9_+.-]+:[a-f0-9]+)\b`)
+
 // parsePushOutput reads the Docker push JSON stream and extracts the digest.
 func parsePushOutput(r io.Reader) (string, error) {
-	decoder := json.NewDecoder(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", err
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		match := dockerPushDigestPattern.FindStringSubmatch(trimmed)
+		if len(match) == 2 {
+			return match[1], nil
+		}
+		return "", nil
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	var digest string
 
 	for {

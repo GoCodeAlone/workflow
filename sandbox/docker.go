@@ -174,9 +174,9 @@ func (s *DockerSandbox) CreateContainer(ctx context.Context, cmd []string) error
 	args = append(args, s.config.Image)
 	args = append(args, cmd...)
 
-	out, err := exec.CommandContext(ctx, "docker", args...).Output()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("sandbox: create container: %w", err)
+		return fmt.Errorf("sandbox: create container: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	s.containerID = strings.TrimSpace(string(out))
 	return nil
@@ -209,9 +209,9 @@ func (s *DockerSandbox) ExecInContainer(ctx context.Context, cmd []string, copyI
 	args := append([]string{"create"}, s.dockerRunArgs()...)
 	args = append(args, s.config.Image)
 	args = append(args, cmd...)
-	out, err := exec.CommandContext(ctx, "docker", args...).Output()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
-		return nil, nil, fmt.Errorf("sandbox: failed to create container: %w", err)
+		return nil, nil, fmt.Errorf("sandbox: failed to create container: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	containerID := strings.TrimSpace(string(out))
 
@@ -405,11 +405,42 @@ func runDockerResult(ctx context.Context, args []string) (*ExecResult, error) {
 }
 
 func (s *DockerSandbox) copyFromContainer(ctx context.Context, containerID, srcPath string) (io.ReadCloser, error) {
-	out, err := exec.CommandContext(ctx, "docker", "cp", containerID+":"+srcPath, "-").Output()
+	cmd := exec.CommandContext(ctx, "docker", "cp", containerID+":"+srcPath, "-")
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
-	return io.NopCloser(bytes.NewReader(out)), nil
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		_, copyErr := io.Copy(pw, stdout)
+		waitErr := cmd.Wait()
+		switch {
+		case copyErr != nil:
+			_ = pw.CloseWithError(copyErr)
+		case waitErr != nil:
+			msg := strings.TrimSpace(stderr.String())
+			if msg != "" {
+				_ = pw.CloseWithError(fmt.Errorf("%w: %s", waitErr, msg))
+			} else {
+				_ = pw.CloseWithError(waitErr)
+			}
+		default:
+			_ = pw.Close()
+		}
+	}()
+
+	return pr, nil
 }
 
 func (s *DockerSandbox) copyToContainer(ctx context.Context, containerID, hostPath, destPath string) error {

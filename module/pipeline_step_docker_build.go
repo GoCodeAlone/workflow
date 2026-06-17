@@ -85,7 +85,21 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 		return nil, fmt.Errorf("docker_build step %q: docker CLI not found: %w", s.name, err)
 	}
 
-	args := []string{"build", "--rm", "-f", s.dockerfile}
+	contextPath, err := filepath.Abs(s.contextPath)
+	if err != nil {
+		return nil, fmt.Errorf("docker_build step %q: resolve context path: %w", s.name, err)
+	}
+	dockerfile := s.dockerfilePath(contextPath)
+
+	iidFile, err := os.CreateTemp("", "workflow-docker-build-iid-*")
+	if err != nil {
+		return nil, fmt.Errorf("docker_build step %q: create iidfile: %w", s.name, err)
+	}
+	iidPath := iidFile.Name()
+	_ = iidFile.Close()
+	defer os.Remove(iidPath)
+
+	args := []string{"build", "--rm", "--iidfile", iidPath, "-f", dockerfile}
 	for _, tag := range s.tags {
 		args = append(args, "-t", tag)
 	}
@@ -99,7 +113,7 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 	for _, ref := range s.cacheFrom {
 		args = append(args, "--cache-from", ref)
 	}
-	args = append(args, s.contextPath)
+	args = append(args, contextPath)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
@@ -107,8 +121,8 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 		return nil, fmt.Errorf("docker_build step %q: build failed: %w: %s", s.name, err, string(out))
 	}
 
-	imageID := ""
-	if len(s.tags) > 0 {
+	imageID := readDockerIIDFile(iidPath)
+	if imageID == "" && len(s.tags) > 0 {
 		imageID = inspectDockerImageID(ctx, s.tags[0])
 	}
 	return &StepResult{
@@ -118,6 +132,21 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 			"context":  s.contextPath,
 		},
 	}, nil
+}
+
+func (s *DockerBuildStep) dockerfilePath(absContextPath string) string {
+	if filepath.IsAbs(s.dockerfile) {
+		return s.dockerfile
+	}
+	return filepath.Join(absContextPath, s.dockerfile)
+}
+
+func readDockerIIDFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func inspectDockerImageID(ctx context.Context, ref string) string {

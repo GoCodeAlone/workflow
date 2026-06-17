@@ -36,3 +36,34 @@ func TestDockerPushStep_MinimalConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParsePushOutput_TextDigest(t *testing.T) {
+	digest, err := parsePushOutput(strings.NewReader("latest: digest: sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff size: 856\n"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if digest != "sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" {
+		t.Fatalf("unexpected digest %q", digest)
+	}
+}
+
+func TestParsePushOutput_JSONDigest(t *testing.T) {
+	digest, err := parsePushOutput(strings.NewReader(`{"status":"pushed"}
+{"aux":{"Digest":"sha256:ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if digest != "sha256:ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100" {
+		t.Fatalf("unexpected digest %q", digest)
+	}
+}
+
+func TestParsePushOutput_JSONError(t *testing.T) {
+	_, err := parsePushOutput(strings.NewReader(`{"error":"denied"}`))
+	if err == nil {
+		t.Fatal("expected push error")
+	}
+	if !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
