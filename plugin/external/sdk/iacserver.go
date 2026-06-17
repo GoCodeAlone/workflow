@@ -15,7 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
-	ext "github.com/GoCodeAlone/workflow/plugin/external"
+	"github.com/GoCodeAlone/workflow/plugin/external/contract"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
@@ -355,12 +355,12 @@ func (b *iacPluginServiceBridge) GetManifest(_ context.Context, _ *emptypb.Empty
 // IaCServeOptions configures the IaC plugin gRPC server entrypoint.
 //
 // Plugin authors typically zero-value this; ServeIaCPlugin then uses the
-// canonical host<->plugin handshake (ext.Handshake). The struct exists as
+// canonical host<->plugin handshake. The struct exists as
 // a forward-extension point so future metadata fields (PluginInfo) can be
 // added without breaking the API.
 type IaCServeOptions struct {
 	// PluginInfo overrides the default handshake/metadata. When nil,
-	// ServeIaCPlugin uses ext.Handshake (the canonical wfctl<->plugin
+	// ServeIaCPlugin uses the canonical wfctl<->plugin
 	// handshake — required for compatibility with the workflow host).
 	PluginInfo *PluginInfo
 
@@ -547,7 +547,7 @@ func (p *mapBackedProvider) CreateTypedStep(typeName, name string, config *anypb
 // breaking the IaCServeOptions API.
 type PluginInfo struct {
 	// HandshakeConfig is the go-plugin handshake. Plugin authors should
-	// leave this zero-valued to inherit ext.Handshake — the host (wfctl)
+	// leave this zero-valued to inherit the host (wfctl)
 	// and plugin MUST agree on the cookie + protocol version, so override
 	// only when implementing a non-workflow host.
 	HandshakeConfig goplugin.HandshakeConfig
@@ -631,8 +631,8 @@ func ServeIaCPlugin(provider any, opts IaCServeOptions) {
 }
 
 // resolveServeHandshake returns the goplugin handshake to use for an IaC
-// plugin. Defaults to ext.Handshake (the canonical wfctl<->plugin
-// handshake) when the caller did not supply a PluginInfo OR supplied
+// plugin. Defaults to the canonical wfctl<->plugin handshake when the
+// caller did not supply a PluginInfo OR supplied
 // the zero-valued HandshakeConfig. Returns an error when the caller
 // supplied a PARTIAL override (any non-zero field but missing
 // MagicCookieKey or MagicCookieValue) — partial overrides produce a
@@ -648,13 +648,13 @@ func ServeIaCPlugin(provider any, opts IaCServeOptions) {
 // without invoking goplugin.Serve's blocking loop.
 func resolveServeHandshake(opts IaCServeOptions) (goplugin.HandshakeConfig, error) {
 	if opts.PluginInfo == nil {
-		return ext.Handshake, nil
+		return contract.Handshake, nil
 	}
 	hs := opts.PluginInfo.HandshakeConfig
 	if hs == (goplugin.HandshakeConfig{}) {
 		// Zero value: caller supplied PluginInfo{} but no handshake
 		// override. Treat identically to opts.PluginInfo == nil.
-		return ext.Handshake, nil
+		return contract.Handshake, nil
 	}
 	if hs.MagicCookieKey == "" || hs.MagicCookieValue == "" {
 		return goplugin.HandshakeConfig{}, fmt.Errorf(
@@ -662,7 +662,7 @@ func resolveServeHandshake(opts IaCServeOptions) (goplugin.HandshakeConfig, erro
 				"override (MagicCookieKey=%q MagicCookieValue=%q "+
 				"ProtocolVersion=%d): both MagicCookieKey AND "+
 				"MagicCookieValue MUST be set when overriding the default "+
-				"ext.Handshake — leave the whole struct zero-valued to "+
+				"canonical handshake - leave the whole struct zero-valued to "+
 				"inherit the canonical wfctl<->plugin handshake",
 			hs.MagicCookieKey, hs.MagicCookieValue, hs.ProtocolVersion,
 		)
