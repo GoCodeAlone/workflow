@@ -1,14 +1,14 @@
 package module
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/docker/docker/api/types/image"
-	dockerclient "github.com/docker/docker/client"
 )
 
 // DockerPushStep pushes a Docker image to a remote registry.
@@ -42,13 +42,11 @@ func NewDockerPushStepFactory() StepFactory {
 // Name returns the step name.
 func (s *DockerPushStep) Name() string { return s.name }
 
-// Execute pushes the image to the configured registry.
+// Execute pushes the image to the configured registry using the Docker CLI.
 func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
-	if err != nil {
-		return nil, fmt.Errorf("docker_push step %q: failed to create Docker client: %w", s.name, err)
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker_push step %q: docker CLI not found: %w", s.name, err)
 	}
-	defer cli.Close()
 
 	// Determine the full image reference
 	ref := s.image
@@ -56,16 +54,14 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 		ref = s.registry + "/" + s.image
 	}
 
-	opts := image.PushOptions{}
-
-	reader, err := cli.ImagePush(ctx, ref, opts)
+	cmd := exec.CommandContext(ctx, "docker", "push", ref)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker_push step %q: push failed: %w", s.name, err)
+		return nil, fmt.Errorf("docker_push step %q: push failed: %w: %s", s.name, err, string(out))
 	}
-	defer reader.Close()
 
 	// Read push output to completion and extract the digest
-	digest, err := parsePushOutput(reader)
+	digest, err := parsePushOutput(bytes.NewReader(out))
 	if err != nil {
 		return nil, fmt.Errorf("docker_push step %q: %w", s.name, err)
 	}

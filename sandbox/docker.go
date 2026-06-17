@@ -4,17 +4,14 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
-
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // Mount describes a bind mount from host to container.
@@ -27,7 +24,7 @@ type Mount struct {
 // SandboxConfig holds configuration for a Docker sandbox execution environment.
 type SandboxConfig struct {
 	// Profile is the security profile name that produced this config ("strict",
-	// "standard", "permissive"). It is informational — it does not affect local
+	// "standard", "permissive"). It is informational - it does not affect local
 	// Docker execution but is forwarded to remote runners so they can apply their
 	// own profile clamping (ADR 0019).
 	Profile     string            `yaml:"profile,omitempty"`
@@ -89,15 +86,33 @@ type ExecResult struct {
 	Stderr   string
 }
 
-// DockerSandbox wraps the Docker Engine SDK to execute commands in isolated containers.
+type hostConfig struct {
+	Memory         int64
+	NanoCPUs       int64
+	Mounts         []hostMount
+	NetworkMode    string
+	SecurityOpt    []string
+	CapAdd         []string
+	CapDrop        []string
+	ReadonlyRootfs bool
+	PidsLimit      *int64
+	Tmpfs          map[string]string
+}
+
+type hostMount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
+}
+
+// DockerSandbox wraps the Docker CLI to execute commands in isolated containers.
 type DockerSandbox struct {
-	client      *client.Client
 	config      SandboxConfig
 	containerID string // set by CreateContainer, used by CopyIn/CopyOut/RemoveContainer
 }
 
 // NewDockerSandbox creates a new DockerSandbox with the given configuration.
-// It initializes a Docker client using environment variables (DOCKER_HOST, etc.).
+// It requires the Docker CLI to be present on PATH.
 func NewDockerSandbox(config SandboxConfig) (*DockerSandbox, error) {
 	if config.Image == "" {
 		return nil, fmt.Errorf("sandbox: image is required")
@@ -107,15 +122,11 @@ func NewDockerSandbox(config SandboxConfig) (*DockerSandbox, error) {
 		config.Timeout = 10 * time.Minute
 	}
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: failed to create Docker client: %w", err)
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("sandbox: docker CLI not found: %w", err)
 	}
 
-	return &DockerSandbox{
-		client: cli,
-		config: config,
-	}, nil
+	return &DockerSandbox{config: config}, nil
 }
 
 // Exec creates a container, runs the given command, captures output, and removes the container.
@@ -127,72 +138,14 @@ func (s *DockerSandbox) Exec(ctx context.Context, cmd []string) (*ExecResult, er
 	ctx, cancel := context.WithTimeout(ctx, s.config.Timeout)
 	defer cancel()
 
-	// Pull image if not present locally
 	if err := s.ensureImage(ctx); err != nil {
 		return nil, fmt.Errorf("sandbox: failed to pull image: %w", err)
 	}
 
-	// Build container config
-	containerConfig := &container.Config{
-		Image:      s.config.Image,
-		Cmd:        cmd,
-		Env:        s.buildEnv(),
-		WorkingDir: s.config.WorkDir,
-	}
-	if s.config.User != "" {
-		containerConfig.User = s.config.User
-	}
-
-	hostConfig := s.buildHostConfig()
-
-	// Create container
-	resp, err := s.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: failed to create container: %w", err)
-	}
-	containerID := resp.ID
-
-	// Always remove the container when done
-	defer func() {
-		removeCtx, removeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer removeCancel()
-		_ = s.client.ContainerRemove(removeCtx, containerID, container.RemoveOptions{Force: true})
-	}()
-
-	// Start container
-	if err := s.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return nil, fmt.Errorf("sandbox: failed to start container: %w", err)
-	}
-
-	// Wait for container to finish
-	statusCh, errCh := s.client.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
-	var exitCode int
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, fmt.Errorf("sandbox: error waiting for container: %w", err)
-		}
-	case status := <-statusCh:
-		exitCode = int(status.StatusCode)
-	case <-ctx.Done():
-		// Timeout: stop the container
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = s.client.ContainerStop(stopCtx, containerID, container.StopOptions{})
-		return nil, fmt.Errorf("sandbox: execution timed out after %s", s.config.Timeout)
-	}
-
-	// Capture stdout/stderr
-	stdout, stderr, err := s.getLogs(ctx, containerID)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: failed to capture logs: %w", err)
-	}
-
-	return &ExecResult{
-		ExitCode: exitCode,
-		Stdout:   stdout,
-		Stderr:   stderr,
-	}, nil
+	args := append([]string{"run", "--rm"}, s.dockerRunArgs()...)
+	args = append(args, s.config.Image)
+	args = append(args, cmd...)
+	return runDockerResult(ctx, args)
 }
 
 // CopyIn copies a file from the host into the active container.
@@ -204,31 +157,28 @@ func (s *DockerSandbox) CopyIn(ctx context.Context, srcPath, destPath string) er
 	return s.copyToContainer(ctx, s.containerID, srcPath, destPath)
 }
 
-// CopyOut copies a file out of the active container. Returns a ReadCloser with the file contents.
+// CopyOut copies a file out of the active container. Returns a ReadCloser with
+// a tar archive containing the file contents, matching Docker copy semantics.
 // Call CreateContainer first to set the active container ID.
 func (s *DockerSandbox) CopyOut(ctx context.Context, srcPath string) (io.ReadCloser, error) {
 	if s.containerID == "" {
 		return nil, fmt.Errorf("sandbox: CopyOut requires an active container; call CreateContainer first")
 	}
-	reader, _, err := s.client.CopyFromContainer(ctx, s.containerID, srcPath)
-	if err != nil {
-		return nil, fmt.Errorf("sandbox: CopyOut %q: %w", srcPath, err)
-	}
-	return reader, nil
+	return s.copyFromContainer(ctx, s.containerID, srcPath)
 }
 
-// CreateContainer creates and starts a container, storing its ID for use with CopyIn/CopyOut.
+// CreateContainer creates a container, storing its ID for use with CopyIn/CopyOut.
 // Call RemoveContainer when done to clean up.
 func (s *DockerSandbox) CreateContainer(ctx context.Context, cmd []string) error {
-	hostConfig := s.buildHostConfig()
-	resp, err := s.client.ContainerCreate(ctx, &container.Config{
-		Image: s.config.Image,
-		Cmd:   cmd,
-	}, hostConfig, nil, nil, "")
+	args := append([]string{"create"}, s.dockerRunArgs()...)
+	args = append(args, s.config.Image)
+	args = append(args, cmd...)
+
+	out, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
 		return fmt.Errorf("sandbox: create container: %w", err)
 	}
-	s.containerID = resp.ID
+	s.containerID = strings.TrimSpace(string(out))
 	return nil
 }
 
@@ -239,7 +189,7 @@ func (s *DockerSandbox) RemoveContainer(ctx context.Context) error {
 	}
 	id := s.containerID
 	s.containerID = ""
-	return s.client.ContainerRemove(ctx, id, container.RemoveOptions{Force: true})
+	return exec.CommandContext(ctx, "docker", "rm", "-f", id).Run()
 }
 
 // ExecInContainer creates a container, copies files in, runs the command, and allows file extraction.
@@ -256,109 +206,63 @@ func (s *DockerSandbox) ExecInContainer(ctx context.Context, cmd []string, copyI
 		return nil, nil, fmt.Errorf("sandbox: failed to pull image: %w", err)
 	}
 
-	containerConfig := &container.Config{
-		Image:      s.config.Image,
-		Cmd:        cmd,
-		Env:        s.buildEnv(),
-		WorkingDir: s.config.WorkDir,
-	}
-	if s.config.User != "" {
-		containerConfig.User = s.config.User
-	}
-
-	hostConfig := s.buildHostConfig()
-
-	resp, err := s.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, "")
+	args := append([]string{"create"}, s.dockerRunArgs()...)
+	args = append(args, s.config.Image)
+	args = append(args, cmd...)
+	out, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
 		return nil, nil, fmt.Errorf("sandbox: failed to create container: %w", err)
 	}
-	containerID := resp.ID
+	containerID := strings.TrimSpace(string(out))
 
 	defer func() {
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer removeCancel()
-		_ = s.client.ContainerRemove(removeCtx, containerID, container.RemoveOptions{Force: true})
+		_ = exec.CommandContext(removeCtx, "docker", "rm", "-f", containerID).Run()
 	}()
 
-	// Copy files into container before starting
 	for hostPath, containerPath := range copyIn {
 		if err := s.copyToContainer(ctx, containerID, hostPath, containerPath); err != nil {
 			return nil, nil, fmt.Errorf("sandbox: failed to copy %s to container: %w", hostPath, err)
 		}
 	}
 
-	if err := s.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
-		return nil, nil, fmt.Errorf("sandbox: failed to start container: %w", err)
-	}
-
-	statusCh, errCh := s.client.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
-	var exitCode int
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, nil, fmt.Errorf("sandbox: error waiting for container: %w", err)
-		}
-	case status := <-statusCh:
-		exitCode = int(status.StatusCode)
-	case <-ctx.Done():
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer stopCancel()
-		_ = s.client.ContainerStop(stopCtx, containerID, container.StopOptions{})
-		return nil, nil, fmt.Errorf("sandbox: execution timed out after %s", s.config.Timeout)
-	}
-
-	stdout, stderr, err := s.getLogs(ctx, containerID)
+	result, err := runDockerResult(ctx, []string{"start", "-a", containerID})
 	if err != nil {
-		return nil, nil, fmt.Errorf("sandbox: failed to capture logs: %w", err)
+		return nil, nil, err
 	}
 
-	// Copy files out of container
 	outputs := make(map[string]io.ReadCloser)
 	for _, path := range copyOutPaths {
-		reader, _, err := s.client.CopyFromContainer(ctx, containerID, path)
+		reader, err := s.copyFromContainer(ctx, containerID, path)
 		if err != nil {
-			// Close any already-opened readers
 			for _, r := range outputs {
-				r.Close()
+				_ = r.Close()
 			}
 			return nil, nil, fmt.Errorf("sandbox: failed to copy %s from container: %w", path, err)
 		}
 		outputs[path] = reader
 	}
 
-	result := &ExecResult{
-		ExitCode: exitCode,
-		Stdout:   stdout,
-		Stderr:   stderr,
-	}
-
 	return result, outputs, nil
 }
 
-// Close cleans up the Docker client.
+// Close cleans up resources held by the sandbox.
 func (s *DockerSandbox) Close() error {
-	if s.client != nil {
-		return s.client.Close()
-	}
 	return nil
 }
 
 // ensureImage pulls the image if it is not available locally.
 func (s *DockerSandbox) ensureImage(ctx context.Context) error {
-	_, err := s.client.ImageInspect(ctx, s.config.Image)
-	if err == nil {
-		return nil // Image already present
+	if err := exec.CommandContext(ctx, "docker", "image", "inspect", s.config.Image).Run(); err == nil {
+		return nil
 	}
-
-	reader, err := s.client.ImagePull(ctx, s.config.Image, image.PullOptions{})
+	cmd := exec.CommandContext(ctx, "docker", "pull", s.config.Image)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s", err, string(out))
 	}
-	defer reader.Close()
-
-	// Consume the pull output to completion
-	_, err = io.Copy(io.Discard, reader)
-	return err
+	return nil
 }
 
 // buildEnv converts the config env map into Docker's KEY=VALUE format.
@@ -373,16 +277,14 @@ func (s *DockerSandbox) buildEnv() []string {
 	return env
 }
 
-// buildHostConfig creates the Docker HostConfig from SandboxConfig.
-func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
-	hc := &container.HostConfig{}
+// buildHostConfig creates an internal HostConfig from SandboxConfig.
+func (s *DockerSandbox) buildHostConfig() *hostConfig {
+	hc := &hostConfig{}
 
-	// Resource limits
 	if s.config.MemoryLimit > 0 {
 		hc.Memory = s.config.MemoryLimit
 	}
 	if s.config.CPULimit > 0 {
-		// Docker uses NanoCPUs (1 CPU = 1e9 NanoCPUs)
 		hc.NanoCPUs = int64(s.config.CPULimit * 1e9)
 	}
 	if s.config.PidsLimit > 0 {
@@ -390,26 +292,21 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 		hc.PidsLimit = &limit
 	}
 
-	// Mounts
 	if len(s.config.Mounts) > 0 {
-		mounts := make([]mount.Mount, len(s.config.Mounts))
+		hc.Mounts = make([]hostMount, len(s.config.Mounts))
 		for i, m := range s.config.Mounts {
-			mounts[i] = mount.Mount{
-				Type:     mount.TypeBind,
+			hc.Mounts[i] = hostMount{
 				Source:   m.Source,
 				Target:   m.Target,
 				ReadOnly: m.ReadOnly,
 			}
 		}
-		hc.Mounts = mounts
 	}
 
-	// Network mode
 	if s.config.NetworkMode != "" {
-		hc.NetworkMode = container.NetworkMode(s.config.NetworkMode)
+		hc.NetworkMode = s.config.NetworkMode
 	}
 
-	// Security options
 	secOpts := make([]string, len(s.config.SecurityOpts))
 	copy(secOpts, s.config.SecurityOpts)
 	if s.config.NoNewPrivileges {
@@ -419,7 +316,6 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 		hc.SecurityOpt = secOpts
 	}
 
-	// Capabilities
 	if len(s.config.CapAdd) > 0 {
 		hc.CapAdd = s.config.CapAdd
 	}
@@ -427,7 +323,6 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 		hc.CapDrop = s.config.CapDrop
 	}
 
-	// Filesystem hardening
 	hc.ReadonlyRootfs = s.config.ReadOnlyRootfs
 	if len(s.config.Tmpfs) > 0 {
 		hc.Tmpfs = s.config.Tmpfs
@@ -436,43 +331,94 @@ func (s *DockerSandbox) buildHostConfig() *container.HostConfig {
 	return hc
 }
 
-// getLogs captures stdout and stderr from a container.
-func (s *DockerSandbox) getLogs(ctx context.Context, containerID string) (string, string, error) {
-	logReader, err := s.client.ContainerLogs(ctx, containerID, container.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-	})
-	if err != nil {
-		return "", "", err
+func (s *DockerSandbox) dockerRunArgs() []string {
+	hc := s.buildHostConfig()
+	args := make([]string, 0, 32)
+	if s.config.WorkDir != "" {
+		args = append(args, "-w", s.config.WorkDir)
 	}
-	defer logReader.Close()
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	_, err = stdcopy.StdCopy(&stdoutBuf, &stderrBuf, logReader)
-	if err != nil {
-		return "", "", err
+	if s.config.User != "" {
+		args = append(args, "-u", s.config.User)
 	}
-
-	return strings.TrimSpace(stdoutBuf.String()), strings.TrimSpace(stderrBuf.String()), nil
+	for _, env := range s.buildEnv() {
+		args = append(args, "-e", env)
+	}
+	for _, mount := range hc.Mounts {
+		spec := "type=bind,src=" + mount.Source + ",dst=" + mount.Target
+		if mount.ReadOnly {
+			spec += ",readonly"
+		}
+		args = append(args, "--mount", spec)
+	}
+	if hc.Memory > 0 {
+		args = append(args, "--memory", strconv.FormatInt(hc.Memory, 10))
+	}
+	if hc.NanoCPUs > 0 {
+		args = append(args, "--cpus", strconv.FormatFloat(float64(hc.NanoCPUs)/1e9, 'f', -1, 64))
+	}
+	if hc.PidsLimit != nil {
+		args = append(args, "--pids-limit", strconv.FormatInt(*hc.PidsLimit, 10))
+	}
+	if hc.NetworkMode != "" {
+		args = append(args, "--network", hc.NetworkMode)
+	}
+	for _, opt := range hc.SecurityOpt {
+		args = append(args, "--security-opt", opt)
+	}
+	for _, cap := range hc.CapAdd {
+		args = append(args, "--cap-add", cap)
+	}
+	for _, cap := range hc.CapDrop {
+		args = append(args, "--cap-drop", cap)
+	}
+	if hc.ReadonlyRootfs {
+		args = append(args, "--read-only")
+	}
+	for path, spec := range hc.Tmpfs {
+		args = append(args, "--tmpfs", path+":"+spec)
+	}
+	return args
 }
 
-// copyToContainer copies a host file into the container at destPath.
-func (s *DockerSandbox) copyToContainer(ctx context.Context, containerID, hostPath, destPath string) error {
-	f, err := os.Open(hostPath)
-	if err != nil {
-		return fmt.Errorf("failed to open %s: %w", hostPath, err)
-	}
-	defer f.Close()
+func runDockerResult(ctx context.Context, args []string) (*ExecResult, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-	stat, err := f.Stat()
+	err := cmd.Run()
+	exitCode := 0
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return nil, fmt.Errorf("sandbox: docker command failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+	}
+
+	return &ExecResult{
+		ExitCode: exitCode,
+		Stdout:   strings.TrimSpace(stdout.String()),
+		Stderr:   strings.TrimSpace(stderr.String()),
+	}, nil
+}
+
+func (s *DockerSandbox) copyFromContainer(ctx context.Context, containerID, srcPath string) (io.ReadCloser, error) {
+	out, err := exec.CommandContext(ctx, "docker", "cp", containerID+":"+srcPath, "-").Output()
+	if err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(out)), nil
+}
+
+func (s *DockerSandbox) copyToContainer(ctx context.Context, containerID, hostPath, destPath string) error {
+	if _, err := os.Stat(hostPath); err != nil {
 		return fmt.Errorf("failed to stat %s: %w", hostPath, err)
 	}
-
-	tarReader, err := createTarFromFile(f, stat)
+	out, err := exec.CommandContext(ctx, "docker", "cp", hostPath, containerID+":"+destPath).CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %s", err, string(out))
 	}
-
-	return s.client.CopyToContainer(ctx, containerID, destPath, tarReader, container.CopyToContainerOptions{})
+	return nil
 }

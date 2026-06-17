@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/GoCodeAlone/modular"
-	"github.com/docker/docker/api/types/build"
-	dockerclient "github.com/docker/docker/client"
 )
 
 // DockerBuildStep builds a Docker image from a context directory and Dockerfile.
@@ -79,40 +79,38 @@ func NewDockerBuildStepFactory() StepFactory {
 // Name returns the step name.
 func (s *DockerBuildStep) Name() string { return s.name }
 
-// Execute builds a Docker image using the Docker SDK.
+// Execute builds a Docker image using the Docker CLI.
 func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("docker_build step %q: docker CLI not found: %w", s.name, err)
+	}
+
+	args := []string{"build", "--rm", "-f", s.dockerfile}
+	for _, tag := range s.tags {
+		args = append(args, "-t", tag)
+	}
+	for key, value := range s.buildArgs {
+		arg := key + "="
+		if value != nil {
+			arg += *value
+		}
+		args = append(args, "--build-arg", arg)
+	}
+	for _, ref := range s.cacheFrom {
+		args = append(args, "--cache-from", ref)
+	}
+	args = append(args, s.contextPath)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: failed to create Docker client: %w", s.name, err)
-	}
-	defer cli.Close()
-
-	// Create a tar of the build context directory
-	buildCtx, err := createBuildContext(s.contextPath)
-	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: failed to create build context: %w", s.name, err)
+		return nil, fmt.Errorf("docker_build step %q: build failed: %w: %s", s.name, err, string(out))
 	}
 
-	opts := build.ImageBuildOptions{
-		Tags:       s.tags,
-		Dockerfile: s.dockerfile,
-		BuildArgs:  s.buildArgs,
-		CacheFrom:  s.cacheFrom,
-		Remove:     true,
+	imageID := ""
+	if len(s.tags) > 0 {
+		imageID = inspectDockerImageID(ctx, s.tags[0])
 	}
-
-	resp, err := cli.ImageBuild(ctx, buildCtx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: build failed: %w", s.name, err)
-	}
-	defer resp.Body.Close()
-
-	// Read the build output to completion and extract the image ID
-	imageID, err := parseBuildOutput(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("docker_build step %q: %w", s.name, err)
-	}
-
 	return &StepResult{
 		Output: map[string]any{
 			"image_id": imageID,
@@ -120,6 +118,14 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 			"context":  s.contextPath,
 		},
 	}, nil
+}
+
+func inspectDockerImageID(ctx context.Context, ref string) string {
+	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", ref).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // createBuildContext creates a tar archive of the build context directory.
