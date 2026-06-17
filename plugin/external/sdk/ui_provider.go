@@ -1,6 +1,9 @@
 package sdk
 
-import ext "github.com/GoCodeAlone/workflow/plugin/external"
+import "github.com/GoCodeAlone/workflow/plugin/external/contract"
+
+type UIManifest = contract.UIManifest
+type UINavItem = contract.UINavItem
 
 // UIProvider is an optional interface that PluginProvider implementations can
 // satisfy to declare UI assets and navigation contributions.
@@ -12,11 +15,9 @@ import ext "github.com/GoCodeAlone/workflow/plugin/external"
 //
 // # Type aliases
 //
-// The UI manifest types (UIManifest, UINavItem) are defined in the
-// github.com/GoCodeAlone/workflow/plugin/external package so that both the
-// host engine and plugin processes share the same type definitions without
-// introducing an import cycle.
+// The UI manifest types are aliases for the shared contract package so plugins
+// can use the SDK without importing host-side external plugin adapters.
 type UIProvider interface {
 	// UIManifest returns the UI manifest for this plugin.
-	UIManifest() ext.UIManifest
+	UIManifest() UIManifest
 }

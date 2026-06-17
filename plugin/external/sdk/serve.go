@@ -7,7 +7,7 @@ import (
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
-	ext "github.com/GoCodeAlone/workflow/plugin/external"
+	"github.com/GoCodeAlone/workflow/plugin/external/contract"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
 )
@@ -95,7 +95,7 @@ func Serve(provider PluginProvider, opts ...ServeOption) {
 	}
 
 	goplugin.Serve(&goplugin.ServeConfig{
-		HandshakeConfig: ext.Handshake,
+		HandshakeConfig: contract.Handshake,
 		GRPCServer:      goplugin.DefaultGRPCServer,
 		Plugins: goplugin.PluginSet{
 			"plugin": &servePlugin{server: server},
@@ -126,7 +126,7 @@ func (p *servePlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, _ *g
 
 // writeUIManifestIfAbsent writes m to "ui.json" in the current working
 // directory only when that file does not already exist.
-func writeUIManifestIfAbsent(m ext.UIManifest) {
+func writeUIManifestIfAbsent(m UIManifest) {
 	const filename = "ui.json"
 	if _, err := os.Stat(filename); err == nil {
 		return // file already exists — do not overwrite
