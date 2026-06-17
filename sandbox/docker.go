@@ -421,10 +421,20 @@ func (s *DockerSandbox) copyFromContainer(ctx context.Context, containerID, srcP
 	pr, pw := io.Pipe()
 	go func() {
 		_, copyErr := io.Copy(pw, stdout)
+		if copyErr != nil {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			_ = cmd.Wait()
+			if errors.Is(copyErr, io.ErrClosedPipe) {
+				return
+			}
+			_ = pw.CloseWithError(copyErr)
+			return
+		}
+
 		waitErr := cmd.Wait()
 		switch {
-		case copyErr != nil:
-			_ = pw.CloseWithError(copyErr)
 		case waitErr != nil:
 			msg := strings.TrimSpace(stderr.String())
 			if msg != "" {
