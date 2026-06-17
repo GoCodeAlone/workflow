@@ -1,11 +1,8 @@
 package module
 
 import (
-	"archive/tar"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,7 +112,7 @@ func (s *DockerBuildStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 	}
 	args = append(args, contextPath)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec G204,G702 - workflow docker_build intentionally executes user-configured Docker CLI args.
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("docker_build step %q: build failed: %w: %s", s.name, err, string(out))
@@ -150,105 +147,9 @@ func readDockerIIDFile(path string) string {
 }
 
 func inspectDockerImageID(ctx context.Context, ref string) string {
-	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", ref).Output()
+	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{.Id}}", ref).Output() // #nosec G204,G702 - ref is the configured image tag passed to Docker.
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// createBuildContext creates a tar archive of the build context directory.
-func createBuildContext(contextPath string) (io.Reader, error) {
-	absPath, err := filepath.Abs(contextPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve context path: %w", err)
-	}
-
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("context path %q does not exist: %w", absPath, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("context path %q is not a directory", absPath)
-	}
-
-	pr, pw := io.Pipe()
-	go func() {
-		pw.CloseWithError(archiveDirectory(absPath, pw))
-	}()
-
-	return pr, nil
-}
-
-// archiveDirectory creates a tar archive of a directory and writes it to w.
-func archiveDirectory(dir string, w io.Writer) error {
-	tw := tar.NewWriter(w)
-	defer tw.Close()
-
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-
-		// Use forward slashes for tar paths
-		relPath = filepath.ToSlash(relPath)
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = relPath
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		_, err = io.Copy(tw, f)
-		return err
-	})
-}
-
-// parseBuildOutput reads the Docker build JSON stream and extracts the image ID.
-func parseBuildOutput(r io.Reader) (string, error) {
-	decoder := json.NewDecoder(r)
-	var imageID string
-
-	for {
-		var msg struct {
-			Stream string `json:"stream"`
-			Aux    struct {
-				ID string `json:"ID"`
-			} `json:"aux"`
-			Error string `json:"error"`
-		}
-		if err := decoder.Decode(&msg); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return "", fmt.Errorf("failed to parse build output: %w", err)
-		}
-		if msg.Error != "" {
-			return "", fmt.Errorf("build error: %s", msg.Error)
-		}
-		if msg.Aux.ID != "" {
-			imageID = msg.Aux.ID
-		}
-	}
-
-	return imageID, nil
 }

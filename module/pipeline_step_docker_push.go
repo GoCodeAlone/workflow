@@ -55,7 +55,7 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 		ref = s.registry + "/" + s.image
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "push", ref)
+	cmd := exec.CommandContext(ctx, "docker", "push", ref) // #nosec G204,G702 - workflow docker_push intentionally pushes the configured image reference.
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("docker_push step %q: push failed: %w: %s", s.name, err, string(out))

@@ -174,7 +174,7 @@ func (s *DockerSandbox) CreateContainer(ctx context.Context, cmd []string) error
 	args = append(args, s.config.Image)
 	args = append(args, cmd...)
 
-	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput() // #nosec G204 - sandbox intentionally maps config into Docker CLI args.
 	if err != nil {
 		return fmt.Errorf("sandbox: create container: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -189,7 +189,7 @@ func (s *DockerSandbox) RemoveContainer(ctx context.Context) error {
 	}
 	id := s.containerID
 	s.containerID = ""
-	return exec.CommandContext(ctx, "docker", "rm", "-f", id).Run()
+	return exec.CommandContext(ctx, "docker", "rm", "-f", id).Run() // #nosec G204 - container ID comes from Docker create output.
 }
 
 // ExecInContainer creates a container, copies files in, runs the command, and allows file extraction.
@@ -209,7 +209,7 @@ func (s *DockerSandbox) ExecInContainer(ctx context.Context, cmd []string, copyI
 	args := append([]string{"create"}, s.dockerRunArgs()...)
 	args = append(args, s.config.Image)
 	args = append(args, cmd...)
-	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput() // #nosec G204 - sandbox intentionally maps config into Docker CLI args.
 	if err != nil {
 		return nil, nil, fmt.Errorf("sandbox: failed to create container: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -218,7 +218,7 @@ func (s *DockerSandbox) ExecInContainer(ctx context.Context, cmd []string, copyI
 	defer func() {
 		removeCtx, removeCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer removeCancel()
-		_ = exec.CommandContext(removeCtx, "docker", "rm", "-f", containerID).Run()
+		_ = exec.CommandContext(removeCtx, "docker", "rm", "-f", containerID).Run() // #nosec G204 - container ID comes from Docker create output.
 	}()
 
 	for hostPath, containerPath := range copyIn {
@@ -254,10 +254,10 @@ func (s *DockerSandbox) Close() error {
 
 // ensureImage pulls the image if it is not available locally.
 func (s *DockerSandbox) ensureImage(ctx context.Context) error {
-	if err := exec.CommandContext(ctx, "docker", "image", "inspect", s.config.Image).Run(); err == nil {
+	if err := exec.CommandContext(ctx, "docker", "image", "inspect", s.config.Image).Run(); err == nil { // #nosec G204 - sandbox image is an explicit execution input.
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "docker", "pull", s.config.Image)
+	cmd := exec.CommandContext(ctx, "docker", "pull", s.config.Image) // #nosec G204 - sandbox image is an explicit execution input.
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, string(out))
@@ -295,11 +295,7 @@ func (s *DockerSandbox) buildHostConfig() *hostConfig {
 	if len(s.config.Mounts) > 0 {
 		hc.Mounts = make([]hostMount, len(s.config.Mounts))
 		for i, m := range s.config.Mounts {
-			hc.Mounts[i] = hostMount{
-				Source:   m.Source,
-				Target:   m.Target,
-				ReadOnly: m.ReadOnly,
-			}
+			hc.Mounts[i] = hostMount(m)
 		}
 	}
 
@@ -382,7 +378,7 @@ func (s *DockerSandbox) dockerRunArgs() []string {
 
 func runDockerResult(ctx context.Context, args []string) (*ExecResult, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec G204 - sandbox intentionally maps config into Docker CLI args.
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -405,7 +401,7 @@ func runDockerResult(ctx context.Context, args []string) (*ExecResult, error) {
 }
 
 func (s *DockerSandbox) copyFromContainer(ctx context.Context, containerID, srcPath string) (io.ReadCloser, error) {
-	cmd := exec.CommandContext(ctx, "docker", "cp", containerID+":"+srcPath, "-")
+	cmd := exec.CommandContext(ctx, "docker", "cp", containerID+":"+srcPath, "-") // #nosec G204 - container ID comes from Docker create output; path is caller-selected copy target.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -447,7 +443,7 @@ func (s *DockerSandbox) copyToContainer(ctx context.Context, containerID, hostPa
 	if _, err := os.Stat(hostPath); err != nil {
 		return fmt.Errorf("failed to stat %s: %w", hostPath, err)
 	}
-	out, err := exec.CommandContext(ctx, "docker", "cp", hostPath, containerID+":"+destPath).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "docker", "cp", hostPath, containerID+":"+destPath).CombinedOutput() // #nosec G204 - caller-selected copy paths are the sandbox API contract.
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, string(out))
 	}
