@@ -152,6 +152,31 @@ func TestFromResourceStates_DNSStatePreservesProviderAuthority(t *testing.T) {
 	}
 }
 
+func TestFromResourceStates_DelegationAcceptsStringSlices(t *testing.T) {
+	states := []interfaces.ResourceState{
+		{
+			Type:       "infra.dns_delegation",
+			Provider:   "namecheap",
+			ProviderID: "example.com",
+			Outputs: map[string]any{
+				"registrar_nameservers": []string{"dns1.registrar-servers.com", "dns2.registrar-servers.com"},
+			},
+		},
+	}
+	p := record.FromResourceStates(states)
+	if len(p.Snapshots) != 1 {
+		t.Fatalf("want 1 snapshot from delegation state; got %d", len(p.Snapshots))
+	}
+	ns, ok := p.Snapshots[0].Authority["registrar_nameservers"]
+	if !ok {
+		t.Fatalf("Authority missing registrar_nameservers")
+	}
+	nsSlice, ok := ns.([]any)
+	if !ok || len(nsSlice) != 2 || nsSlice[0] != "dns1.registrar-servers.com" || nsSlice[1] != "dns2.registrar-servers.com" {
+		t.Fatalf("registrar_nameservers = %#v, want two nameservers", ns)
+	}
+}
+
 func TestFromResourceStates_MergesBothLayersByDomain(t *testing.T) {
 	states := []interfaces.ResourceState{
 		{

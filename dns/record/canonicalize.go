@@ -88,13 +88,11 @@ func FromResourceStates(states []interfaces.ResourceState) Portfolio {
 			snap := getOrCreate(st.Provider, domain)
 			for _, nsKey := range []string{"registrar_nameservers", "live_nameservers"} {
 				if v, ok := st.Outputs[nsKey]; ok {
-					if slice, ok := v.([]any); ok {
-						cp := make([]any, len(slice))
-						copy(cp, slice)
+					if cloned, ok := cloneNameserverAuthorityValue(v); ok {
 						if snap.Authority == nil {
 							snap.Authority = map[string]any{}
 						}
-						snap.Authority[nsKey] = cp
+						snap.Authority[nsKey] = cloned
 					}
 				}
 			}
@@ -287,6 +285,15 @@ func cloneAuthorityValue(value any) any {
 		return cp
 	default:
 		return v
+	}
+}
+
+func cloneNameserverAuthorityValue(value any) (any, bool) {
+	switch value.(type) {
+	case []any, []string:
+		return cloneAuthorityValue(value), true
+	default:
+		return nil, false
 	}
 }
 
