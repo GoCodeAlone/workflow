@@ -631,8 +631,8 @@ func ServeIaCPlugin(provider any, opts IaCServeOptions) {
 }
 
 // resolveServeHandshake returns the goplugin handshake to use for an IaC
-// plugin. Defaults to the canonical wfctl<->plugin
-// handshake) when the caller did not supply a PluginInfo OR supplied
+// plugin. Defaults to the canonical wfctl<->plugin handshake when the
+// caller did not supply a PluginInfo OR supplied
 // the zero-valued HandshakeConfig. Returns an error when the caller
 // supplied a PARTIAL override (any non-zero field but missing
 // MagicCookieKey or MagicCookieValue) — partial overrides produce a
