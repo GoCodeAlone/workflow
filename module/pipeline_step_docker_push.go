@@ -79,7 +79,7 @@ func (s *DockerPushStep) Execute(ctx context.Context, _ *PipelineContext) (*Step
 
 var dockerPushDigestPattern = regexp.MustCompile(`(?i)\bdigest:\s*([a-z0-9_+.-]+:[a-f0-9]+)\b`)
 
-// parsePushOutput reads the Docker push JSON stream and extracts the digest.
+// parsePushOutput extracts the digest from Docker CLI text output or a JSON stream.
 func parsePushOutput(r io.Reader) (string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {

@@ -410,6 +410,7 @@ func (s *DockerSandbox) copyFromContainer(ctx context.Context, containerID, srcP
 	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
 			return nil, fmt.Errorf("%w: %s", err, msg)
