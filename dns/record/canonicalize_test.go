@@ -369,6 +369,29 @@ func TestFromResourceStatesOmitsAbsentOptionalFields(t *testing.T) {
 	}
 }
 
+func TestFromResourceStatesPreservesCloudflareProxyMetadata(t *testing.T) {
+	states := []interfaces.ResourceState{
+		{
+			Type:       "infra.dns",
+			Provider:   "cloudflare",
+			ProviderID: "example.com",
+			Outputs: map[string]any{
+				"records": []any{
+					map[string]any{"type": "A", "name": "@", "data": "192.0.2.10", "ttl": 300, "proxied": false, "proxiable": true},
+				},
+			},
+		},
+	}
+	p := record.FromResourceStates(states)
+	r := p.Snapshots[0].Records[0]
+	if r.Proxied == nil || *r.Proxied {
+		t.Fatalf("proxied = %v, want explicit false", r.Proxied)
+	}
+	if r.Proxiable == nil || !*r.Proxiable {
+		t.Fatalf("proxiable = %v, want explicit true", r.Proxiable)
+	}
+}
+
 func TestFromResourceStatesCanonicalizesRecordAndAuthorityOrder(t *testing.T) {
 	states := []interfaces.ResourceState{
 		{

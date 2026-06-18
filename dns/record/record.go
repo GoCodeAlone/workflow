@@ -10,15 +10,17 @@ import "fmt"
 // provider returns, so unknown/newer types (PTR, HTTPS, SVCB, TLSA, DNAME, …)
 // MUST be preserved, never rejected. KnownType drives an optional warning only.
 type Record struct {
-	Type     string `json:"type"`
-	Name     string `json:"name"`
-	Value    string `json:"value"`
-	TTL      int    `json:"ttl"`
-	Priority *int   `json:"priority,omitempty"`
-	Port     *int   `json:"port,omitempty"`
-	Weight   *int   `json:"weight,omitempty"`
-	Flags    *int   `json:"flags,omitempty"`
-	Tag      string `json:"tag,omitempty"`
+	Type      string `json:"type"`
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	TTL       int    `json:"ttl"`
+	Priority  *int   `json:"priority,omitempty"`
+	Port      *int   `json:"port,omitempty"`
+	Weight    *int   `json:"weight,omitempty"`
+	Flags     *int   `json:"flags,omitempty"`
+	Tag       string `json:"tag,omitempty"`
+	Proxied   *bool  `json:"proxied,omitempty"`
+	Proxiable *bool  `json:"proxiable,omitempty"`
 }
 
 // Snapshot is a flat representation of one DNS zone at a point in time.
