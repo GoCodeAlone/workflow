@@ -159,6 +159,12 @@ func recordLess(a, b Record) bool {
 	if !strings.EqualFold(a.Tag, b.Tag) {
 		return strings.ToLower(a.Tag) < strings.ToLower(b.Tag)
 	}
+	if less, ok := optionalBoolLess(a.Proxied, b.Proxied); ok {
+		return less
+	}
+	if less, ok := optionalBoolLess(a.Proxiable, b.Proxiable); ok {
+		return less
+	}
 	return a.Tag < b.Tag
 }
 
@@ -172,6 +178,21 @@ func optionalIntLess(a, b *int) (bool, bool) {
 		return false, true
 	case *a != *b:
 		return *a < *b, true
+	default:
+		return false, false
+	}
+}
+
+func optionalBoolLess(a, b *bool) (bool, bool) {
+	switch {
+	case a == nil && b == nil:
+		return false, false
+	case a == nil:
+		return true, true
+	case b == nil:
+		return false, true
+	case *a != *b:
+		return !*a && *b, true
 	default:
 		return false, false
 	}
@@ -329,6 +350,14 @@ func recordFromMap(m map[string]any) Record {
 		n := toInt(v)
 		r.Flags = &n
 	}
+	if v, ok := m["proxied"]; ok {
+		b := toBool(v)
+		r.Proxied = &b
+	}
+	if v, ok := m["proxiable"]; ok {
+		b := toBool(v)
+		r.Proxiable = &b
+	}
 	return r
 }
 
@@ -368,4 +397,9 @@ func toInt(v any) int {
 		return int(n)
 	}
 	return 0
+}
+
+func toBool(v any) bool {
+	b, _ := v.(bool)
+	return b
 }
