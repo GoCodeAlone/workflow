@@ -80,7 +80,16 @@ func lookupChecksumForURL(downloadURL string) (string, error) {
 	u.Fragment = ""
 	checksumsURL := u.String()
 
-	body, err := downloadWithTimeout(checksumsURL, 30*time.Second)
+	var body []byte
+	if owner, repo, tag, filename, ok := parseGitHubReleaseDownloadURL(checksumsURL); ok {
+		if tok := gitHubToken(); tok != "" {
+			body, err = downloadGitHubReleaseAsset(owner, repo, tag, filename, tok)
+		} else {
+			body, err = downloadWithTimeout(checksumsURL, 30*time.Second)
+		}
+	} else {
+		body, err = downloadWithTimeout(checksumsURL, 30*time.Second)
+	}
 	if err != nil {
 		return "", fmt.Errorf("fetch checksums.txt from %s: %w", checksumsURL, err)
 	}
