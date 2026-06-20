@@ -217,3 +217,43 @@ func TestLookupChecksumForURL_URLEncodedAssetName(t *testing.T) {
 		t.Errorf("expected %s, got %s", expectedSHA, got)
 	}
 }
+
+func TestLookupChecksumForURL_UsesGitHubAPIForPrivateReleaseChecksums(t *testing.T) {
+	const expectedSHA = "abc123def456"
+	t.Setenv("RELEASES_TOKEN", "")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GITHUB_TOKEN", "")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/GoCodeAlone/repo/releases/tags/v1.0.0", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Fatalf("release metadata Authorization = %q, want bearer token", got)
+		}
+		_, _ = w.Write([]byte(`{"assets":[{"id":123,"name":"checksums.txt"}]}`))
+	})
+	mux.HandleFunc("/repos/GoCodeAlone/repo/releases/assets/123", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept"); got != "application/octet-stream" {
+			t.Fatalf("asset Accept = %q, want application/octet-stream", got)
+		}
+		fmt.Fprintf(w, "%s  plugin-darwin-arm64.tar.gz\n", expectedSHA)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	origBaseURL := gitHubAPIBaseURL
+	origClient := gitHubAPIClient
+	gitHubAPIBaseURL = srv.URL
+	gitHubAPIClient = srv.Client()
+	t.Cleanup(func() {
+		gitHubAPIBaseURL = origBaseURL
+		gitHubAPIClient = origClient
+	})
+
+	got, err := lookupChecksumForURL("https://github.com/GoCodeAlone/repo/releases/download/v1.0.0/plugin-darwin-arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("lookupChecksumForURL: %v", err)
+	}
+	if got != expectedSHA {
+		t.Fatalf("checksum = %q, want %q", got, expectedSHA)
+	}
+}
