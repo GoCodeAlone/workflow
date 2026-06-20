@@ -220,7 +220,9 @@ func TestLookupChecksumForURL_URLEncodedAssetName(t *testing.T) {
 
 func TestLookupChecksumForURL_UsesGitHubAPIForPrivateReleaseChecksums(t *testing.T) {
 	const expectedSHA = "abc123def456"
+	t.Setenv("RELEASES_TOKEN", "")
 	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GITHUB_TOKEN", "")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/GoCodeAlone/repo/releases/tags/v1.0.0", func(w http.ResponseWriter, r *http.Request) {

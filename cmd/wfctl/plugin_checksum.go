@@ -83,7 +83,7 @@ func lookupChecksumForURL(downloadURL string) (string, error) {
 	var body []byte
 	if owner, repo, tag, filename, ok := parseGitHubReleaseDownloadURL(checksumsURL); ok {
 		if tok := gitHubToken(); tok != "" {
-			body, err = downloadGitHubReleaseAsset(owner, repo, tag, filename, tok)
+			body, err = downloadGitHubReleaseAssetWithTimeout(owner, repo, tag, filename, tok, 30*time.Second)
 		} else {
 			body, err = downloadWithTimeout(checksumsURL, 30*time.Second)
 		}
