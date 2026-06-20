@@ -93,7 +93,8 @@ func defaultMigrationPluginExecutor(ctx context.Context, pluginName string, args
 		pluginRoot = env["WFCTL_PLUGIN_DIR"]
 	}
 	binaryPath := filepath.Join(pluginRoot, pluginDirName, pluginDirName)
-	cmd := exec.CommandContext(ctx, binaryPath, args...) //nolint:gosec // binary path follows wfctl installed-plugin layout.
+	cmdArgs := append([]string{"--wfctl-cli"}, args...)
+	cmd := exec.CommandContext(ctx, binaryPath, cmdArgs...) //nolint:gosec // binary path follows wfctl installed-plugin layout.
 
 	cmd.Env = mapEnv(withMigrationPluginBaseEnv(env))
 

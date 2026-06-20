@@ -114,8 +114,9 @@ func TestDefaultMigrationPluginExecutorDoesNotInheritProcessSecrets(t *testing.T
 		t.Fatal(err)
 	}
 	envPath := filepath.Join(root, "env.txt")
+	argsPath := filepath.Join(root, "args.txt")
 	binaryPath := filepath.Join(pluginDir, "migrations")
-	script := "#!/bin/sh\n/usr/bin/env > " + envPath + "\n"
+	script := "#!/bin/sh\n/usr/bin/env > " + envPath + "\nprintf '%s\\n' \"$@\" > " + argsPath + "\n"
 	if err := os.WriteFile(binaryPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +140,14 @@ func TestDefaultMigrationPluginExecutorDoesNotInheritProcessSecrets(t *testing.T
 	}
 	if !strings.Contains(envDump, "DATABASE_URL=postgres://user:secret@example.com/app") || !strings.Contains(envDump, "PLUGIN_PUBLIC_VAR=ok") {
 		t.Fatalf("plugin did not receive explicit env:\n%s", envDump)
+	}
+	argsDump, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := "--wfctl-cli\nstatus\n--driver\ngolang-migrate\n--source-dir\nmigrations\n"
+	if string(argsDump) != wantArgs {
+		t.Fatalf("args = %q, want %q", argsDump, wantArgs)
 	}
 }
 
