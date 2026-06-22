@@ -53,7 +53,12 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 	req := normalize(opts.Capabilities)
 	cats := normalize(opts.Categories)
 	r.Requested = append([]string(nil), keysSorted(req)...)
-	matched := make(map[string]bool)
+
+	// matchedTerms records which REQUESTED terms found at least one capability.
+	// A requested term may match by id, name, tag, or description substring, so
+	// we cannot infer "matched" from capability ids/names alone — tracking the
+	// terms themselves avoids false "unmatched" reports for tag/description hits.
+	matchedTerms := make(map[string]bool)
 	for i := range inv.Capabilities {
 		cap := &inv.Capabilities[i]
 		if !opts.IncludeUncategorized && isUncategorized(*cap) {
@@ -62,14 +67,19 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 		if len(cats) > 0 && !cats[strings.ToLower(cap.Category)] {
 			continue
 		}
-		if len(req) > 0 && !matchesRequested(*cap, req) {
-			continue
+		if len(req) > 0 {
+			any := false
+			for term := range req {
+				if termMatches(cap, term) {
+					matchedTerms[term] = true
+					any = true
+				}
+			}
+			if !any {
+				continue
+			}
 		}
 		r.Capabilities = append(r.Capabilities, buildHit(cap))
-		if len(req) > 0 {
-			matched[strings.ToLower(cap.ID)] = true
-			matched[strings.ToLower(cap.Name)] = true
-		}
 	}
 	sort.Slice(r.Capabilities, func(i, j int) bool {
 		if r.Capabilities[i].Category != r.Capabilities[j].Category {
@@ -78,7 +88,7 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 		return r.Capabilities[i].ID < r.Capabilities[j].ID
 	})
 	for _, want := range keysSorted(req) {
-		if !matched[want] {
+		if !matchedTerms[want] {
 			r.Unmatched = append(r.Unmatched, want)
 		}
 	}
@@ -90,10 +100,14 @@ func buildHit(cap *inventory.Capability) CapabilityHit {
 	seen := map[string]bool{}
 	for i := range cap.Providers {
 		p := &cap.Providers[i]
-		if seen[p.Name] {
+		// De-dupe by (name, kind, releaseStatus): the inventory may carry the
+		// same provider name with different release status (registry vs local),
+		// and both variants are meaningful to surface.
+		key := strings.Join([]string{p.Name, p.Kind, p.ReleaseStatus}, "\x00")
+		if seen[key] {
 			continue
 		}
-		seen[p.Name] = true
+		seen[key] = true
 		h.Providers = append(h.Providers, ProviderSummary{
 			Name:          p.Name,
 			Kind:          p.Kind,
@@ -105,20 +119,19 @@ func buildHit(cap *inventory.Capability) CapabilityHit {
 	return h
 }
 
-func matchesRequested(cap inventory.Capability, req map[string]bool) bool {
-	lname, ldesc := strings.ToLower(cap.Name), strings.ToLower(cap.Description)
-	if req[strings.ToLower(cap.ID)] || req[lname] {
+// termMatches reports whether a single requested term matches cap by id, name,
+// tag, or description substring (all case-insensitive; term is pre-lowercased).
+func termMatches(cap *inventory.Capability, term string) bool {
+	if strings.EqualFold(term, cap.ID) || strings.EqualFold(term, cap.Name) {
 		return true
 	}
 	for _, t := range cap.Tags {
-		if req[strings.ToLower(t)] {
+		if strings.EqualFold(term, t) {
 			return true
 		}
 	}
-	for r := range req {
-		if ldesc != "" && strings.Contains(ldesc, r) {
-			return true
-		}
+	if desc := strings.ToLower(cap.Description); desc != "" && strings.Contains(desc, term) {
+		return true
 	}
 	return false
 }

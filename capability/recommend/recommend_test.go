@@ -66,6 +66,54 @@ func TestRecommend_ExcludesUncategorizedByDefault(t *testing.T) {
 	}
 }
 
+func TestRecommend_ByTagNotUnmatched(t *testing.T) {
+	// Requesting by a TAG (not id/name) must still match and NOT report Unmatched.
+	inv := smallInventory(t) // auth.authz carries tag "cross-cutting"
+	rec := recommend.Recommend(inv, recommend.Options{Capabilities: []string{"cross-cutting"}})
+	if len(rec.Unmatched) != 0 {
+		t.Fatalf("tag request falsely unmatched: %#v", rec.Unmatched)
+	}
+	if len(rec.Capabilities) != 1 || rec.Capabilities[0].ID != "auth.authz" {
+		t.Fatalf("tag request should match auth.authz: %#v", rec.Capabilities)
+	}
+}
+
+func TestRecommend_ByDescriptionNotUnmatched(t *testing.T) {
+	// Requesting by a description substring must match and NOT report Unmatched.
+	inv := smallInventory(t) // auth.authz description "Enforces permissions and roles"
+	rec := recommend.Recommend(inv, recommend.Options{Capabilities: []string{"permissions"}})
+	if len(rec.Unmatched) != 0 {
+		t.Fatalf("description request falsely unmatched: %#v", rec.Unmatched)
+	}
+	if len(rec.Capabilities) != 1 {
+		t.Fatalf("description request should match auth.authz: %#v", rec.Capabilities)
+	}
+}
+
+func TestRecommend_PreservesSameNameDiffStatus(t *testing.T) {
+	// A capability provided by the same plugin name under different release
+	// statuses (registry vs local) must surface BOTH provider rows, not dedupe
+	// them away by name.
+	inv := &inventory.Inventory{
+		Capabilities: []inventory.Capability{
+			{
+				ID:       "auth.authz",
+				Category: "auth",
+				Name:     "Authorization",
+				Providers: []inventory.Provider{
+					{Name: "auth", Kind: "external", ReleaseStatus: "released"},
+					{Name: "auth", Kind: "local-plugin", ReleaseStatus: "local-only"},
+				},
+			},
+		},
+	}
+	rec := recommend.Recommend(inv, recommend.Options{Categories: []string{"auth"}})
+	hit := findHit(t, rec, "auth.authz")
+	if len(hit.Providers) != 2 {
+		t.Fatalf("expected 2 providers (registry+local), got %#v", hit.Providers)
+	}
+}
+
 // findHit returns the CapabilityHit with the given ID, failing the test if absent.
 func findHit(t *testing.T, rec *recommend.Recommendation, id string) recommend.CapabilityHit {
 	t.Helper()
