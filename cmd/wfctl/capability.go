@@ -41,6 +41,8 @@ func runCapabilityWithOutput(args []string, out io.Writer) error {
 		return runCapabilityRecommend(args[1:], out)
 	case "build":
 		return runCapabilityBuild(args[1:], out)
+	case "assemble":
+		return runCapabilityAssemble(args[1:], out)
 	case "-h", "--help", "help":
 		printCapabilityUsage(out)
 		return nil
@@ -61,6 +63,7 @@ Subcommands:
   check      Print detected capabilities and findings for an application
   recommend  Recommend plugins that provide requested capabilities
   build      Interactively select capabilities and emit a recommendation
+  assemble   Assemble a minimal workflow config from selected capabilities
 
 Use "wfctl capability <subcommand> -h" for subcommand options.`)
 }
