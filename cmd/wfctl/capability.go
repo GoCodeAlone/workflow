@@ -253,7 +253,8 @@ func runCapabilityRecommend(args []string, out io.Writer) error {
 		return fmt.Errorf("unsupported recommend format %q", format)
 	}
 	if len(rec.Unmatched) > 0 {
-		fmt.Fprintf(out, "# warning: %d requested capability(ies) unmatched: %s\n", len(rec.Unmatched), strings.Join(rec.Unmatched, ", "))
+		// Warnings go to stderr so they never corrupt the JSON/MD artifact on stdout.
+		fmt.Fprintf(os.Stderr, "# warning: %d requested capability(ies) unmatched: %s\n", len(rec.Unmatched), strings.Join(rec.Unmatched, ", "))
 	}
 	return writeCapabilityOutput(out, outputPath, buf.Bytes())
 }

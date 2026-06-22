@@ -249,7 +249,7 @@ wfctl capability recommend --category auth --category database --format json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--capability` | (none) | Requested capability id/name/tag; repeat for multiple |
+| `--capability` | (none) | Requested capability id/name/tag/description; repeat for multiple |
 | `--category` | (none) | Requested category; repeat for multiple |
 | `--include-uncategorized` | false | Include capabilities whose id begins `uncategorized:` |
 | `--registry` | `data/registry` | Registry root containing `plugins/*/manifest.json` |
