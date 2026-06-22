@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/capability/inventory"
+	"github.com/GoCodeAlone/workflow/capability/recommend"
 )
 
 func runCapability(args []string) error {
@@ -36,6 +37,8 @@ func runCapabilityWithOutput(args []string, out io.Writer) error {
 		return runCapabilityApp(args[1:], out)
 	case "check":
 		return runCapabilityCheck(args[1:], out)
+	case "recommend":
+		return runCapabilityRecommend(args[1:], out)
 	case "-h", "--help", "help":
 		printCapabilityUsage(out)
 		return nil
@@ -54,6 +57,7 @@ Subcommands:
   crossrefs  Generate plugin/provider capability cross-reference index
   app        Generate capability profile for an application
   check      Print detected capabilities and findings for an application
+  recommend  Recommend plugins that provide requested capabilities
 
 Use "wfctl capability <subcommand> -h" for subcommand options.`)
 }
@@ -203,6 +207,109 @@ func runCapabilityCheck(args []string, out io.Writer) error {
 		return fmt.Errorf("unsupported check format %q", format)
 	}
 	return writeCapabilityOutput(out, outputPath, buf.Bytes())
+}
+
+func runCapabilityRecommend(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("capability recommend", flag.ContinueOnError)
+	fs.SetOutput(out)
+	var registryDir, repoRoot, taxonomyPath, format, outputPath string
+	var includeUncat bool
+	var capabilities, categories stringSliceValue
+	fs.StringVar(&registryDir, "registry", defaultCapabilityRegistryPath(), "registry directory")
+	fs.StringVar(&repoRoot, "repo-root", "..", "workspace root containing workflow-plugin-* repos")
+	fs.StringVar(&taxonomyPath, "taxonomy", defaultCapabilityTaxonomyPath(), "capability taxonomy YAML")
+	fs.StringVar(&format, "format", "json", "output format: json or md")
+	fs.StringVar(&outputPath, "output", "", "write output to path instead of stdout")
+	fs.BoolVar(&includeUncat, "include-uncategorized", false, "include uncategorized capabilities")
+	fs.Var(&capabilities, "capability", "requested capability id/name/tag; repeat for multiple")
+	fs.Var(&categories, "category", "requested category; repeat for multiple")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	inv, err := inventory.CollectEcosystem(inventory.EcosystemOptions{
+		RegistryDir:     registryDir,
+		RepoRoot:        repoRoot,
+		TaxonomyPath:    taxonomyPath,
+		GeneratedAt:     time.Now().UTC(),
+		WorkflowVersion: version,
+	})
+	if err != nil {
+		return err
+	}
+	rec := recommend.Recommend(inv, recommend.Options{
+		Capabilities:         capabilities,
+		Categories:           categories,
+		IncludeUncategorized: includeUncat,
+	})
+	var buf bytes.Buffer
+	switch format {
+	case "json":
+		if err := writeCapabilityJSON(&buf, rec); err != nil {
+			return err
+		}
+	case "md", "markdown":
+		renderRecommendMarkdown(&buf, rec)
+	default:
+		return fmt.Errorf("unsupported recommend format %q", format)
+	}
+	if len(rec.Unmatched) > 0 {
+		fmt.Fprintf(out, "# warning: %d requested capability(ies) unmatched: %s\n", len(rec.Unmatched), strings.Join(rec.Unmatched, ", "))
+	}
+	return writeCapabilityOutput(out, outputPath, buf.Bytes())
+}
+
+// stringSliceValue is a repeatable string flag used by `capability recommend`.
+// Unlike capabilityFilterFlags, recommend only consumes capability/category
+// dimensions, so it registers just what it needs.
+type stringSliceValue []string
+
+func (s *stringSliceValue) String() string {
+	if s == nil {
+		return ""
+	}
+	return strings.Join(*s, ",")
+}
+
+func (s *stringSliceValue) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+func renderRecommendMarkdown(out io.Writer, rec *recommend.Recommendation) {
+	fmt.Fprintln(out, "# Workflow Capability Recommendations")
+	fmt.Fprintln(out)
+	if len(rec.Requested) > 0 {
+		fmt.Fprintf(out, "- Requested: %s\n", strings.Join(rec.Requested, ", "))
+	}
+	fmt.Fprintf(out, "- Matched capabilities: %d\n", len(rec.Capabilities))
+	fmt.Fprintln(out)
+	for i := range rec.Capabilities {
+		hit := &rec.Capabilities[i]
+		header := hit.Name + " (" + hit.ID + ")"
+		if hit.Category != "" {
+			header += " [" + hit.Category + "]"
+		}
+		fmt.Fprintf(out, "## %s\n", header)
+		for j := range hit.Providers {
+			p := &hit.Providers[j]
+			line := "- " + p.Name + " (kind=" + p.Kind
+			if p.ReleaseStatus != "" {
+				line += " status=" + p.ReleaseStatus
+			}
+			if p.Source != "" {
+				line += " source=" + p.Source
+			}
+			line += ")"
+			fmt.Fprintln(out, line)
+		}
+		fmt.Fprintln(out)
+	}
+	if len(rec.Unmatched) > 0 {
+		fmt.Fprintln(out, "## Unmatched")
+		for _, name := range rec.Unmatched {
+			fmt.Fprintf(out, "- %s\n", name)
+		}
+	}
 }
 
 func parseCapabilityCheckFlags(args []string, out io.Writer) (inventory.AppOptions, string, string, bool, capabilityFilterFlags, error) {
