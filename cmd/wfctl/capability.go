@@ -39,6 +39,8 @@ func runCapabilityWithOutput(args []string, out io.Writer) error {
 		return runCapabilityCheck(args[1:], out)
 	case "recommend":
 		return runCapabilityRecommend(args[1:], out)
+	case "build":
+		return runCapabilityBuild(args[1:], out)
 	case "-h", "--help", "help":
 		printCapabilityUsage(out)
 		return nil
@@ -58,6 +60,7 @@ Subcommands:
   app        Generate capability profile for an application
   check      Print detected capabilities and findings for an application
   recommend  Recommend plugins that provide requested capabilities
+  build      Interactively select capabilities and emit a recommendation
 
 Use "wfctl capability <subcommand> -h" for subcommand options.`)
 }
