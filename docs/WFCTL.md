@@ -258,6 +258,27 @@ wfctl capability recommend --category auth --category database --format json
 | `--format` | `json` | `json` or `md` |
 | `--output` | stdout | Write the artifact to a file |
 
+#### `wfctl capability build`
+
+Interactive Bubbletea wizard — the agent-less path over `recommend`. Walks
+capability selection → review → emit, without writing filter flags or driving
+an agent. The TUI renders to **stderr** so the emitted recommendation on stdout
+stays clean for redirection (e.g. `wfctl capability build > rec.md`).
+
+```
+wfctl capability build
+wfctl capability build --registry data/registry --repo-root ..
+```
+
+Keys: `Space` toggle a capability, `j`/`k` or ↑/↓ move, `Enter` advance
+(selection → review → emit), `Esc` back, `ctrl+c` cancel.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry` | `data/registry` | Registry root containing `plugins/*/manifest.json` |
+| `--repo-root` | `..` | Workspace root to scan for local `workflow-plugin-*` repos |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+
 #### `wfctl capability ecosystem`
 
 Builds the ecosystem matrix from the checked-in capability taxonomy, registry
