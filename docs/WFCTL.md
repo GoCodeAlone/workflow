@@ -217,6 +217,7 @@ wfctl capability catalog --capability secrets --tag cross-cutting
 wfctl capability crossrefs --plugin workflow-plugin-github
 wfctl capability app --repo workflow.yaml --capability tenancy
 wfctl capability check --finding tenant-evidence-missing --findings-only
+wfctl capability recommend --capability auth.authz --format md
 ```
 
 | Filter | Applies to | Description |
@@ -230,6 +231,32 @@ wfctl capability check --finding tenant-evidence-missing --findings-only
 | `--finding` | all | Match finding code, level, or message |
 | `--tag` | ecosystem, catalog | Match taxonomy tags |
 | `--exact` | all | Use exact matching instead of substring matching |
+
+#### `wfctl capability recommend`
+
+Recommends plugins that provide a set of requested capabilities. Unlike the
+other capability subcommands, `recommend` does not apply the full filter set —
+it accepts only `--capability` / `--category` (repeatable) plus
+`--include-uncategorized`, groups providers per matched capability, and surfaces
+any requested capabilities that matched no provider under `unmatched`. Output is
+deterministic (sorted); the inventory carries no quality or popularity signal,
+so providers are listed, not ranked.
+
+```
+wfctl capability recommend --capability auth.authz --format md
+wfctl capability recommend --category auth --category database --format json
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--capability` | (none) | Requested capability id/name/tag/description; repeat for multiple |
+| `--category` | (none) | Requested category; repeat for multiple |
+| `--include-uncategorized` | false | Include capabilities whose id begins `uncategorized:` |
+| `--registry` | `data/registry` | Registry root containing `plugins/*/manifest.json` |
+| `--repo-root` | `..` | Workspace root to scan for local `workflow-plugin-*` repos |
+| `--taxonomy` | `data/capabilities/taxonomy.yaml` | Capability taxonomy YAML |
+| `--format` | `json` | `json` or `md` |
+| `--output` | stdout | Write the artifact to a file |
 
 #### `wfctl capability ecosystem`
 
