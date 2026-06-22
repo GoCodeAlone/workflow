@@ -1,7 +1,6 @@
 package assembler
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -77,6 +76,12 @@ func assembleToConfig(t *testing.T, in AssemblyInput) *config.WorkflowConfig {
 	if err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
+	// Prove the loaded config passes the SAME structural gate `wfctl validate`
+	// uses (Copilot: the round-trip-gate claim was previously untested). A real
+	// boot is the stronger proof, but validate-pass is the explicit contract.
+	if err := schema.ValidateConfig(cfg); err != nil {
+		t.Fatalf("loaded config fails schema.ValidateConfig (the wfctl validate gate): %v", err)
+	}
 	return cfg
 }
 
@@ -103,7 +108,7 @@ func bootAndCheckHealth(t *testing.T, cfg *config.WorkflowConfig) {
 		t.Fatalf("BuildFromConfig: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context() // Copilot: t.Context() respects test cancellation/timeout (⊥ context.Background)
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("engine.Start: %v", err)
 	}
