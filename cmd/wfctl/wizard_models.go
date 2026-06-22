@@ -64,6 +64,10 @@ const (
 	screenCICD                     // 9
 	screenReview                   // 10
 	screenDone                     // 11
+
+	// `wfctl capability build` screens (separate flow; reuses the screenID type
+	// but a distinct value range so it never collides with the wizard flow above).
+	screenCapability screenID = 100 // choose capabilities
 )
 
 // inputField holds a named text input.

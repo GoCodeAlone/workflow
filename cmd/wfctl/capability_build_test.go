@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/GoCodeAlone/workflow/capability/inventory"
 )
 
@@ -47,5 +48,26 @@ func TestBuildSelection_EmptyIsEmpty(t *testing.T) {
 	sel := newBuildSelection(fixtureInventory(t))
 	if rec := sel.recommendation(); len(rec.Capabilities) != 0 {
 		t.Fatalf("empty selection -> zero hits: %#v", rec)
+	}
+}
+
+func TestBuildModel_CtrlCCancels(t *testing.T) {
+	m := newBuildModel(newBuildSelection(fixtureInventory(t)))
+	got, cmd := m.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
+	if cmd == nil {
+		t.Fatal("ctrl+c did not request quit")
+	}
+	bm, ok := got.(buildModel)
+	if !ok || !bm.cancelled {
+		t.Fatalf("ctrl+c did not mark cancelled: %#v", got)
+	}
+}
+
+func TestBuildModel_AdvancesToReview(t *testing.T) {
+	m := newBuildModel(newBuildSelection(fixtureInventory(t)))
+	m.selection.toggleCapability("auth.authz") // choose one on screenCapability
+	got, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if bm, ok := got.(buildModel); !ok || bm.screen != screenReview {
+		t.Fatalf("Enter did not advance to review: %#v", got)
 	}
 }
