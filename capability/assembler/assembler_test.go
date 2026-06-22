@@ -94,3 +94,30 @@ func hasModuleType(app *AssembledApp, typ string) bool {
 	}
 	return false
 }
+
+func TestAssemble_RequiresPluginsScopedToRequested(t *testing.T) {
+	// Regression: requires.plugins must list only external providers of REQUESTED+
+	// matched capabilities — not the whole ecosystem (previously inflated to ~all
+	// plugins because the loop iterated every inv.Capabilities).
+	inv := &inventory.Inventory{Capabilities: []inventory.Capability{
+		cap("http.routing", prov("workflow-plugin-http", "external", "module:http.server", "module:http.router")),
+		cap("storage.database", prov("workflow-plugin-some-db", "external", "module:database.workflow")),
+	}}
+	reg := schema.NewModuleSchemaRegistry()
+	app, err := Assemble(inv, AssemblyInput{Capabilities: []string{"http.routing"}}, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	names := pluginNames(app)
+	if len(names) != 1 || names[0] != "workflow-plugin-http" {
+		t.Fatalf("requires.plugins=%v want exactly [workflow-plugin-http] (storage.database not requested)", names)
+	}
+}
+
+func pluginNames(app *AssembledApp) []string {
+	out := make([]string, 0, len(app.Requires.Plugins))
+	for _, p := range app.Requires.Plugins {
+		out = append(out, p.Name)
+	}
+	return out
+}

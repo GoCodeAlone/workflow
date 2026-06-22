@@ -1,6 +1,7 @@
 package assembler
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/schema"
@@ -33,18 +34,17 @@ func genConfig(moduleType string, reg *schema.ModuleSchemaRegistry) (map[string]
 	if s == nil {
 		return nil, false
 	}
-	cfg := map[string]any{}
-	for k, v := range s.DefaultConfig {
-		cfg[k] = v
-	}
-	for _, f := range s.ConfigFields {
+	cfg := make(map[string]any, len(s.DefaultConfig))
+	maps.Copy(cfg, s.DefaultConfig)
+	for i := range s.ConfigFields {
+		f := &s.ConfigFields[i] // pointer: avoid 200B per-iter copy (gocritic rangeValCopy)
 		if _, set := cfg[f.Key]; set {
 			continue
 		}
 		if !f.Required {
 			continue // optional + no default -> omit (clean scaffold)
 		}
-		cfg[f.Key] = placeholderFor(moduleType, f)
+		cfg[f.Key] = placeholderFor(moduleType, *f)
 	}
 	return cfg, true
 }

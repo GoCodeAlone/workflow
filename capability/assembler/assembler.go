@@ -46,14 +46,29 @@ func Assemble(inv *inventory.Inventory, in AssemblyInput, reg *schema.ModuleSche
 	app.Modules = wire(app.Modules)
 	app.Workflows = httpWorkflow(app.Modules)
 
-	// 5. requires.plugins — external only (D2)
-	for i := range inv.Capabilities {
-		for j := range inv.Capabilities[i].Providers {
-			p := &inv.Capabilities[i].Providers[j]
-			if p.Kind != "external" && p.Kind != "local-plugin" {
-				continue // builtin package — auto-loaded by DefaultPlugins
+	// 5. requires.plugins — external/local-plugin providers of REQUESTED+MATCHED
+	//    capabilities only (D2). Iterating all inv.Capabilities would inflate the
+	//    emitted requires.plugins to the entire ecosystem; scope to what the user
+	//    actually asked for (unmatched capabilities contribute nothing).
+	unmatchedSet := map[string]bool{}
+	for _, u := range unmatched {
+		unmatchedSet[u] = true
+	}
+	for _, want := range in.Capabilities {
+		if unmatchedSet[want] {
+			continue
+		}
+		for i := range inv.Capabilities {
+			if inv.Capabilities[i].ID != want {
+				continue
 			}
-			app.Requires.Plugins = appendUniquePlugin(app.Requires.Plugins, p.Name)
+			for j := range inv.Capabilities[i].Providers {
+				p := &inv.Capabilities[i].Providers[j]
+				if p.Kind != "external" && p.Kind != "local-plugin" {
+					continue // builtin package — auto-loaded by DefaultPlugins
+				}
+				app.Requires.Plugins = appendUniquePlugin(app.Requires.Plugins, p.Name)
+			}
 		}
 	}
 
