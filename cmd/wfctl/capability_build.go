@@ -104,8 +104,12 @@ func (m buildModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.Code {
 		case tea.KeyEscape:
-			if m.screen > screenCapability {
-				m.screen--
+			// Explicit per-screen back-navigation: the build flow's screen enum
+			// uses a distinct value range (screenCapability=100, screenReview=10),
+			// so numeric screen--/comparisons would be wrong. Only review goes
+			// back (to capability); capability cancels.
+			if m.screen == screenReview {
+				m.screen = screenCapability
 				m.err = ""
 			} else {
 				m.cancelled = true
@@ -226,7 +230,9 @@ func runCapabilityBuild(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(newBuildModel(newBuildSelection(inv)))
+	// Render the TUI to stderr so a redirected stdout (e.g. `> rec.md`) stays
+	// clean for the emitted recommendation.
+	p := tea.NewProgram(newBuildModel(newBuildSelection(inv)), tea.WithOutput(os.Stderr))
 	final, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("capability build: %w", err)

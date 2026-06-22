@@ -71,3 +71,18 @@ func TestBuildModel_AdvancesToReview(t *testing.T) {
 		t.Fatalf("Enter did not advance to review: %#v", got)
 	}
 }
+
+func TestBuildModel_EscOnReviewBacksToCapability(t *testing.T) {
+	m := newBuildModel(newBuildSelection(fixtureInventory(t)))
+	m.selection.toggleCapability("auth.authz")
+	adv, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})) // capability -> review
+	before, ok := adv.(buildModel)
+	if !ok || before.screen != screenReview {
+		t.Fatalf("precondition: expected screenReview, got %#v", adv)
+	}
+	got, _ := before.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})) // review -> back
+	after, ok := got.(buildModel)
+	if !ok || after.screen != screenCapability || after.cancelled {
+		t.Fatalf("Esc on review should return to capability (not cancel): screen=%v cancelled=%v", after.screen, after.cancelled)
+	}
+}
