@@ -1,7 +1,6 @@
 package assembler
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/schema"
@@ -41,7 +40,6 @@ func TestGenConfig_DSNAsEnv(t *testing.T) {
 	if cfg["dsn"] != "${WORKFLOW_DSN}" {
 		t.Fatalf("dsn=%v want ${WORKFLOW_DSN}", cfg["dsn"])
 	} // namespaced (P2b)
-	_ = reflect.DeepEqual // keep import if unused by other asserts
 }
 
 func TestGenConfig_SelectRequiredGetsFirstOption(t *testing.T) {

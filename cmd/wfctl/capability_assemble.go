@@ -164,7 +164,9 @@ func resolveOutDir(outDir string, force bool) (string, error) {
 		resolved = abs // target doesn't exist yet
 	}
 	cwd, _ := os.Getwd()
-	if !strings.HasPrefix(resolved, cwd) && !force {
+	// Containment uses cwd + separator so "/tmp/app2" is NOT accepted as inside
+	// cwd "/tmp/app" (Copilot: bare HasPrefix(resolved, cwd) was bypassable).
+	if resolved != cwd && !strings.HasPrefix(resolved, cwd+string(filepath.Separator)) && !force {
 		return "", fmt.Errorf("--out %q resolves outside cwd (%s); use --force to allow", resolved, cwd)
 	}
 	return resolved, nil
@@ -186,10 +188,13 @@ func emit(outDir string, app *assembler.AssembledApp, in assembler.AssemblyInput
 	if err := os.WriteFile(filepath.Join(outDir, "workflow.yaml"), wfYAML, 0o600); err != nil {
 		return err
 	}
-	appYAML, _ := yaml.Marshal(map[string]any{
+	appYAML, err := yaml.Marshal(map[string]any{
 		"application": map[string]any{"name": "assembled-app", "version": "0.1.0"},
 		"requires":    app.Requires,
 	})
+	if err != nil {
+		return fmt.Errorf("marshal app.yaml: %w", err)
+	}
 	if err := os.WriteFile(filepath.Join(outDir, "app.yaml"), appYAML, 0o600); err != nil {
 		return err
 	}
@@ -258,8 +263,8 @@ func renderNextSteps(app *assembler.AssembledApp, in assembler.AssemblyInput) st
 		fmt.Fprintln(&b)
 	}
 
-	if goalHash := hashGoal(in.Goal); goalHash != "sha256:" {
-		fmt.Fprintf(&b, "_goal hash: %s_\n", goalHash)
+	if in.Goal != "" { // print only when a goal was provided (Copilot: hashGoal never returns bare "sha256:")
+		fmt.Fprintf(&b, "_goal hash: %s_\n", hashGoal(in.Goal))
 	}
 	return b.String()
 }
@@ -294,8 +299,10 @@ func writeAssembleAudit(app *assembler.AssembledApp, in assembler.AssemblyInput)
 	if err != nil {
 		return fmt.Errorf("audit: open %s: %w", path, err)
 	}
-	defer f.Close() //nolint:errcheck
 	_, err = fmt.Fprintf(f, "%s\n", line)
+	if cerr := f.Close(); cerr != nil && err == nil { // check Close (code-quality: was unhandled defer)
+		err = cerr
+	}
 	return err
 }
 
