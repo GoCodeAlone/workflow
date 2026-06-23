@@ -233,12 +233,19 @@ func TestPluginInstallGlobalDependenciesInstallsClosure(t *testing.T) {
 	alphaTarball := buildPluginTarGz(t, "alpha", []byte(alphaScript), minimalPluginJSON("alpha", "2.0.0"))
 	betaTarball := buildPluginTarGz(t, "beta", []byte("#!/bin/sh\necho beta\n"), minimalPluginJSON("beta", "2.0.0"))
 
-	var alphaManifest, betaManifest RegistryManifest
+	alphaChecksum := sha256Hex(alphaTarball)
+	betaChecksum := sha256Hex(betaTarball)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/plugins/alpha/manifest.json":
+			alphaManifest := testRegistryManifestForRequest(r, "alpha", "2.0.0", "/download/alpha.tar.gz", alphaChecksum)
+			alphaManifest.Dependencies = []PluginDependency{{Name: "beta", MinVersion: "2.0.0"}}
+			alphaManifest.Capabilities = &RegistryCapabilities{
+				CLICommands: []RegistryCLICommand{{Name: "alpha"}},
+			}
 			writeHTTPJSON(t, w, alphaManifest)
 		case "/plugins/beta/manifest.json":
+			betaManifest := testRegistryManifestForRequest(r, "beta", "2.0.0", "/download/beta.tar.gz", betaChecksum)
 			writeHTTPJSON(t, w, betaManifest)
 		case "/download/alpha.tar.gz":
 			_, _ = w.Write(alphaTarball)
@@ -249,13 +256,6 @@ func TestPluginInstallGlobalDependenciesInstallsClosure(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-
-	alphaManifest = testRegistryManifest("alpha", "2.0.0", srv.URL+"/download/alpha.tar.gz", sha256Hex(alphaTarball))
-	alphaManifest.Dependencies = []PluginDependency{{Name: "beta", MinVersion: "2.0.0"}}
-	alphaManifest.Capabilities = &RegistryCapabilities{
-		CLICommands: []RegistryCLICommand{{Name: "alpha"}},
-	}
-	betaManifest = testRegistryManifest("beta", "2.0.0", srv.URL+"/download/beta.tar.gz", sha256Hex(betaTarball))
 
 	if err := runPluginInstall([]string{"-g", "-config", writeTestRegistryConfig(t, srv.URL), "alpha"}); err != nil {
 		t.Fatalf("runPluginInstall -g alpha: %v", err)
@@ -300,14 +300,22 @@ func TestPluginUpdateGlobalDependencyFailurePreservesPreviousInstall(t *testing.
 	betaTarball := buildPluginTarGz(t, "beta", []byte("#!/bin/sh\necho beta v2\n"), minimalPluginJSON("beta", "2.0.0"))
 	gammaTarball := buildPluginTarGz(t, "gamma", []byte("#!/bin/sh\necho gamma v2\n"), minimalPluginJSON("gamma", "2.0.0"))
 
-	var alphaManifest, betaManifest, gammaManifest RegistryManifest
+	alphaChecksum := sha256Hex(alphaTarball)
+	betaChecksum := sha256Hex(betaTarball)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/plugins/alpha/manifest.json":
+			alphaManifest := testRegistryManifestForRequest(r, "alpha", "2.0.0", "/download/alpha.tar.gz", alphaChecksum)
+			alphaManifest.Dependencies = []PluginDependency{
+				{Name: "beta", MinVersion: "2.0.0"},
+				{Name: "gamma", MinVersion: "2.0.0"},
+			}
 			writeHTTPJSON(t, w, alphaManifest)
 		case "/plugins/beta/manifest.json":
+			betaManifest := testRegistryManifestForRequest(r, "beta", "2.0.0", "/download/beta.tar.gz", betaChecksum)
 			writeHTTPJSON(t, w, betaManifest)
 		case "/plugins/gamma/manifest.json":
+			gammaManifest := testRegistryManifestForRequest(r, "gamma", "2.0.0", "/download/gamma.tar.gz", strings.Repeat("0", 64))
 			writeHTTPJSON(t, w, gammaManifest)
 		case "/download/alpha.tar.gz":
 			_, _ = w.Write(alphaTarball)
@@ -320,14 +328,6 @@ func TestPluginUpdateGlobalDependencyFailurePreservesPreviousInstall(t *testing.
 		}
 	}))
 	defer srv.Close()
-
-	alphaManifest = testRegistryManifest("alpha", "2.0.0", srv.URL+"/download/alpha.tar.gz", sha256Hex(alphaTarball))
-	alphaManifest.Dependencies = []PluginDependency{
-		{Name: "beta", MinVersion: "2.0.0"},
-		{Name: "gamma", MinVersion: "2.0.0"},
-	}
-	betaManifest = testRegistryManifest("beta", "2.0.0", srv.URL+"/download/beta.tar.gz", sha256Hex(betaTarball))
-	gammaManifest = testRegistryManifest("gamma", "2.0.0", srv.URL+"/download/gamma.tar.gz", strings.Repeat("0", 64))
 
 	err := runPluginUpdate([]string{"-g", "-config", writeTestRegistryConfig(t, srv.URL), "alpha"})
 	if err == nil {
@@ -410,6 +410,10 @@ func testRegistryManifest(name, version, url, checksum string) RegistryManifest 
 			SHA256: checksum,
 		}},
 	}
+}
+
+func testRegistryManifestForRequest(r *http.Request, name, version, path, checksum string) RegistryManifest {
+	return testRegistryManifest(name, version, "http://"+r.Host+path, checksum)
 }
 
 func writeHTTPJSON(t *testing.T, w http.ResponseWriter, v any) {

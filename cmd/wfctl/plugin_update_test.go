@@ -110,11 +110,11 @@ func TestPluginUpdateGlobalNamedUsesGlobalDir(t *testing.T) {
 	writeInstalledPlugin(t, filepath.Join(cwd, "data", "plugins"), "portfolio", "1.0.0")
 
 	tarball := buildPluginTarGz(t, "portfolio", []byte("#!/bin/sh\necho portfolio v2\n"), minimalPluginJSON("portfolio", "v2.0.0"))
-	var manifest RegistryManifest
+	checksum := sha256Hex(tarball)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/plugins/portfolio/manifest.json":
-			writeHTTPJSON(t, w, manifest)
+			writeHTTPJSON(t, w, testRegistryManifestForRequest(r, "portfolio", "v2.0.0", "/download/portfolio.tar.gz", checksum))
 		case "/download/portfolio.tar.gz":
 			_, _ = w.Write(tarball)
 		default:
@@ -122,7 +122,6 @@ func TestPluginUpdateGlobalNamedUsesGlobalDir(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	manifest = testRegistryManifest("portfolio", "v2.0.0", srv.URL+"/download/portfolio.tar.gz", sha256Hex(tarball))
 
 	if err := runPluginUpdate([]string{"-g", "-config", writeTestRegistryConfig(t, srv.URL), "portfolio"}); err != nil {
 		t.Fatalf("runPluginUpdate -g portfolio: %v", err)
@@ -143,13 +142,14 @@ func TestPluginUpdateGlobalAllUpdatesInstalledPlugins(t *testing.T) {
 
 	portfolioTarball := buildPluginTarGz(t, "portfolio", []byte("#!/bin/sh\necho portfolio v2\n"), minimalPluginJSON("portfolio", "v2.0.0"))
 	moderationTarball := buildPluginTarGz(t, "moderation", []byte("#!/bin/sh\necho moderation v2\n"), minimalPluginJSON("moderation", "v2.0.0"))
-	var portfolioManifest, moderationManifest RegistryManifest
+	portfolioChecksum := sha256Hex(portfolioTarball)
+	moderationChecksum := sha256Hex(moderationTarball)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/plugins/portfolio/manifest.json":
-			writeHTTPJSON(t, w, portfolioManifest)
+			writeHTTPJSON(t, w, testRegistryManifestForRequest(r, "portfolio", "v2.0.0", "/download/portfolio.tar.gz", portfolioChecksum))
 		case "/plugins/moderation/manifest.json":
-			writeHTTPJSON(t, w, moderationManifest)
+			writeHTTPJSON(t, w, testRegistryManifestForRequest(r, "moderation", "v2.0.0", "/download/moderation.tar.gz", moderationChecksum))
 		case "/download/portfolio.tar.gz":
 			_, _ = w.Write(portfolioTarball)
 		case "/download/moderation.tar.gz":
@@ -159,8 +159,6 @@ func TestPluginUpdateGlobalAllUpdatesInstalledPlugins(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	portfolioManifest = testRegistryManifest("portfolio", "v2.0.0", srv.URL+"/download/portfolio.tar.gz", sha256Hex(portfolioTarball))
-	moderationManifest = testRegistryManifest("moderation", "v2.0.0", srv.URL+"/download/moderation.tar.gz", sha256Hex(moderationTarball))
 
 	if err := runPluginUpdate([]string{"-g", "-config", writeTestRegistryConfig(t, srv.URL), "--all"}); err != nil {
 		t.Fatalf("runPluginUpdate -g --all: %v", err)
