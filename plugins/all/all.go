@@ -33,7 +33,6 @@ import (
 	plugindlq "github.com/GoCodeAlone/workflow/plugins/dlq"
 	pluginevstore "github.com/GoCodeAlone/workflow/plugins/eventstore"
 	pluginff "github.com/GoCodeAlone/workflow/plugins/featureflags"
-	plugingitlab "github.com/GoCodeAlone/workflow/plugins/gitlab"
 	pluginhttp "github.com/GoCodeAlone/workflow/plugins/http"
 	plugininfra "github.com/GoCodeAlone/workflow/plugins/infra"
 	pluginintegration "github.com/GoCodeAlone/workflow/plugins/integration"
@@ -48,7 +47,6 @@ import (
 	pluginpipeline "github.com/GoCodeAlone/workflow/plugins/pipelinesteps"
 	pluginplatform "github.com/GoCodeAlone/workflow/plugins/platform"
 	pluginpolicy "github.com/GoCodeAlone/workflow/plugins/policy"
-	pluginscanner "github.com/GoCodeAlone/workflow/plugins/scanner"
 	pluginscheduler "github.com/GoCodeAlone/workflow/plugins/scheduler"
 	pluginsecrets "github.com/GoCodeAlone/workflow/plugins/secrets"
 	pluginsm "github.com/GoCodeAlone/workflow/plugins/statemachine"
@@ -96,13 +94,11 @@ func DefaultPlugins() []plugin.EnginePlugin {
 		plugininfra.New(),
 		pluginplatform.New(),
 		plugincloud.New(),
-		plugingitlab.New(),
 		plugindatastores.New(),
 		pluginpolicy.New(),
 		plugink8s.New(),
 		pluginmarketplace.New(),
 		pluginmcp.New(),
-		pluginscanner.New(),
 		pluginactors.New(),
 	}
 	return base

@@ -569,11 +569,10 @@ See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 | `webhook.sender` | Outbound webhook delivery with retry and dead letter | messaging |
 | `notification.slack` | Slack notifications | messaging |
 | `openapi.consumer` | OpenAPI spec consumer for external service integration | observability |
-| `gitlab.webhook` | GitLab webhook receiver and validator | gitlab |
-| `gitlab.client` | GitLab API client (pipelines, MRs, repos) | gitlab |
 | `cloud.account` | Cloud account credential holder (AWS, GCP, Azure) | cloud |
-| `security.scanner` | Security scanning provider for SAST/container/dependency scans | scanner |
 | `policy.mock` | In-memory mock policy engine for testing | policy |
+
+> **Note:** `gitlab.webhook`, `gitlab.client`, and `security.scanner` are no longer engine built-ins (removed in v0.83.0). Install them as external plugins — `workflow-plugin-gitlab` and `workflow-plugin-security-scanner` — via `wfctl plugin install`. The `step.scan_*` pipeline steps remain built-in (cicd) and resolve the scanner at runtime from the external plugin.
 
 ### Secrets
 | Type | Description | Plugin |
