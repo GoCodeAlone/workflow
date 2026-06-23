@@ -158,6 +158,28 @@ func TestMerge_EngineWinsDropsPluginGrammar(t *testing.T) {
 	}
 }
 
+// TestMerge_EngineWinsEvenWithoutGrammar locks in Copilot's D25 finding: an
+// engine-registered type with NO grammar today still owns its type namespace —
+// a plugin's grammar for it is ignored (engine wins), rather than adopted and
+// later silently dropped when the engine eventually authors grammar.
+func TestMerge_EngineWinsEvenWithoutGrammar(t *testing.T) {
+	r := schema.NewModuleSchemaRegistry()
+	r.Register(&schema.ModuleSchema{Type: "engine.bare"}) // registered, no grammar yet
+	inv := &inventory.Inventory{Capabilities: []inventory.Capability{
+		{ID: "x", Providers: []inventory.Provider{
+			{Name: "p", Grammar: map[string]schema.GrammarDecl{"engine.bare": {Provides: []string{"plugin.Svc"}}}},
+		}},
+	}}
+	merged, _, err := MergeGrammar(r, inv)
+	if err != nil {
+		t.Fatalf("engine-wins must not error (D25): %v", err)
+	}
+	// engine.bare is engine-registered → plugin grammar ignored → NOT in merged.
+	if g, ok := merged["engine.bare"]; ok {
+		t.Fatalf("plugin grammar for engine-registered (grammar-less) type must be ignored (D25): %+v", g)
+	}
+}
+
 // TestMerge_CollectsRuntimeHooks asserts Category B RuntimeHooks are collected
 // (sorted, de-duplicated) for NEXT_STEPS documentation (D3).
 func TestMerge_CollectsRuntimeHooks(t *testing.T) {
@@ -165,7 +187,7 @@ func TestMerge_CollectsRuntimeHooks(t *testing.T) {
 	r.Register(&schema.ModuleSchema{Type: "auth.jwt", RuntimeHooks: []string{"auth-provider-registration"}})
 	inv := &inventory.Inventory{Capabilities: []inventory.Capability{
 		{ID: "x", Providers: []inventory.Provider{
-			{Name: "p", Grammar: map[string]schema.GrammarDecl{"health.checker": {RuntimeHooks: []string{"health-endpoints"}}}},
+			{Name: "p", Grammar: map[string]schema.GrammarDecl{"plugin.thing": {RuntimeHooks: []string{"health-endpoints"}}}},
 		}},
 	}}
 	_, hooks, err := MergeGrammar(r, inv)

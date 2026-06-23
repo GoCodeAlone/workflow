@@ -29,14 +29,18 @@ func MergeGrammar(reg *schema.ModuleSchemaRegistry, inv *inventory.Inventory) (M
 
 	// 1. Engine builtins (D25: engine wins — seeded first; a plugin re-declaring
 	//    grammar for an engine-registered type is ignored, NOT a conflict).
+	//    Engine ownership applies to EVERY registered engine type, not only those
+	//    that currently declare grammar — otherwise a plugin could shadow an
+	//    engine type whose grammar hasn't been authored yet (Task 6 sweep), then
+	//    have its grammar silently dropped once the engine adds one.
 	engineTypes := map[string]bool{}
 	for _, t := range reg.Types() { // reg.Types() is []string (retro #1: range two-value)
+		engineTypes[t] = true
 		s := reg.Get(t)
 		if s == nil || !hasGrammar(s) {
 			continue
 		}
 		merged[t] = fromSchema(s)
-		engineTypes[t] = true
 	}
 
 	// 2. Plugin grammar, sorted by (provider-name, module-type) for V10 determinism.

@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -31,9 +32,18 @@ func TestModuleSchemaGrammarFieldsRoundTrip(t *testing.T) {
 	if len(got.RouteMiddlewares) != 1 || got.RouteMiddlewares[0] != "auth-mw" {
 		t.Fatalf("RouteMiddlewares lost")
 	}
-	// omitzero: a schema w/o grammar marshals cleanly (no null fields)
+	// omitempty: a schema with no grammar marshals cleanly, OMITTING the grammar
+	// keys entirely (⊥ serializing them as explicit nulls). Assert each grammar
+	// key is absent from the marshaled output.
 	bare := &ModuleSchema{Type: "x"}
-	if out, _ := json.Marshal(bare); string(out) == "" {
-		t.Fatal("bare marshal empty")
+	out, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2 := string(out)
+	for _, field := range []string{"provides", "requires", "attaches", "routeMiddlewares", "fragment", "runtimeHooks"} {
+		if strings.Contains(got2, `"`+field+`"`) {
+			t.Fatalf("bare schema must omit empty grammar field %q via omitempty, got %s", field, got2)
+		}
 	}
 }
