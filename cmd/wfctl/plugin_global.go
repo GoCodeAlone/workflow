@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 )
@@ -26,4 +27,9 @@ func resolvePluginDir(pluginDir string, global bool) string {
 		return defaultGlobalPluginDir()
 	}
 	return pluginDir
+}
+
+func addGlobalPluginFlags(fs *flag.FlagSet, global *bool) {
+	fs.BoolVar(global, "global", false, "Use global plugin directory")
+	fs.BoolVar(global, "g", false, "Use global plugin directory (shorthand)")
 }
