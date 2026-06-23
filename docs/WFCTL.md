@@ -858,6 +858,7 @@ wfctl plugin install [options] [<name>[@<version>]]
 |------|---------|-------------|
 | `--plugin-dir` | `data/plugins` | Plugin directory |
 | `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--global`, `-g` | `false` | Install into the global plugin directory |
 | `--config` | _(default registry)_ | Registry config file path |
 | `-registry` | _(all registries)_ | Use a specific registry by name |
 | `--manifest` | `wfctl.yaml` | wfctl project manifest path for lockfile installs |
@@ -872,6 +873,7 @@ wfctl plugin install [options] [<name>[@<version>]]
 ```bash
 wfctl plugin install my-plugin
 wfctl plugin install my-plugin@1.2.0
+wfctl plugin install -g portfolio
 wfctl plugin install --data-dir /opt/plugins my-plugin
 wfctl plugin install
 wfctl plugin install --locked
@@ -895,6 +897,15 @@ installs cannot silently skip lockfile freshness checks.
 Registry installs resolve compatibility before selecting a version. Direct URL
 installs, local installs, GitHub repository fallback, and lockfile installs do
 not use registry evidence unless they are backed by registry metadata.
+
+Global installs use `${XDG_DATA_HOME:-$HOME/.local/share}/wfctl/plugins` by
+default. Set `WFCTL_GLOBAL_PLUGIN_DIR` to override the location. Global
+lifecycle commands install binaries and manifests only; they do not create or
+modify project `wfctl.yaml` or `.wfctl-lock.yaml`. Registry dependency closure
+is installed globally with the parent plugin, and existing global plugin dirs
+are swapped only after the staged parent and dependency set validates.
+Top-level wfctl commands are resolved before global plugin CLI commands, so a
+plugin cannot shadow built-in commands such as `validate` or `plugin`.
 
 #### `plugin ci`
 
@@ -987,20 +998,24 @@ wfctl plugin list [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--global`, `-g` | `false` | List plugins from the global plugin directory |
 
 #### `plugin update`
 
 Update an installed plugin to its latest version.
 
 ```
-wfctl plugin update [options] <name>
+wfctl plugin update [options] <name|--all>
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--plugin-dir` | `data/plugins` | Plugin directory |
 | `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--global`, `-g` | `false` | Update plugins in the global plugin directory |
+| `--all` | `false` | Update every installed plugin in the active plugin directory |
 | `--config` | _(default registry)_ | Registry config file path |
 | `--manifest` | `wfctl.yaml` | wfctl project manifest path |
 | `--lock-file` | `.wfctl-lock.yaml` | Lockfile path |
@@ -1010,6 +1025,15 @@ wfctl plugin update [options] <name>
 | `--force` | `false` | Permit known-failing or missing required compatibility evidence while still enforcing archive checksums |
 | `--quiet` | `false` | Suppress per-download progress output |
 | `--skip-checksum` | `false` | Skip archive integrity verification. Use only for trusted internal URLs |
+
+```bash
+wfctl plugin update -g portfolio
+wfctl plugin update -g --all
+```
+
+Global updates reuse the global dependency transaction path. If any dependency
+download, checksum, or validation fails, existing global plugin directories
+remain in place and later plugins in `--all` are not updated.
 
 #### `plugin remove`
 
@@ -1021,7 +1045,9 @@ wfctl plugin remove [options] <name>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--global`, `-g` | `false` | Remove from the global plugin directory |
 
 #### `plugin validate`
 
@@ -1051,7 +1077,9 @@ wfctl plugin info [options] <name>
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-data-dir` | `data/plugins` | Plugin data directory |
+| `--plugin-dir` | `data/plugins` | Plugin directory |
+| `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
+| `--global`, `-g` | `false` | Read from the global plugin directory |
 
 ---
 

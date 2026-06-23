@@ -99,7 +99,8 @@ Subcommands:
   deps     List dependencies for a plugin
   marketplace-verify  Scan a GitHub org's wfctl.yaml files for plugin usage; suggests manifest status (verified | experimental)
 
-Use -plugin-dir to specify a custom plugin directory (replaces deprecated -data-dir).
+Use -plugin-dir to specify a custom project plugin directory (replaces deprecated -data-dir).
+Use -g or -global with install/list/info/update/remove for global plugins in ${XDG_DATA_HOME:-$HOME/.local/share}/wfctl/plugins; WFCTL_GLOBAL_PLUGIN_DIR overrides that location.
 `)
 }
 
