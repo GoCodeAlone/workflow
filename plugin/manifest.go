@@ -46,6 +46,12 @@ type PluginManifest struct {
 	WorkflowTypes []string         `json:"workflowTypes,omitempty" yaml:"workflowTypes,omitempty"`
 	WiringHooks   []string         `json:"wiringHooks,omitempty" yaml:"wiringHooks,omitempty"`
 
+	// Grammar is a NEW sibling top-level field (⊥ nesting under moduleTypes,
+	// which is []string) declaring Assembly Grammar keyed by module-type name
+	// (ADR 0049 / design D1). Local/sibling plugin.json parses permissively;
+	// registry-manifest grammar is deferred to M2 (strict registry-schema.json).
+	Grammar map[string]schema.GrammarDecl `json:"grammar,omitempty" yaml:"grammar,omitempty"`
+
 	// IaCStateBackends lists the iac.state backend names this plugin serves
 	// (e.g. "azure_blob"). Authored in plugin.json either as a top-level
 	// "iacStateBackends" key or nested under the legacy capabilities object
