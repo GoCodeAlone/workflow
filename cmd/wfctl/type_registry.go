@@ -488,20 +488,6 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			ConfigKeys: []string{"provider", "region", "credentials", "project_id", "subscription_id"},
 		},
 
-		// gitlab plugin
-		"gitlab.client": {
-			Type:       "gitlab.client",
-			Plugin:     "gitlab",
-			Stateful:   false,
-			ConfigKeys: []string{"url", "token"},
-		},
-		"gitlab.webhook": {
-			Type:       "gitlab.webhook",
-			Plugin:     "gitlab",
-			Stateful:   false,
-			ConfigKeys: []string{"secret", "path", "events"},
-		},
-
 		// cicd plugin (codebuild module)
 		"aws.codebuild": {
 			Type:       "aws.codebuild",
@@ -676,14 +662,6 @@ func KnownModuleTypes() map[string]ModuleTypeInfo {
 			Plugin:     "mcp",
 			Stateful:   false,
 			ConfigKeys: []string{"log_on_init", "expose_admin_api", "audit_tool_calls"},
-		},
-
-		// scanner plugin
-		"security.scanner": {
-			Type:       "security.scanner",
-			Plugin:     "scanner",
-			Stateful:   false,
-			ConfigKeys: []string{"trivy", "semgrep", "snyk"},
 		},
 	}
 	// Include any types registered dynamically (e.g. from external plugins loaded via LoadPluginTypesFromDir).
@@ -1235,33 +1213,6 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			Type:       "step.codebuild_delete_project",
 			Plugin:     "cicd",
 			ConfigKeys: []string{"project"},
-		},
-
-		// gitlab plugin steps
-		"step.gitlab_trigger_pipeline": {
-			Type:       "step.gitlab_trigger_pipeline",
-			Plugin:     "gitlab",
-			ConfigKeys: []string{"client", "project", "ref", "variables"},
-		},
-		"step.gitlab_pipeline_status": {
-			Type:       "step.gitlab_pipeline_status",
-			Plugin:     "gitlab",
-			ConfigKeys: []string{"client", "project", "pipeline_id"},
-		},
-		"step.gitlab_parse_webhook": {
-			Type:       "step.gitlab_parse_webhook",
-			Plugin:     "gitlab",
-			ConfigKeys: []string{"client"},
-		},
-		"step.gitlab_create_mr": {
-			Type:       "step.gitlab_create_mr",
-			Plugin:     "gitlab",
-			ConfigKeys: []string{"client", "project", "source_branch", "target_branch", "title", "description"},
-		},
-		"step.gitlab_mr_comment": {
-			Type:       "step.gitlab_mr_comment",
-			Plugin:     "gitlab",
-			ConfigKeys: []string{"client", "project", "mr_iid", "body"},
 		},
 
 		// policy plugin steps

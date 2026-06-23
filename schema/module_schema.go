@@ -2565,34 +2565,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
-	// ---- GitLab Client ----
-
-	r.Register(&ModuleSchema{
-		Type:        "gitlab.client",
-		Label:       "GitLab Client",
-		Category:    "integration",
-		Description: "GitLab API client for triggering pipelines, managing MRs, and querying pipeline status",
-		Outputs:     []ServiceIODef{{Name: "client", Type: "ExternalAPIClient", Description: "GitLab API client for pipeline and MR operations"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "url", Label: "GitLab URL", Type: FieldTypeString, DefaultValue: "https://gitlab.com", Description: "GitLab instance URL"},
-			{Key: "token", Label: "Access Token", Type: FieldTypeString, Required: true, Description: "GitLab personal or project access token", Sensitive: true},
-		},
-	})
-
-	// ---- GitLab Webhook ----
-
-	r.Register(&ModuleSchema{
-		Type:        "gitlab.webhook",
-		Label:       "GitLab Webhook",
-		Category:    "integration",
-		Description: "GitLab webhook receiver that parses and validates incoming GitLab events",
-		Inputs:      []ServiceIODef{{Name: "event", Type: "http.Request", Description: "Incoming GitLab webhook HTTP request"}},
-		Outputs:     []ServiceIODef{{Name: "event", Type: "Event", Description: "Parsed and validated GitLab event"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "secret", Label: "Webhook Secret", Type: FieldTypeString, Description: "GitLab webhook secret token for request validation", Sensitive: true},
-		},
-	})
-
 	// ---- HTTP Middleware OTEL ----
 
 	r.Register(&ModuleSchema{
@@ -2772,23 +2744,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 	})
 
-	// ---- Security Scanner ----
-
-	r.Register(&ModuleSchema{
-		Type:        "security.scanner",
-		Label:       "Security Scanner",
-		Category:    "security",
-		Description: "Security scanner provider supporting mock, semgrep, trivy, and grype backends",
-		Outputs:     []ServiceIODef{{Name: "scanner", Type: "JSON", Description: "Security scanner service for SAST, container, and dependency scans"}},
-		ConfigFields: []ConfigFieldDef{
-			{Key: "mode", Label: "Mode", Type: FieldTypeSelect, Options: []string{"mock", "cli"}, DefaultValue: "mock", Description: "Scanner mode: 'mock' for testing or 'cli' for real tools"},
-			{Key: "semgrepBinary", Label: "Semgrep Binary", Type: FieldTypeString, DefaultValue: "semgrep", Description: "Path to semgrep binary"},
-			{Key: "trivyBinary", Label: "Trivy Binary", Type: FieldTypeString, DefaultValue: "trivy", Description: "Path to trivy binary"},
-			{Key: "grypeBinary", Label: "Grype Binary", Type: FieldTypeString, DefaultValue: "grype", Description: "Path to grype binary"},
-			{Key: "mockFindings", Label: "Mock Findings", Type: FieldTypeMap, Description: "Mock findings to return (keyed by scan type: sast, container, deps)"},
-		},
-	})
-
 	// ---- Storage Artifact ----
 
 	r.Register(&ModuleSchema{
@@ -2890,11 +2845,6 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		{"step.git_commit", "Git Commit", "Creates a Git commit"},
 		{"step.git_push", "Git Push", "Pushes commits to a remote repository"},
 		{"step.git_tag", "Git Tag", "Creates a Git tag"},
-		{"step.gitlab_create_mr", "GitLab Create MR", "Creates a GitLab merge request"},
-		{"step.gitlab_mr_comment", "GitLab MR Comment", "Adds a comment to a GitLab merge request"},
-		{"step.gitlab_parse_webhook", "GitLab Parse Webhook", "Parses and validates a GitLab webhook"},
-		{"step.gitlab_pipeline_status", "GitLab Pipeline Status", "Gets the status of a GitLab pipeline"},
-		{"step.gitlab_trigger_pipeline", "GitLab Trigger Pipeline", "Triggers a GitLab CI/CD pipeline"},
 		{"step.iac_apply", "IaC Apply", "Applies infrastructure changes"},
 		{"step.iac_commit_back", "IaC Commit Back", "Commits serialised authored specs back to git after a full-success apply"},
 		{"step.iac_destroy", "IaC Destroy", "Destroys IaC-managed infrastructure"},

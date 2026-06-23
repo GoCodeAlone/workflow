@@ -1233,65 +1233,6 @@
       },
       "maxIncoming": 0
     },
-    "gitlab.client": {
-      "type": "gitlab.client",
-      "label": "GitLab Client",
-      "category": "integration",
-      "description": "GitLab API client for triggering pipelines, managing MRs, and querying pipeline status",
-      "outputs": [
-        {
-          "name": "client",
-          "type": "ExternalAPIClient",
-          "description": "GitLab API client for pipeline and MR operations"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "url",
-          "label": "GitLab URL",
-          "type": "string",
-          "description": "GitLab instance URL",
-          "defaultValue": "https://gitlab.com"
-        },
-        {
-          "key": "token",
-          "label": "Access Token",
-          "type": "string",
-          "description": "GitLab personal or project access token",
-          "required": true,
-          "sensitive": true
-        }
-      ]
-    },
-    "gitlab.webhook": {
-      "type": "gitlab.webhook",
-      "label": "GitLab Webhook",
-      "category": "integration",
-      "description": "GitLab webhook receiver that parses and validates incoming GitLab events",
-      "inputs": [
-        {
-          "name": "event",
-          "type": "http.Request",
-          "description": "Incoming GitLab webhook HTTP request"
-        }
-      ],
-      "outputs": [
-        {
-          "name": "event",
-          "type": "Event",
-          "description": "Parsed and validated GitLab event"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "secret",
-          "label": "Webhook Secret",
-          "type": "string",
-          "description": "GitLab webhook secret token for request validation",
-          "sensitive": true
-        }
-      ]
-    },
     "health.checker": {
       "type": "health.checker",
       "label": "Health Checker",
@@ -3278,59 +3219,6 @@
           "type": "string",
           "description": "Key used for field encryption",
           "sensitive": true
-        }
-      ]
-    },
-    "security.scanner": {
-      "type": "security.scanner",
-      "label": "Security Scanner",
-      "category": "security",
-      "description": "Security scanner provider supporting mock, semgrep, trivy, and grype backends",
-      "outputs": [
-        {
-          "name": "scanner",
-          "type": "JSON",
-          "description": "Security scanner service for SAST, container, and dependency scans"
-        }
-      ],
-      "configFields": [
-        {
-          "key": "mode",
-          "label": "Mode",
-          "type": "select",
-          "description": "Scanner mode: 'mock' for testing or 'cli' for real tools",
-          "defaultValue": "mock",
-          "options": [
-            "mock",
-            "cli"
-          ]
-        },
-        {
-          "key": "semgrepBinary",
-          "label": "Semgrep Binary",
-          "type": "string",
-          "description": "Path to semgrep binary",
-          "defaultValue": "semgrep"
-        },
-        {
-          "key": "trivyBinary",
-          "label": "Trivy Binary",
-          "type": "string",
-          "description": "Path to trivy binary",
-          "defaultValue": "trivy"
-        },
-        {
-          "key": "grypeBinary",
-          "label": "Grype Binary",
-          "type": "string",
-          "description": "Path to grype binary",
-          "defaultValue": "grype"
-        },
-        {
-          "key": "mockFindings",
-          "label": "Mock Findings",
-          "type": "map",
-          "description": "Mock findings to return (keyed by scan type: sast, container, deps)"
         }
       ]
     },
@@ -5844,41 +5732,6 @@
       "label": "Git Tag",
       "category": "pipeline",
       "description": "Creates a Git tag",
-      "configFields": []
-    },
-    "step.gitlab_create_mr": {
-      "type": "step.gitlab_create_mr",
-      "label": "GitLab Create MR",
-      "category": "pipeline",
-      "description": "Creates a GitLab merge request",
-      "configFields": []
-    },
-    "step.gitlab_mr_comment": {
-      "type": "step.gitlab_mr_comment",
-      "label": "GitLab MR Comment",
-      "category": "pipeline",
-      "description": "Adds a comment to a GitLab merge request",
-      "configFields": []
-    },
-    "step.gitlab_parse_webhook": {
-      "type": "step.gitlab_parse_webhook",
-      "label": "GitLab Parse Webhook",
-      "category": "pipeline",
-      "description": "Parses and validates a GitLab webhook",
-      "configFields": []
-    },
-    "step.gitlab_pipeline_status": {
-      "type": "step.gitlab_pipeline_status",
-      "label": "GitLab Pipeline Status",
-      "category": "pipeline",
-      "description": "Gets the status of a GitLab pipeline",
-      "configFields": []
-    },
-    "step.gitlab_trigger_pipeline": {
-      "type": "step.gitlab_trigger_pipeline",
-      "label": "GitLab Trigger Pipeline",
-      "category": "pipeline",
-      "description": "Triggers a GitLab CI/CD pipeline",
       "configFields": []
     },
     "step.graphql": {
