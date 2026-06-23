@@ -55,7 +55,6 @@ func TestWire_CategoryA(t *testing.T) {
 	if len(routes) != 5 {
 		t.Fatalf("crud-route want 5 routes, got %d: %+v", len(routes), routes)
 	}
-	wantMethods := map[string]bool{"GET": true, "POST": true, "PUT": true, "DELETE": true}
 	gotMethods := map[string]int{}
 	for _, r := range routes {
 		mw, _ := r["middlewares"].([]string)
@@ -74,7 +73,35 @@ func TestWire_CategoryA(t *testing.T) {
 			t.Fatalf("crud-route path wrong: %q", p)
 		}
 	}
-	_ = wantMethods
+}
+
+// TestWire_FragmentEmitsAllMiddlewares (Copilot #5): a crud-route fragment
+// tags routes with ALL declared RouteMiddlewares (by-type → instance names),
+// not just the first — Pass A materializes every one, so dropping any in
+// emitFragment would silently lose a declared middleware.
+func TestWire_FragmentEmitsAllMiddlewares(t *testing.T) {
+	eng := MergedGrammar{
+		"http.server":             {Provides: []string{"http.Server"}},
+		"http.router":             {Requires: []string{"http.server"}, Attaches: &schema.AttachSpec{To: "http.server", Emit: "workflows.http"}},
+		"http.middleware.auth":    {Attaches: &schema.AttachSpec{To: "http.router"}},
+		"http.middleware.logging": {Attaches: &schema.AttachSpec{To: "http.router"}},
+		"api.handler": {
+			Attaches:         &schema.AttachSpec{To: "http.router"},
+			RouteMiddlewares: []string{"http.middleware.auth", "http.middleware.logging"},
+			Fragment:         &schema.FragmentSpec{Kind: "crud-route", Fields: []string{"resourceName"}},
+		},
+	}
+	reg := schema.NewModuleSchemaRegistry()
+	mods := []config.ModuleConfig{{Name: "api", Type: "api.handler", Config: map[string]any{"resourceName": "things"}}}
+
+	res := GrammarWire(mods, eng, reg, []string{"health.checker"})
+
+	for _, r := range wfRoutes(res.Workflows) {
+		mw, _ := r["middlewares"].([]string)
+		if len(mw) != 2 || mw[0] != "auth" || mw[1] != "logging" {
+			t.Fatalf("route must carry ALL declared middlewares [auth logging], got %+v", mw)
+		}
+	}
 }
 
 // TestWire_AttachesPluginTypeIsGlueGap (D23): an Attaches.To target that is NOT

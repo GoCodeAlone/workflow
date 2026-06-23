@@ -164,9 +164,14 @@ func emitFragment(res *ApplyResult, f *schema.FragmentSpec, owner *config.Module
 	if resource == "" {
 		return // D20: required field absent — grammar-load should have errored; defensive.
 	}
-	mwName := ""
-	if decl, ok := g[owner.Type]; ok && len(decl.RouteMiddlewares) > 0 {
-		mwName = defaultName(decl.RouteMiddlewares[0]) // P8: by-type → instance name
+	// P8: tag routes with ALL declared RouteMiddlewares (resolved by-type to
+	// instance names). Pass A already materialized every one; dropping any here
+	// would silently lose a declared middleware.
+	var mwNames []string
+	if decl, ok := g[owner.Type]; ok {
+		for _, mwt := range decl.RouteMiddlewares {
+			mwNames = append(mwNames, defaultName(mwt))
+		}
 	}
 	routes := []map[string]any{
 		{"method": "GET", "path": "/" + resource, "handler": owner.Name},
@@ -176,8 +181,8 @@ func emitFragment(res *ApplyResult, f *schema.FragmentSpec, owner *config.Module
 		{"method": "DELETE", "path": "/" + resource + "/{id}", "handler": owner.Name},
 	}
 	for i := range routes {
-		if mwName != "" {
-			routes[i]["middlewares"] = []string{mwName}
+		if len(mwNames) > 0 {
+			routes[i]["middlewares"] = append([]string{}, mwNames...)
 		}
 	}
 	attachRoutes(res, "http", routes)
@@ -209,7 +214,10 @@ func indexByType(mods []config.ModuleConfig) map[string]*config.ModuleConfig {
 
 // defaultName is the instance name for a materialized module of type t: the
 // segment after the final "." (http.server→server, http.router→router,
-// health.checker→health). Matches the names v0.82.0's in-code wire() used.
+// health.checker→checker, http.middleware.auth→auth). This is the grammar-wire
+// naming convention; v0.82.0's in-code wire() used a few hand-picked names
+// (notably "health" for health.checker), but instance names are an
+// implementation detail — MC-parity compares the type graph, not names.
 func defaultName(t string) string {
 	if i := strings.LastIndex(t, "."); i >= 0 {
 		return t[i+1:]

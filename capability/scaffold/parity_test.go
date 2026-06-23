@@ -30,8 +30,10 @@ func engineGrammarForParity() MergedGrammar {
 
 // TestWire_ParityWithV082 is the MC-parity regression guard (D6): the
 // grammar-driven wire must reproduce v0.82.0's in-code wire() WIRING — same set
-// of module types, same instance names, same DependsOn graph, same
+// of module types, same DependsOn (compared as types), and the same
 // workflows.http entry-point section — across several fixed input sets.
+// Instance names are intentionally NOT compared (runtime resolves by type; the
+// grammar's defaultName differs from wire()'s hand-picked names).
 //
 // Config bytes are NOT asserted equal: GrammarWire intentionally enriches
 // materialized modules with the registry's DefaultConfig (P6) where v0.82.0's
@@ -164,7 +166,9 @@ func joinDeps(xs []string) string {
 	return out
 }
 
-// deepEqual is a small order-independent any-comparator for the workflow maps.
+// deepEqual is a small any-comparator for the workflow maps: maps compare
+// order-independent (key set + values); slices ([]map[string]any, []string)
+// compare IN ORDER — route order is significant for crud-route fragments.
 func deepEqual(a, b any) bool {
 	switch av := a.(type) {
 	case map[string]any:
