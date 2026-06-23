@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -218,6 +222,125 @@ func TestLookupDynamicCLICommandConflictHasGlobalRemediation(t *testing.T) {
 	}
 }
 
+func TestPluginInstallGlobalDependenciesInstallsClosure(t *testing.T) {
+	cwd := chdirTemp(t)
+	global := t.TempDir()
+	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
+
+	alphaScript := "#!/bin/sh\nset -eu\n" +
+		"test -f \"$WFCTL_GLOBAL_PLUGIN_DIR/beta/plugin.json\"\n" +
+		"echo beta-manifest-ok\n"
+	alphaTarball := buildPluginTarGz(t, "alpha", []byte(alphaScript), minimalPluginJSON("alpha", "2.0.0"))
+	betaTarball := buildPluginTarGz(t, "beta", []byte("#!/bin/sh\necho beta\n"), minimalPluginJSON("beta", "2.0.0"))
+
+	var alphaManifest, betaManifest RegistryManifest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/alpha/manifest.json":
+			writeHTTPJSON(t, w, alphaManifest)
+		case "/plugins/beta/manifest.json":
+			writeHTTPJSON(t, w, betaManifest)
+		case "/download/alpha.tar.gz":
+			_, _ = w.Write(alphaTarball)
+		case "/download/beta.tar.gz":
+			_, _ = w.Write(betaTarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	alphaManifest = testRegistryManifest("alpha", "2.0.0", srv.URL+"/download/alpha.tar.gz", sha256Hex(alphaTarball))
+	alphaManifest.Dependencies = []PluginDependency{{Name: "beta", MinVersion: "2.0.0"}}
+	alphaManifest.Capabilities = &RegistryCapabilities{
+		CLICommands: []RegistryCLICommand{{Name: "alpha"}},
+	}
+	betaManifest = testRegistryManifest("beta", "2.0.0", srv.URL+"/download/beta.tar.gz", sha256Hex(betaTarball))
+
+	if err := runPluginInstall([]string{"-g", "-config", writeTestRegistryConfig(t, srv.URL), "alpha"}); err != nil {
+		t.Fatalf("runPluginInstall -g alpha: %v", err)
+	}
+
+	if got := readInstalledVersion(filepath.Join(global, "alpha")); got != "v2.0.0" {
+		t.Fatalf("alpha version = %q, want v2.0.0", got)
+	}
+	if got := readInstalledVersion(filepath.Join(global, "beta")); got != "2.0.0" {
+		t.Fatalf("beta version = %q, want 2.0.0", got)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".wfctl-lock.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("global dependency install wrote .wfctl-lock.yaml, err=%v", err)
+	}
+
+	entry, err := lookupDynamicCLICommand("alpha")
+	if err != nil {
+		t.Fatalf("lookup alpha command: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("alpha CLI command was not registered")
+	}
+	out, err := captureStdout(t, func() error {
+		return DispatchCLICommand(entry, []string{"alpha"})
+	})
+	if err != nil {
+		t.Fatalf("dispatch alpha command: %v", err)
+	}
+	if !strings.Contains(out, "beta-manifest-ok") {
+		t.Fatalf("alpha output = %q, want beta manifest proof", out)
+	}
+}
+
+func TestPluginGlobalUpdateDependencyFailurePreservesPreviousInstall(t *testing.T) {
+	global := t.TempDir()
+	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
+	writeInstalledPlugin(t, global, "alpha", "1.0.0")
+	writeInstalledPlugin(t, global, "beta", "1.0.0")
+	writeInstalledPlugin(t, global, "gamma", "1.0.0")
+
+	alphaTarball := buildPluginTarGz(t, "alpha", []byte("#!/bin/sh\necho alpha v2\n"), minimalPluginJSON("alpha", "2.0.0"))
+	betaTarball := buildPluginTarGz(t, "beta", []byte("#!/bin/sh\necho beta v2\n"), minimalPluginJSON("beta", "2.0.0"))
+	gammaTarball := buildPluginTarGz(t, "gamma", []byte("#!/bin/sh\necho gamma v2\n"), minimalPluginJSON("gamma", "2.0.0"))
+
+	var alphaManifest, betaManifest, gammaManifest RegistryManifest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/plugins/alpha/manifest.json":
+			writeHTTPJSON(t, w, alphaManifest)
+		case "/plugins/beta/manifest.json":
+			writeHTTPJSON(t, w, betaManifest)
+		case "/plugins/gamma/manifest.json":
+			writeHTTPJSON(t, w, gammaManifest)
+		case "/download/alpha.tar.gz":
+			_, _ = w.Write(alphaTarball)
+		case "/download/beta.tar.gz":
+			_, _ = w.Write(betaTarball)
+		case "/download/gamma.tar.gz":
+			_, _ = w.Write(gammaTarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	alphaManifest = testRegistryManifest("alpha", "2.0.0", srv.URL+"/download/alpha.tar.gz", sha256Hex(alphaTarball))
+	alphaManifest.Dependencies = []PluginDependency{
+		{Name: "beta", MinVersion: "2.0.0"},
+		{Name: "gamma", MinVersion: "2.0.0"},
+	}
+	betaManifest = testRegistryManifest("beta", "2.0.0", srv.URL+"/download/beta.tar.gz", sha256Hex(betaTarball))
+	gammaManifest = testRegistryManifest("gamma", "2.0.0", srv.URL+"/download/gamma.tar.gz", strings.Repeat("0", 64))
+
+	err := runPluginUpdate([]string{"-g", "-config", writeTestRegistryConfig(t, srv.URL), "alpha"})
+	if err == nil {
+		t.Fatal("expected dependency update failure")
+	}
+
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if got := readInstalledVersion(filepath.Join(global, name)); got != "1.0.0" {
+			t.Fatalf("%s version after failed transaction = %q, want 1.0.0", name, got)
+		}
+	}
+}
+
 func chdirTemp(t *testing.T) string {
 	t.Helper()
 	orig, err := os.Getwd()
@@ -268,5 +391,31 @@ func writeInstalledCLIPlugin(t *testing.T, root, name, version, command string) 
 	manifest := `{"name":"` + name + `","version":"` + version + `","author":"tester","description":"test plugin","capabilities":{"cliCommands":[{"name":"` + command + `","description":"test command"}]}}`
 	if err := os.WriteFile(filepath.Join(root, name, "plugin.json"), []byte(manifest), 0o640); err != nil {
 		t.Fatalf("write cli plugin manifest: %v", err)
+	}
+}
+
+func testRegistryManifest(name, version, url, checksum string) RegistryManifest {
+	return RegistryManifest{
+		Name:        name,
+		Version:     version,
+		Author:      "tester",
+		Description: "test plugin",
+		Type:        "external",
+		Tier:        "community",
+		License:     "MIT",
+		Downloads: []PluginDownload{{
+			OS:     runtime.GOOS,
+			Arch:   runtime.GOARCH,
+			URL:    url,
+			SHA256: checksum,
+		}},
+	}
+}
+
+func writeHTTPJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Fatalf("encode json: %v", err)
 	}
 }

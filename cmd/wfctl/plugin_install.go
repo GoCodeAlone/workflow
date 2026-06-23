@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -278,6 +279,17 @@ func runPluginInstall(args []string) error {
 		manifest = manifestForCompatibilityVersion(manifest, index, decision.Version)
 	}
 
+	if global {
+		if err := installGlobalPluginTransaction(pluginDirVal, pluginName, manifest, *cfgPath, *skipChecksum); err != nil {
+			if requestedVersion != "" && requestedVersion != registryVersion {
+				return fmt.Errorf("requested version %s not available for %q (registry manifest is at %s): %w",
+					requestedVersion, pluginName, registryVersion, err)
+			}
+			return err
+		}
+		return nil
+	}
+
 	// Resolve and install dependencies before installing the plugin itself.
 	if len(manifest.Dependencies) > 0 {
 		resolved := make(map[string]string)
@@ -535,6 +547,97 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	return nil
 }
 
+func installGlobalPluginTransaction(pluginDir, pluginName string, manifest *RegistryManifest, cfgPath string, skipChecksum bool) error {
+	parentDir := filepath.Dir(pluginDir)
+	if err := os.MkdirAll(parentDir, 0750); err != nil {
+		return fmt.Errorf("create global plugin parent dir: %w", err)
+	}
+	stagingRoot, err := os.MkdirTemp(parentDir, ".wfctl-global-install-*")
+	if err != nil {
+		return fmt.Errorf("create global plugin staging root: %w", err)
+	}
+	defer os.RemoveAll(stagingRoot) //nolint:errcheck
+
+	prev := installSkipLockfileUpdate
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = prev }()
+
+	if len(manifest.Dependencies) > 0 {
+		resolved := make(map[string]string)
+		if err := resolveDependencies(pluginName, manifest, stagingRoot, cfgPath, []string{}, resolved); err != nil {
+			return fmt.Errorf("resolve dependencies for %q: %w", pluginName, err)
+		}
+	}
+	if err := installPluginFromManifest(stagingRoot, pluginName, manifest, nil, skipChecksum); err != nil {
+		return err
+	}
+
+	return commitGlobalPluginTransaction(stagingRoot, pluginDir)
+}
+
+func commitGlobalPluginTransaction(stagingRoot, pluginDir string) error {
+	entries, err := os.ReadDir(stagingRoot)
+	if err != nil {
+		return fmt.Errorf("read global plugin staging root: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+	if err := os.MkdirAll(pluginDir, 0750); err != nil {
+		return fmt.Errorf("create global plugin dir: %w", err)
+	}
+	backupRoot, err := os.MkdirTemp(filepath.Dir(pluginDir), ".wfctl-global-backup-*")
+	if err != nil {
+		return fmt.Errorf("create global plugin backup root: %w", err)
+	}
+	defer os.RemoveAll(backupRoot) //nolint:errcheck
+
+	type movedPlugin struct {
+		name      string
+		hadBackup bool
+	}
+	var moved []movedPlugin
+	rollback := func() {
+		for i := len(moved) - 1; i >= 0; i-- {
+			name := moved[i].name
+			target := filepath.Join(pluginDir, name)
+			_ = os.RemoveAll(target) //nolint:errcheck
+			if moved[i].hadBackup {
+				_ = os.Rename(filepath.Join(backupRoot, name), target) //nolint:errcheck
+			}
+		}
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		source := filepath.Join(stagingRoot, name)
+		target := filepath.Join(pluginDir, name)
+		backup := filepath.Join(backupRoot, name)
+
+		hadBackup := false
+		if _, statErr := os.Stat(target); statErr == nil {
+			hadBackup = true
+			if err := os.Rename(target, backup); err != nil {
+				rollback()
+				return fmt.Errorf("preserve existing global plugin dir %s: %w", target, err)
+			}
+		} else if !os.IsNotExist(statErr) {
+			rollback()
+			return fmt.Errorf("stat global plugin dir %s: %w", target, statErr)
+		}
+
+		moved = append(moved, movedPlugin{name: name, hadBackup: hadBackup})
+		if err := os.Rename(source, target); err != nil {
+			rollback()
+			return fmt.Errorf("install global plugin dir %s: %w", target, err)
+		}
+	}
+
+	return nil
+}
+
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
 	var pluginDirVal string
@@ -699,6 +802,9 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		if global {
+			return installGlobalPluginTransaction(pluginDirVal, pluginName, manifest, *cfgPath, *skipChecksum)
+		}
 		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
@@ -720,6 +826,9 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		if global {
+			return installGlobalPluginTransaction(pluginDirVal, pluginName, manifest, *cfgPath, *skipChecksum)
+		}
 		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
