@@ -127,18 +127,36 @@ func (s *Server) handleGetModuleSchema(_ context.Context, req mcp.CallToolReques
 
 	example := generateModuleExample(ms)
 
-	result := map[string]any{
-		"type":          ms.Type,
-		"label":         ms.Label,
-		"category":      ms.Category,
-		"description":   ms.Description,
-		"inputs":        ms.Inputs,
-		"outputs":       ms.Outputs,
-		"configFields":  ms.ConfigFields,
-		"defaultConfig": ms.DefaultConfig,
-		"example":       example,
-	}
+	result := moduleSchemaToMap(ms)
+	result["example"] = example
 	return marshalToolResult(result)
+}
+
+// moduleSchemaToMap serializes a ModuleSchema into the get_module_schema tool's
+// output shape, including ALL fields. D24: the prior hand-map literal silently
+// dropped additive fields — MaxIncoming/MaxOutgoing and the Assembly Grammar
+// fields (Provides/Requires/Attaches/RouteMiddlewares/Fragment/RuntimeHooks) —
+// so agents consuming get_module_schema never saw them. Kept pure (no server
+// state) so the serialization is unit-testable directly.
+func moduleSchemaToMap(ms *schema.ModuleSchema) map[string]any {
+	return map[string]any{
+		"type":             ms.Type,
+		"label":            ms.Label,
+		"category":         ms.Category,
+		"description":      ms.Description,
+		"inputs":           ms.Inputs,
+		"outputs":          ms.Outputs,
+		"configFields":     ms.ConfigFields,
+		"defaultConfig":    ms.DefaultConfig,
+		"maxIncoming":      ms.MaxIncoming,
+		"maxOutgoing":      ms.MaxOutgoing,
+		"provides":         ms.Provides,
+		"requires":         ms.Requires,
+		"attaches":         ms.Attaches,
+		"routeMiddlewares": ms.RouteMiddlewares,
+		"fragment":         ms.Fragment,
+		"runtimeHooks":     ms.RuntimeHooks,
+	}
 }
 
 func (s *Server) handleGetStepSchema(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
