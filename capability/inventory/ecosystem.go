@@ -10,6 +10,7 @@ import (
 	"time"
 
 	workflowplugin "github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/schema"
 )
 
 // EcosystemOptions controls ecosystem capability inventory generation.
@@ -173,6 +174,7 @@ func collectLocalProviders(builder *inventoryBuilder, repoRoot string) (int, err
 			Dependencies:  dependencyNames(manifest.Dependencies),
 			Path:          manifestPath,
 			Raw:           manifestRawCapabilities(manifest),
+			Grammar:       manifest.Grammar,
 		})
 		count++
 	}
@@ -261,6 +263,7 @@ type providerInput struct {
 	Dependencies  []string
 	Path          string
 	Raw           []rawCapability
+	Grammar       map[string]schema.GrammarDecl
 }
 
 type inventoryBuilder struct {
@@ -379,6 +382,9 @@ func mergeProvider(cap *Capability, input providerInput, raw rawCapability) {
 		Source:        input.Source,
 		Capabilities:  []string{rawName},
 		Dependencies:  append([]string(nil), input.Dependencies...),
+		// P5/D26 single-source: grammar is carried from the first declaring
+		// provider only; the existing-provider branch above leaves it untouched.
+		Grammar: input.Grammar,
 	})
 }
 

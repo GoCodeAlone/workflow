@@ -42,18 +42,56 @@ type ServiceIODef struct {
 	Description string `json:"description,omitempty"`
 }
 
+// AttachSpec declares how a module attaches to another (Category A): To = target
+// module type; Emit = the entry-point section key to emit (e.g. "workflows.http").
+type AttachSpec struct {
+	To   string `json:"to,omitempty" yaml:"to,omitempty"`
+	Emit string `json:"emit,omitempty" yaml:"emit,omitempty"`
+}
+
+// FragmentSpec declares a YAML fragment this module emits (Category A): Kind names a
+// closed-set template; Fields are required substitution placeholders (validated present
+// at grammar-load, D20).
+type FragmentSpec struct {
+	Kind   string   `json:"kind" yaml:"kind"`
+	Fields []string `json:"fields,omitempty" yaml:"fields,omitempty"`
+}
+
 // ModuleSchema describes the full configuration schema for a module type.
+//
+// Grammar fields (D7 — extends ModuleSchema, one source of truth):
+//   - Category A (declarative-emittable): Provides/Requires/Attaches/RouteMiddlewares/Fragment.
+//   - Category B (documented runtime preconditions, ⊥ emit): RuntimeHooks (D3).
 type ModuleSchema struct {
-	Type          string           `json:"type"`
-	Label         string           `json:"label"`
-	Category      string           `json:"category"`
-	Description   string           `json:"description,omitempty"`
-	Inputs        []ServiceIODef   `json:"inputs,omitempty"`
-	Outputs       []ServiceIODef   `json:"outputs,omitempty"`
-	ConfigFields  []ConfigFieldDef `json:"configFields"`
-	DefaultConfig map[string]any   `json:"defaultConfig,omitempty"`
-	MaxIncoming   *int             `json:"maxIncoming,omitempty"` // nil=unlimited, 0=none, N=limit
-	MaxOutgoing   *int             `json:"maxOutgoing,omitempty"`
+	Type          string           `json:"type" yaml:"type"`
+	Label         string           `json:"label" yaml:"label"`
+	Category      string           `json:"category" yaml:"category"`
+	Description   string           `json:"description,omitempty" yaml:"description,omitempty"`
+	Inputs        []ServiceIODef   `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+	Outputs       []ServiceIODef   `json:"outputs,omitempty" yaml:"outputs,omitempty"`
+	ConfigFields  []ConfigFieldDef `json:"configFields" yaml:"configFields"`
+	DefaultConfig map[string]any   `json:"defaultConfig,omitempty" yaml:"defaultConfig,omitempty"`
+	MaxIncoming   *int             `json:"maxIncoming,omitempty" yaml:"maxIncoming,omitempty"` // nil=unlimited, 0=none, N=limit
+	MaxOutgoing   *int             `json:"maxOutgoing,omitempty" yaml:"maxOutgoing,omitempty"`
+
+	// Assembly Grammar (D7). Additive; all optional (omitzero via omitempty).
+	Provides         []string      `json:"provides,omitempty" yaml:"provides,omitempty"`
+	Requires         []string      `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Attaches         *AttachSpec   `json:"attaches,omitempty" yaml:"attaches,omitempty"`
+	RouteMiddlewares []string      `json:"routeMiddlewares,omitempty" yaml:"routeMiddlewares,omitempty"`
+	Fragment         *FragmentSpec `json:"fragment,omitempty" yaml:"fragment,omitempty"`
+	RuntimeHooks     []string      `json:"runtimeHooks,omitempty" yaml:"runtimeHooks,omitempty"`
+}
+
+// GrammarDecl is the plugin-manifest grammar subset (a ModuleSchema minus the
+// non-grammar fields) — used in PluginManifest.Grammar map[string]GrammarDecl (Task 2).
+type GrammarDecl struct {
+	Provides         []string      `json:"provides,omitempty" yaml:"provides,omitempty"`
+	Requires         []string      `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Attaches         *AttachSpec   `json:"attaches,omitempty" yaml:"attaches,omitempty"`
+	RouteMiddlewares []string      `json:"routeMiddlewares,omitempty" yaml:"routeMiddlewares,omitempty"`
+	Fragment         *FragmentSpec `json:"fragment,omitempty" yaml:"fragment,omitempty"`
+	RuntimeHooks     []string      `json:"runtimeHooks,omitempty" yaml:"runtimeHooks,omitempty"`
 }
 
 // ModuleSchemaRegistry holds all known module configuration schemas.

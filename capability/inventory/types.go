@@ -2,6 +2,8 @@
 // plugins, registries, and applications.
 package inventory
 
+import "github.com/GoCodeAlone/workflow/schema"
+
 // Inventory is the top-level ecosystem capability report.
 type Inventory struct {
 	Metadata     Metadata     `json:"metadata"`
@@ -43,6 +45,12 @@ type Provider struct {
 	Source        string   `json:"source,omitempty"`
 	Capabilities  []string `json:"capabilities,omitempty"`
 	Dependencies  []string `json:"dependencies,omitempty"`
+
+	// Grammar carries this provider's Assembly Grammar (design D1/D26), retained
+	// from the sibling PluginManifest.Grammar field. Populated for local-plugin
+	// providers; nil for registry providers (registry-manifest grammar is M2).
+	// Single-source: set on first provider insert (P5).
+	Grammar map[string]schema.GrammarDecl `json:"grammar,omitempty"`
 }
 
 // Catalog is the docs-facing capability report derived from Inventory.
