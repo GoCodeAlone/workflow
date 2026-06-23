@@ -171,6 +171,53 @@ func TestPluginUpdateGlobalRejectsProjectVersionPin(t *testing.T) {
 	}
 }
 
+func TestLookupDynamicCLICommandUsesGlobalDir(t *testing.T) {
+	global := t.TempDir()
+	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
+	writeInstalledCLIPlugin(t, global, "portfolio", "1.0.0", "portfolio")
+
+	entry, err := lookupDynamicCLICommand("portfolio")
+	if err != nil {
+		t.Fatalf("lookupDynamicCLICommand: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("lookupDynamicCLICommand returned nil entry")
+	}
+	wantBinary := filepath.Join(global, "portfolio", "portfolio")
+	if entry.BinaryPath != wantBinary {
+		t.Fatalf("BinaryPath = %q, want %q", entry.BinaryPath, wantBinary)
+	}
+}
+
+func TestLookupDynamicCLICommandStaticCommandWins(t *testing.T) {
+	global := t.TempDir()
+	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
+	writeInstalledPlugin(t, global, "validate", "1.0.0")
+
+	entry, err := lookupDynamicCLICommand("validate")
+	if err != nil {
+		t.Fatalf("lookupDynamicCLICommand static command: %v", err)
+	}
+	if entry != nil {
+		t.Fatalf("lookupDynamicCLICommand static command returned %#v, want nil", entry)
+	}
+}
+
+func TestLookupDynamicCLICommandConflictHasGlobalRemediation(t *testing.T) {
+	global := t.TempDir()
+	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
+	writeInstalledCLIPlugin(t, global, "alpha", "1.0.0", "portfolio")
+	writeInstalledCLIPlugin(t, global, "beta", "1.0.0", "portfolio")
+
+	_, err := lookupDynamicCLICommand("portfolio")
+	if err == nil {
+		t.Fatal("expected duplicate command error")
+	}
+	if !strings.Contains(err.Error(), "plugin list -g") || !strings.Contains(err.Error(), "plugin remove -g") {
+		t.Fatalf("error = %q, want global remediation hint", err)
+	}
+}
+
 func chdirTemp(t *testing.T) string {
 	t.Helper()
 	orig, err := os.Getwd()
@@ -212,5 +259,14 @@ func writeInstalledPlugin(t *testing.T, root, name, version string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\necho plugin\n"), 0o750); err != nil {
 		t.Fatalf("write installed plugin binary: %v", err)
+	}
+}
+
+func writeInstalledCLIPlugin(t *testing.T, root, name, version, command string) {
+	t.Helper()
+	writeInstalledPlugin(t, root, name, version)
+	manifest := `{"name":"` + name + `","version":"` + version + `","author":"tester","description":"test plugin","capabilities":{"cliCommands":[{"name":"` + command + `","description":"test command"}]}}`
+	if err := os.WriteFile(filepath.Join(root, name, "plugin.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatalf("write cli plugin manifest: %v", err)
 	}
 }
