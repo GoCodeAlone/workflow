@@ -35,6 +35,23 @@ func TestDefaultPlugins_UniqueNames(t *testing.T) {
 	}
 }
 
+// TestRemovedBuiltins_NotInDefaultPlugins asserts that the superseded built-in
+// plugins (gitlab, scanner) have been removed from DefaultPlugins and must now
+// be installed as external plugins. This is the TDD red-before-green guard
+// for the builtin->external migration.
+func TestRemovedBuiltins_NotInDefaultPlugins(t *testing.T) {
+	removed := map[string]bool{
+		"gitlab":  true,
+		"scanner": true,
+	}
+	for _, p := range DefaultPlugins() {
+		name := p.Name()
+		if removed[name] {
+			t.Errorf("DefaultPlugins() still returns removed built-in plugin %q — it must be installed as an external plugin now", name)
+		}
+	}
+}
+
 func TestDefaultPlugins_IndependentSlices(t *testing.T) {
 	a := DefaultPlugins()
 	b := DefaultPlugins()
