@@ -705,6 +705,7 @@ func runPluginUpdate(args []string) error {
 	addGlobalPluginFlags(fs, &global)
 	cfgPath := fs.String("config", "", "Registry config file path")
 	pinVersion := fs.String("version", "", "Pin to this specific version in wfctl.yaml (skips registry lookup)")
+	updateAll := fs.Bool("all", false, "Update all installed plugins in the active plugin directory")
 	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
 	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
 	compatMode := fs.String("compat-mode", "", "Compatibility mode for registry updates: enforce or warn")
@@ -727,6 +728,15 @@ func runPluginUpdate(args []string) error {
 	}
 	restoreDownloadProgress := setDownloadProgressQuiet(*quiet)
 	defer restoreDownloadProgress()
+	if *updateAll {
+		if fs.NArg() > 0 {
+			return fmt.Errorf("--all cannot be combined with an explicit plugin name")
+		}
+		if *pinVersion != "" {
+			return fmt.Errorf("--all cannot be combined with --version")
+		}
+		return updateAllInstalledPlugins(pluginDirVal, global, *cfgPath, *compatMode, *engineVersion, *forceCompat, *skipChecksum, *quiet)
+	}
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return fmt.Errorf("plugin name is required")
@@ -833,6 +843,63 @@ func runPluginUpdate(args []string) error {
 	}
 
 	return registryErr
+}
+
+func updateAllInstalledPlugins(pluginDir string, global bool, cfgPath, compatMode, engineVersion string, forceCompat, skipChecksum, quiet bool) error {
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No plugins installed.")
+			return nil
+		}
+		return fmt.Errorf("read plugin dir %q: %w", pluginDir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".installing") || strings.HasSuffix(name, ".uninstalling") {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		fmt.Println("No plugins installed.")
+		return nil
+	}
+
+	for _, name := range names {
+		args := []string{"-plugin-dir", pluginDir}
+		if global {
+			args = append(args, "-g")
+		}
+		if cfgPath != "" {
+			args = append(args, "-config", cfgPath)
+		}
+		if compatMode != "" {
+			args = append(args, "-compat-mode", compatMode)
+		}
+		if engineVersion != "" {
+			args = append(args, "-engine-version", engineVersion)
+		}
+		if forceCompat {
+			args = append(args, "-force")
+		}
+		if skipChecksum {
+			args = append(args, "-skip-checksum")
+		}
+		if quiet {
+			args = append(args, "-quiet")
+		}
+		args = append(args, name)
+		if err := runPluginUpdate(args); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runPluginRemove(args []string) error {

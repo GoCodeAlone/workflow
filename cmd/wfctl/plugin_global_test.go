@@ -289,7 +289,7 @@ func TestPluginInstallGlobalDependenciesInstallsClosure(t *testing.T) {
 	}
 }
 
-func TestPluginGlobalUpdateDependencyFailurePreservesPreviousInstall(t *testing.T) {
+func TestPluginUpdateGlobalDependencyFailurePreservesPreviousInstall(t *testing.T) {
 	global := t.TempDir()
 	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
 	writeInstalledPlugin(t, global, "alpha", "1.0.0")
