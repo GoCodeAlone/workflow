@@ -246,29 +246,25 @@ func main() {
 		updateNoticeDone = checkForUpdateNotice()
 	}
 
-	if _, isStatic := commands[cmd]; !isStatic {
-		registry, err := BuildCLIRegistry(defaultPluginCommandDir())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: load plugin CLI commands: %v\n", err) //nolint:gosec // G705
+	if entry, err := lookupDynamicCLICommand(cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
+		os.Exit(1)
+	} else if entry != nil {
+		if err := DispatchCLICommand(entry, os.Args[1:]); err != nil {
+			if isPromptCancelled(err) {
+				fmt.Fprintln(os.Stderr, "Cancelled.")
+				os.Exit(0)
+			}
+			fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
 			os.Exit(1)
 		}
-		if entry := registry.LookupCLICommand(cmd); entry != nil {
-			if err := DispatchCLICommand(entry, os.Args[1:]); err != nil {
-				if isPromptCancelled(err) {
-					fmt.Fprintln(os.Stderr, "Cancelled.")
-					os.Exit(0)
-				}
-				fmt.Fprintf(os.Stderr, "error: %v\n", err) //nolint:gosec // G705
-				os.Exit(1)
+		if updateNoticeDone != nil {
+			select {
+			case <-updateNoticeDone:
+			case <-time.After(time.Second):
 			}
-			if updateNoticeDone != nil {
-				select {
-				case <-updateNoticeDone:
-				case <-time.After(time.Second):
-				}
-			}
-			return
 		}
+		return
 	}
 
 	// Set up a context that is cancelled on SIGINT/SIGTERM so that long-running
@@ -305,6 +301,18 @@ func main() {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+func lookupDynamicCLICommand(cmd string) (*CLIRegistryEntry, error) {
+	if _, isStatic := commands[cmd]; isStatic {
+		return nil, nil
+	}
+	pluginDir := defaultGlobalPluginDir()
+	registry, err := BuildCLIRegistry(pluginDir)
+	if err != nil {
+		return nil, fmt.Errorf("load global plugin CLI commands from %s: %w; inspect with 'wfctl plugin list -g' and remove conflicts with 'wfctl plugin remove -g <name>'", pluginDir, err)
+	}
+	return registry.LookupCLICommand(cmd), nil
 }
 
 func defaultPluginCommandDir() string {

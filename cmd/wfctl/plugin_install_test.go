@@ -33,6 +33,21 @@ type captureTransport struct {
 	target string // host:port of the httptest.Server
 }
 
+func TestPluginUsageMentionsGlobalLifecycle(t *testing.T) {
+	var buf bytes.Buffer
+	prevOutput := flag.CommandLine.Output()
+	flag.CommandLine.SetOutput(&buf)
+	t.Cleanup(func() { flag.CommandLine.SetOutput(prevOutput) })
+
+	printPluginUsage()
+	out := buf.String()
+	for _, want := range []string{"-g", "-global", "WFCTL_GLOBAL_PLUGIN_DIR"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plugin usage missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func (ct *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ct.mu.Lock()
 	ct.header = req.Header.Get("Authorization")

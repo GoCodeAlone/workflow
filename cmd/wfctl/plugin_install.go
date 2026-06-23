@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -96,8 +97,10 @@ func formatPluginSearchResults(plugins []PluginSearchResult) string {
 func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ContinueOnError)
 	var pluginDirVal string
+	var global bool
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	addGlobalPluginFlags(fs, &global)
 	cfgPath := fs.String("config", "", "Registry config file path")
 	registryName := fs.String("registry", "", "Use a specific registry by name")
 	directURL := fs.String("url", "", "Install from a direct download URL (tar.gz archive)")
@@ -123,6 +126,12 @@ func runPluginInstall(args []string) error {
 	if err := fs.Parse(parsedArgs); err != nil {
 		return err
 	}
+	pluginDirVal = resolvePluginDir(pluginDirVal, global)
+	if global {
+		prev := installSkipLockfileUpdate
+		installSkipLockfileUpdate = true
+		defer func() { installSkipLockfileUpdate = prev }()
+	}
 	restoreDownloadProgress := setDownloadProgressQuiet(*quiet)
 	defer restoreDownloadProgress()
 	// Validate flag combinations before doing anything else.
@@ -139,6 +148,12 @@ func runPluginInstall(args []string) error {
 	}
 	if *locked && (*fromConfig != "" || *directURL != "" || *localPath != "" || fs.NArg() > 0) {
 		return fmt.Errorf("--locked is only supported for lockfile installs; run without plugin arguments, --from-config, --url, or --local")
+	}
+	if global && *locked {
+		return fmt.Errorf("--global and --locked cannot be combined")
+	}
+	if global && *directURL == "" && *localPath == "" && *fromConfig == "" && fs.NArg() < 1 {
+		return fmt.Errorf("--global install requires <name>, --url, --local, or --from-config")
 	}
 
 	// --from-config: batch install from workflow requires.plugins[].
@@ -262,6 +277,17 @@ func runPluginInstall(args []string) error {
 	registryVersion := manifest.Version
 	if decision.Version != "" && decision.Version != manifest.Version {
 		manifest = manifestForCompatibilityVersion(manifest, index, decision.Version)
+	}
+
+	if global {
+		if err := installGlobalPluginTransaction(pluginDirVal, pluginName, manifest, *cfgPath, *skipChecksum); err != nil {
+			if requestedVersion != "" && requestedVersion != registryVersion {
+				return fmt.Errorf("requested version %s not available for %q (registry manifest is at %s): %w",
+					requestedVersion, pluginName, registryVersion, err)
+			}
+			return err
+		}
+		return nil
 	}
 
 	// Resolve and install dependencies before installing the plugin itself.
@@ -521,11 +547,104 @@ func installPluginFromManifest(dataDir, pluginName string, manifest *RegistryMan
 	return nil
 }
 
+func installGlobalPluginTransaction(pluginDir, pluginName string, manifest *RegistryManifest, cfgPath string, skipChecksum bool) error {
+	parentDir := filepath.Dir(pluginDir)
+	if err := os.MkdirAll(parentDir, 0750); err != nil {
+		return fmt.Errorf("create global plugin parent dir: %w", err)
+	}
+	stagingRoot, err := os.MkdirTemp(parentDir, ".wfctl-global-install-*")
+	if err != nil {
+		return fmt.Errorf("create global plugin staging root: %w", err)
+	}
+	defer os.RemoveAll(stagingRoot) //nolint:errcheck
+
+	prev := installSkipLockfileUpdate
+	installSkipLockfileUpdate = true
+	defer func() { installSkipLockfileUpdate = prev }()
+
+	if len(manifest.Dependencies) > 0 {
+		resolved := make(map[string]string)
+		if err := resolveDependencies(pluginName, manifest, stagingRoot, cfgPath, []string{}, resolved); err != nil {
+			return fmt.Errorf("resolve dependencies for %q: %w", pluginName, err)
+		}
+	}
+	if err := installPluginFromManifest(stagingRoot, pluginName, manifest, nil, skipChecksum); err != nil {
+		return err
+	}
+
+	return commitGlobalPluginTransaction(stagingRoot, pluginDir)
+}
+
+func commitGlobalPluginTransaction(stagingRoot, pluginDir string) error {
+	entries, err := os.ReadDir(stagingRoot)
+	if err != nil {
+		return fmt.Errorf("read global plugin staging root: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+
+	if err := os.MkdirAll(pluginDir, 0750); err != nil {
+		return fmt.Errorf("create global plugin dir: %w", err)
+	}
+	backupRoot, err := os.MkdirTemp(filepath.Dir(pluginDir), ".wfctl-global-backup-*")
+	if err != nil {
+		return fmt.Errorf("create global plugin backup root: %w", err)
+	}
+	defer os.RemoveAll(backupRoot) //nolint:errcheck
+
+	type movedPlugin struct {
+		name      string
+		hadBackup bool
+	}
+	var moved []movedPlugin
+	rollback := func() {
+		for i := len(moved) - 1; i >= 0; i-- {
+			name := moved[i].name
+			target := filepath.Join(pluginDir, name)
+			_ = os.RemoveAll(target) //nolint:errcheck
+			if moved[i].hadBackup {
+				_ = os.Rename(filepath.Join(backupRoot, name), target) //nolint:errcheck
+			}
+		}
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		source := filepath.Join(stagingRoot, name)
+		target := filepath.Join(pluginDir, name)
+		backup := filepath.Join(backupRoot, name)
+
+		hadBackup := false
+		if _, statErr := os.Stat(target); statErr == nil {
+			hadBackup = true
+			if err := os.Rename(target, backup); err != nil {
+				rollback()
+				return fmt.Errorf("preserve existing global plugin dir %s: %w", target, err)
+			}
+		} else if !os.IsNotExist(statErr) {
+			rollback()
+			return fmt.Errorf("stat global plugin dir %s: %w", target, statErr)
+		}
+
+		moved = append(moved, movedPlugin{name: name, hadBackup: hadBackup})
+		if err := os.Rename(source, target); err != nil {
+			rollback()
+			return fmt.Errorf("install global plugin dir %s: %w", target, err)
+		}
+	}
+
+	return nil
+}
+
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ContinueOnError)
 	var pluginDirVal string
+	var global bool
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	addGlobalPluginFlags(fs, &global)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin list [options]\n\nList installed plugins.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -533,6 +652,7 @@ func runPluginList(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	pluginDirVal = resolvePluginDir(pluginDirVal, global)
 
 	entries, err := os.ReadDir(pluginDirVal)
 	if os.IsNotExist(err) {
@@ -579,10 +699,13 @@ func runPluginList(args []string) error {
 func runPluginUpdate(args []string) error {
 	fs := flag.NewFlagSet("plugin update", flag.ContinueOnError)
 	var pluginDirVal string
+	var global bool
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	addGlobalPluginFlags(fs, &global)
 	cfgPath := fs.String("config", "", "Registry config file path")
 	pinVersion := fs.String("version", "", "Pin to this specific version in wfctl.yaml (skips registry lookup)")
+	updateAll := fs.Bool("all", false, "Update all installed plugins in the active plugin directory")
 	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
 	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
 	compatMode := fs.String("compat-mode", "", "Compatibility mode for registry updates: enforce or warn")
@@ -597,8 +720,23 @@ func runPluginUpdate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	pluginDirVal = resolvePluginDir(pluginDirVal, global)
+	if global {
+		prev := installSkipLockfileUpdate
+		installSkipLockfileUpdate = true
+		defer func() { installSkipLockfileUpdate = prev }()
+	}
 	restoreDownloadProgress := setDownloadProgressQuiet(*quiet)
 	defer restoreDownloadProgress()
+	if *updateAll {
+		if fs.NArg() > 0 {
+			return fmt.Errorf("--all cannot be combined with an explicit plugin name")
+		}
+		if *pinVersion != "" {
+			return fmt.Errorf("--all cannot be combined with --version")
+		}
+		return updateAllInstalledPlugins(pluginDirVal, global, *cfgPath, *compatMode, *engineVersion, *forceCompat, *skipChecksum, *quiet)
+	}
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return fmt.Errorf("plugin name is required")
@@ -608,6 +746,9 @@ func runPluginUpdate(args []string) error {
 
 	// --version: pin a specific version in the manifest without hitting registry.
 	if *pinVersion != "" {
+		if global {
+			return fmt.Errorf("--version updates wfctl.yaml and cannot be combined with --global")
+		}
 		if err := updateManifestVersion(pluginName, *pinVersion, *manifestPath, *lockPath); err != nil {
 			return err
 		}
@@ -671,6 +812,9 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		if global {
+			return installGlobalPluginTransaction(pluginDirVal, pluginName, manifest, *cfgPath, *skipChecksum)
+		}
 		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
@@ -692,17 +836,79 @@ func runPluginUpdate(args []string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Updating from %s to %s...\n", installedVer, manifest.Version)
+		if global {
+			return installGlobalPluginTransaction(pluginDirVal, pluginName, manifest, *cfgPath, *skipChecksum)
+		}
 		return installPluginFromManifest(pluginDirVal, pluginName, manifest, nil, *skipChecksum)
 	}
 
 	return registryErr
 }
 
+func updateAllInstalledPlugins(pluginDir string, global bool, cfgPath, compatMode, engineVersion string, forceCompat, skipChecksum, quiet bool) error {
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No plugins installed.")
+			return nil
+		}
+		return fmt.Errorf("read plugin dir %q: %w", pluginDir, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".installing") || strings.HasSuffix(name, ".uninstalling") {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		fmt.Println("No plugins installed.")
+		return nil
+	}
+
+	for _, name := range names {
+		args := []string{"-plugin-dir", pluginDir}
+		if global {
+			args = append(args, "-g")
+		}
+		if cfgPath != "" {
+			args = append(args, "-config", cfgPath)
+		}
+		if compatMode != "" {
+			args = append(args, "-compat-mode", compatMode)
+		}
+		if engineVersion != "" {
+			args = append(args, "-engine-version", engineVersion)
+		}
+		if forceCompat {
+			args = append(args, "-force")
+		}
+		if skipChecksum {
+			args = append(args, "-skip-checksum")
+		}
+		if quiet {
+			args = append(args, "-quiet")
+		}
+		args = append(args, name)
+		if err := runPluginUpdate(args); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runPluginRemove(args []string) error {
 	fs := flag.NewFlagSet("plugin remove", flag.ContinueOnError)
 	var pluginDirVal string
+	var global bool
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	addGlobalPluginFlags(fs, &global)
 	manifestPath := fs.String("manifest", wfctlManifestPath, "Path to wfctl.yaml manifest")
 	lockPath := fs.String("lock-file", wfctlLockPath, "Path to lockfile")
 	fs.Usage = func() {
@@ -712,6 +918,7 @@ func runPluginRemove(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	pluginDirVal = resolvePluginDir(pluginDirVal, global)
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return fmt.Errorf("plugin name is required")
@@ -725,6 +932,16 @@ func runPluginRemove(args []string) error {
 	binaryInstalled := true
 	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
 		binaryInstalled = false
+	}
+	if global {
+		if !binaryInstalled {
+			return fmt.Errorf("plugin %q is not installed", pluginName)
+		}
+		if err := os.RemoveAll(pluginDir); err != nil {
+			return fmt.Errorf("remove plugin %q: %w", pluginName, err)
+		}
+		fmt.Printf("Removed plugin %q\n", pluginName)
+		return nil
 	}
 
 	// Check if the plugin is in the manifest.
@@ -763,8 +980,10 @@ func runPluginRemove(args []string) error {
 func runPluginInfo(args []string) error {
 	fs := flag.NewFlagSet("plugin info", flag.ContinueOnError)
 	var pluginDirVal string
+	var global bool
 	fs.StringVar(&pluginDirVal, "plugin-dir", defaultDataDir, "Plugin directory")
 	fs.StringVar(&pluginDirVal, "data-dir", defaultDataDir, "Plugin directory (deprecated, use -plugin-dir)")
+	addGlobalPluginFlags(fs, &global)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: wfctl plugin info [options] <name>\n\nShow details about an installed plugin.\n\nOptions:\n")
 		fs.PrintDefaults()
@@ -772,6 +991,7 @@ func runPluginInfo(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	pluginDirVal = resolvePluginDir(pluginDirVal, global)
 	if fs.NArg() < 1 {
 		fs.Usage()
 		return fmt.Errorf("plugin name is required")
