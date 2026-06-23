@@ -81,3 +81,12 @@ func httpWorkflow(mods []config.ModuleConfig) map[string]any {
 		},
 	}
 }
+
+// WirePublic exposes the v0.82.0 in-code wire() for the grammar-driven wire's
+// MC-parity regression test (capability/scaffold). Behavior is unchanged; this
+// is a thin test seam only. Once the assembler routes through scaffold.GrammarWire
+// (post glue-sweep), wire() remains as the parity reference.
+func WirePublic(mods []config.ModuleConfig) []config.ModuleConfig { return wire(mods) }
+
+// HttpWorkflowPublic exposes the v0.82.0 httpWorkflow() for the parity test.
+func HttpWorkflowPublic(mods []config.ModuleConfig) map[string]any { return httpWorkflow(mods) }
