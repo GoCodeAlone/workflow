@@ -265,7 +265,11 @@ func runCapabilityRecommend(args []string, out io.Writer) error {
 	var buf bytes.Buffer
 	switch format {
 	case "json":
-		if err := writeCapabilityJSON(&buf, rec); err != nil {
+		// Emit the agent-consumable wizard state (G4/§C4): chosen providers
+		// (+facts), alternatives, glue-gaps, and NextSteps. The plain recommend
+		// command has no grammar wire in flight, so glue-gaps/hooks are empty
+		// here; the scaffold flow populates them when it runs the wire.
+		if err := writeCapabilityJSON(&buf, recommend.BuildWizardState(rec, nil, nil)); err != nil {
 			return err
 		}
 	case "md", "markdown":
