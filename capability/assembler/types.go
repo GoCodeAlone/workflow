@@ -9,10 +9,17 @@ import "github.com/GoCodeAlone/workflow/config"
 // required external plugins, findings (NEXT_STEPS), + unmatched requested caps.
 type AssembledApp struct {
 	Modules   []config.ModuleConfig
-	Workflows map[string]any // {http: {server: <name>, router: <name>}} — P1
+	Workflows map[string]any // {http: {server, router, routes[]?}} — P1 + crud routes
 	Requires  config.RequiresConfig
 	Findings  []Finding
 	Unmatched []string
+
+	// GlueGaps are unselected Attaches.To targets the grammar could not resolve
+	// (NEXT_STEPS). RuntimeHooks are the Category-B runtime preconditions the
+	// grammar documented (fired by the engine at boot; ⊥ offline-emit). Both
+	// feed the agent wizard-state (Task 8).
+	GlueGaps     []string
+	RuntimeHooks []string
 }
 
 // Finding is a NEXT_STEPS item (V8 honest wiring).

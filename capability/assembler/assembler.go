@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/GoCodeAlone/workflow/capability/inventory"
+	"github.com/GoCodeAlone/workflow/capability/scaffold"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
 	"gopkg.in/yaml.v3"
@@ -41,10 +42,29 @@ func Assemble(inv *inventory.Inventory, in AssemblyInput, reg *schema.ModuleSche
 		app.Modules = append(app.Modules, config.ModuleConfig{Name: name, Type: em.Type, Config: em.Config})
 	}
 
-	// 4. wiring: entry-point ensure + dependsOn (C4) + workflows.http (P1:
-	//    without it http.server.Start() fails "no router configured")
-	app.Modules = wire(app.Modules)
-	app.Workflows = httpWorkflow(app.Modules)
+	// 4. wiring: grammar-driven (C2; replaces v0.82.0's in-code wire). Merge
+	//    engine grammar ∪ plugin grammar, then apply Category-A glue: Requires
+	//    → ensure-selected + DependsOn; Attaches → entry-point section;
+	//    RouteMiddlewares + Fragment → routes. This is what produces a functional
+	//    scaffold (e.g. the crud-route routes an api.handler emits). Glue-gaps +
+	//    Category-B runtime hooks surface as NEXT_STEPS findings. The MC-parity
+	//    test (capability/assembler/grammar_parity_test.go) proves this reproduces
+	//    v0.82.0 wiring.
+	merged, hooks, err := scaffold.MergeGrammar(reg, inv)
+	if err != nil {
+		return nil, fmt.Errorf("assemble: grammar merge: %w", err)
+	}
+	res := scaffold.GrammarWire(app.Modules, merged, reg, httpAlwaysSelect())
+	app.Modules = res.Modules
+	app.Workflows = res.Workflows
+	app.GlueGaps = res.GlueGaps
+	app.RuntimeHooks = hooks
+	for _, g := range res.GlueGaps {
+		app.Findings = append(app.Findings, Finding{Level: "warn", Code: "glue-gap", Message: g})
+	}
+	for _, h := range hooks {
+		app.Findings = append(app.Findings, Finding{Level: "info", Code: "runtime-hook", Message: "runtime precondition (fired at boot): " + h})
+	}
 
 	// 5. requires.plugins — external/local-plugin providers of REQUESTED+MATCHED
 	//    capabilities only (D2). Iterating all inv.Capabilities would inflate the
@@ -99,6 +119,14 @@ func MarshalConfig(app *AssembledApp) ([]byte, error) {
 }
 
 // defaultName + envPrefix live in config.go (shared by config-gen).
+
+// httpAlwaysSelect returns the entry-point types always materialized for an HTTP
+// scaffold (M1 is HTTP-only, V12): http.router (which Requires http.server) +
+// health.checker (the /healthz binding precondition). This reproduces v0.82.0's
+// in-code wire() always-ensure behavior; the MC-parity test guards it.
+func httpAlwaysSelect() []string {
+	return []string{"http.router", "health.checker"}
+}
 
 func appendUniquePlugin(plugs []config.PluginRequirement, name string) []config.PluginRequirement {
 	for _, p := range plugs {
