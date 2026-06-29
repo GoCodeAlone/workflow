@@ -114,20 +114,42 @@ var projectTemplates = map[string]projectTemplate{
 	},
 }
 
+// runInit is now a deprecation alias for `wfctl scaffold template` (design D5,
+// ADR 0050; the live precedent is runMigrateDeprecated). It prints a one-release
+// notice to stderr then delegates to the shared template-scaffold core, so
+// existing `wfctl init` scripts keep working unchanged.
 func runInit(args []string) error {
-	fs2 := flag.NewFlagSet("init", flag.ContinueOnError)
+	fmt.Fprintln(os.Stderr,
+		"wfctl init is being folded into wfctl scaffold template. "+
+			"The old form is supported for one release; please update your scripts.")
+	return scaffoldFromTemplate("init", args)
+}
+
+// runScaffoldTemplate implements `wfctl scaffold template` — the template owner
+// after the init fold (D5). It shares the scaffoldFromTemplate core with the
+// deprecated `wfctl init`.
+func runScaffoldTemplate(args []string) error {
+	return scaffoldFromTemplate("scaffold template", args)
+}
+
+// scaffoldFromTemplate is the shared project-template core: parse flags, render
+// the chosen template, print next steps. flagSetName names the FlagSet (and thus
+// the help text) so the deprecated `init` and the canonical `scaffold template`
+// share one implementation.
+func scaffoldFromTemplate(flagSetName string, args []string) error {
+	fs2 := flag.NewFlagSet(flagSetName, flag.ContinueOnError)
 	tmplName := fs2.String("template", "api-service", "Project template to use")
 	author := fs2.String("author", "", "Author (GitHub username or org, used in go.mod module path)")
 	desc := fs2.String("description", "", "Project description")
 	output := fs2.String("output", "", "Output directory (defaults to project name)")
 	listTemplates := fs2.Bool("list", false, "List available templates and exit")
 	fs2.Usage = func() {
-		fmt.Fprintf(fs2.Output(), `Usage: wfctl init [options] <project-name>
+		fmt.Fprintf(fs2.Output(), `Usage: wfctl %s [options] <project-name>
 
-Scaffold a new workflow application project.
+Scaffold a new workflow application project from a template.
 
 Options:
-`)
+`, flagSetName)
 		fs2.PrintDefaults()
 		fmt.Fprintln(fs2.Output())
 		printTemplateList(fs2.Output())
