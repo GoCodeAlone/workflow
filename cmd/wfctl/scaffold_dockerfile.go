@@ -44,25 +44,6 @@ type scaffoldDockerfileArgs struct {
 }
 
 // runScaffold dispatches wfctl scaffold subcommands.
-func runScaffold(args []string) error {
-	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, `Usage: wfctl scaffold <subcommand> [options]
-
-Subcommands:
-  dockerfile   Generate a hardened Dockerfile.prebuilt
-
-Run 'wfctl scaffold <subcommand> -h' for subcommand-specific help.
-`)
-		return fmt.Errorf("subcommand required")
-	}
-	switch args[0] {
-	case "dockerfile":
-		return runScaffoldDockerfile(args[1:])
-	default:
-		return fmt.Errorf("unknown scaffold subcommand %q", args[0])
-	}
-}
-
 // runScaffoldDockerfile implements `wfctl scaffold dockerfile`.
 func runScaffoldDockerfile(args []string) error {
 	fs := flag.NewFlagSet("scaffold dockerfile", flag.ContinueOnError)

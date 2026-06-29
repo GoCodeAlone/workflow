@@ -156,7 +156,7 @@ var commands = map[string]func([]string) error{
 	"wizard":          runWizard,
 	"dev":             runDev,
 	"build":           runBuild,
-	"scaffold":        runScaffold,
+	"scaffold":        runScaffoldCmd,
 	"tenant":          runTenant,
 	"capability":      runCapability,
 }
