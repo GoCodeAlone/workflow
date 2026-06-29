@@ -207,27 +207,43 @@ func addAuthRoutesApp(app *AssembledApp) {
 
 // --- HTTP CRUD helpers ---
 
+// crudClient is a bounded HTTP client so a stalled server fails the test fast
+// (⊥ http.DefaultClient, which would hang until the global go test -timeout).
+var crudClient = &http.Client{Timeout: 5 * time.Second}
+
+// newReq builds a request bound to the test context (cancelled on test end).
+func newReq(t *testing.T, method, url string, body io.Reader) *http.Request {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, url, body)
+	if err != nil {
+		t.Fatalf("newReq %s %s: %v", method, url, err)
+	}
+	return req
+}
+
+func marshalBody(t *testing.T, body map[string]any) []byte {
+	t.Helper()
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+	return b
+}
+
 func httpDo(t *testing.T, base, method, path, token string, body map[string]any) int {
 	t.Helper()
 	var rdr io.Reader
 	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rdr = bytes.NewReader(b)
+		rdr = bytes.NewReader(marshalBody(t, body))
 	}
-	req, err := http.NewRequest(method, base+path, rdr)
-	if err != nil {
-		t.Fatal(err)
-	}
+	req := newReq(t, method, base+path, rdr)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := crudClient.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
@@ -238,13 +254,12 @@ func httpDo(t *testing.T, base, method, path, token string, body map[string]any)
 
 func httpCreate(t *testing.T, base, path, token string, body map[string]any) string {
 	t.Helper()
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequest(http.MethodPost, base+path, bytes.NewReader(b))
+	req := newReq(t, http.MethodPost, base+path, bytes.NewReader(marshalBody(t, body)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := crudClient.Do(req)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("POST %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
@@ -274,11 +289,11 @@ func httpUpdate(t *testing.T, base, path, token string, body map[string]any) {
 
 func httpGetBody(t *testing.T, base, path, token string) string {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, base+path, nil)
+	req := newReq(t, http.MethodGet, base+path, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := crudClient.Do(req)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("GET %s: %v", path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -291,10 +306,10 @@ func httpGetBody(t *testing.T, base, path, token string) string {
 // registerAndGetToken POSTs /auth/register and extracts the JWT from the response.
 func registerAndGetToken(t *testing.T, base string) string {
 	t.Helper()
-	body, _ := json.Marshal(map[string]any{"email": "crud@example.com", "name": "CRUD", "password": "pass12345"})
-	req, _ := http.NewRequest(http.MethodPost, base+"/auth/register", bytes.NewReader(body))
+	body := marshalBody(t, map[string]any{"email": "crud@example.com", "name": "CRUD", "password": "pass12345"})
+	req := newReq(t, http.MethodPost, base+"/auth/register", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := crudClient.Do(req)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}

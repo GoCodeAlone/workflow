@@ -48,7 +48,8 @@ func Assemble(inv *inventory.Inventory, in AssemblyInput, reg *schema.ModuleSche
 	//    RouteMiddlewares + Fragment → routes. This is what produces a functional
 	//    scaffold (e.g. the crud-route routes an api.handler emits). Glue-gaps +
 	//    Category-B runtime hooks surface as NEXT_STEPS findings. The MC-parity
-	//    test (capability/scaffold) proves this reproduces v0.82.0 wiring.
+	//    test (capability/assembler/grammar_parity_test.go) proves this reproduces
+	//    v0.82.0 wiring.
 	merged, hooks, err := scaffold.MergeGrammar(reg, inv)
 	if err != nil {
 		return nil, fmt.Errorf("assemble: grammar merge: %w", err)

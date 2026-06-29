@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -147,7 +148,7 @@ func TestWire_EmptyGrammarPassthrough(t *testing.T) {
 func dumpGraph(mods []config.ModuleConfig) string {
 	out := ""
 	for _, m := range mods {
-		out += m.Name + "(" + m.Type + ")<-[" + m.Type + "] "
+		out += m.Name + "(" + m.Type + ")<-[" + strings.Join(m.DependsOn, ",") + "] "
 	}
 	return out
 }
