@@ -122,7 +122,7 @@ func TestMerge_PhantomRequiresIsLoadError(t *testing.T) {
 // (GrammarWire receives the registry separately for type lookups, so merged
 // carries only grammar-bearing types.)
 func TestMerge_EmptyGrammarNoOp(t *testing.T) {
-	r := schema.NewModuleSchemaRegistry()
+	r := schema.NewModuleSchemaRegistryWithoutBuiltins()
 	r.Register(&schema.ModuleSchema{Type: "http.server"}) // bare: no grammar
 	inv := &inventory.Inventory{Capabilities: []inventory.Capability{
 		{ID: "x", Providers: []inventory.Provider{{Name: "p"}}}, // no Grammar
@@ -183,7 +183,7 @@ func TestMerge_EngineWinsEvenWithoutGrammar(t *testing.T) {
 // TestMerge_CollectsRuntimeHooks asserts Category B RuntimeHooks are collected
 // (sorted, de-duplicated) for NEXT_STEPS documentation (D3).
 func TestMerge_CollectsRuntimeHooks(t *testing.T) {
-	r := schema.NewModuleSchemaRegistry()
+	r := schema.NewModuleSchemaRegistryWithoutBuiltins()
 	r.Register(&schema.ModuleSchema{Type: "auth.jwt", RuntimeHooks: []string{"auth-provider-registration"}})
 	inv := &inventory.Inventory{Capabilities: []inventory.Capability{
 		{ID: "x", Providers: []inventory.Provider{

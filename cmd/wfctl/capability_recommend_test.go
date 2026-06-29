@@ -15,8 +15,10 @@ func TestCapabilityRecommend_JSON(t *testing.T) {
 	if err := runCapabilityWithOutput(args, &out); err != nil {
 		t.Fatalf("runCapability recommend: %v", err)
 	}
-	if !strings.Contains(out.String(), `"capabilities"`) {
-		t.Fatalf("expected JSON capabilities, got: %s", out.String())
+	// recommend --format json emits the agent-consumable wizard state (Task 8),
+	// whose top-level key is "chosen" (the selected providers + facts).
+	if !strings.Contains(out.String(), `"chosen"`) {
+		t.Fatalf("expected wizard-state JSON with \"chosen\", got: %s", out.String())
 	}
 	if !strings.Contains(out.String(), "auth") {
 		t.Fatalf("expected auth provider in output: %s", out.String())

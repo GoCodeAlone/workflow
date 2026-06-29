@@ -288,6 +288,18 @@
       ],
       "defaultConfig": {
         "resourceName": "resources"
+      },
+      "attaches": {
+        "to": "http.router"
+      },
+      "routeMiddlewares": [
+        "http.middleware.auth"
+      ],
+      "fragment": {
+        "kind": "crud-route",
+        "fields": [
+          "resourceName"
+        ]
       }
     },
     "api.query": {
@@ -505,7 +517,10 @@
       "defaultConfig": {
         "issuer": "workflow",
         "tokenExpiry": "24h"
-      }
+      },
+      "runtimeHooks": [
+        "auth-provider-registration"
+      ]
     },
     "auth.m2m": {
       "type": "auth.m2m",
@@ -1292,7 +1307,10 @@
         "healthPath": "/healthz",
         "livePath": "/livez",
         "readyPath": "/readyz"
-      }
+      },
+      "runtimeHooks": [
+        "observability.health-endpoints"
+      ]
     },
     "http.client": {
       "type": "http.client",
@@ -1407,6 +1425,9 @@
       ],
       "defaultConfig": {
         "authType": "Bearer"
+      },
+      "attaches": {
+        "to": "http.router"
       }
     },
     "http.middleware.cors": {
@@ -1465,6 +1486,9 @@
         "allowedOrigins": [
           "*"
         ]
+      },
+      "attaches": {
+        "to": "http.router"
       }
     },
     "http.middleware.logging": {
@@ -1503,6 +1527,9 @@
       ],
       "defaultConfig": {
         "logLevel": "info"
+      },
+      "attaches": {
+        "to": "http.router"
       }
     },
     "http.middleware.otel": {
@@ -1572,6 +1599,9 @@
       "defaultConfig": {
         "burstSize": 10,
         "requestsPerMinute": 60
+      },
+      "attaches": {
+        "to": "http.router"
       }
     },
     "http.middleware.requestid": {
@@ -1593,7 +1623,10 @@
           "description": "HTTP request with X-Request-ID header"
         }
       ],
-      "configFields": []
+      "configFields": [],
+      "attaches": {
+        "to": "http.router"
+      }
     },
     "http.middleware.securityheaders": {
       "type": "http.middleware.securityheaders",
@@ -1684,6 +1717,9 @@
         "hstsMaxAge": 31536000,
         "permissionsPolicy": "camera=(), microphone=(), geolocation=()",
         "referrerPolicy": "strict-origin-when-cross-origin"
+      },
+      "attaches": {
+        "to": "http.router"
       }
     },
     "http.proxy": {
@@ -1726,7 +1762,14 @@
           "description": "Routed HTTP request dispatched to handler"
         }
       ],
-      "configFields": []
+      "configFields": [],
+      "requires": [
+        "http.server"
+      ],
+      "attaches": {
+        "to": "http.server",
+        "emit": "workflows.http"
+      }
     },
     "http.server": {
       "type": "http.server",
@@ -1760,7 +1803,10 @@
       "defaultConfig": {
         "address": ":8080"
       },
-      "maxIncoming": 0
+      "maxIncoming": 0,
+      "provides": [
+        "http.Server"
+      ]
     },
     "http.simple_proxy": {
       "type": "http.simple_proxy",
