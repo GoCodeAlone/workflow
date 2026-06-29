@@ -66,7 +66,7 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 	req := normalize(opts.Capabilities)
 	cats := normalize(opts.Categories)
 	r.Requested = append([]string(nil), keysSorted(req)...)
-	defaults := normalizeSet(opts.DefaultPlugins)
+	defaults := normalize(opts.DefaultPlugins)
 
 	// matchedTerms records which REQUESTED terms found at least one capability.
 	// A requested term may match by id, name, tag, or description substring, so
@@ -136,12 +136,13 @@ func buildHit(cap *inventory.Capability, defaults map[string]bool) CapabilityHit
 
 // installRequired computes the D10 selection-fact: a provider needs explicit
 // install/setup when its Kind is external or local-plugin AND it is not a
-// built-in default.
+// built-in default. The name is normalized (lower-cased + trimmed) to match how
+// the defaults set is keyed.
 func installRequired(kind, name string, defaults map[string]bool) bool {
 	if kind != "external" && kind != "local-plugin" {
 		return false
 	}
-	return !defaults[name]
+	return !defaults[strings.ToLower(strings.TrimSpace(name))]
 }
 
 // termMatches reports whether a single requested term matches cap by id, name,
@@ -172,16 +173,6 @@ func normalize(ss []string) map[string]bool {
 		if s = strings.ToLower(strings.TrimSpace(s)); s != "" {
 			m[s] = true
 		}
-	}
-	return m
-}
-
-// normalizeSet lower-cases + trims ss into a set (keeps empty-name entries as
-// "not present"). Used for the DefaultPlugins membership check (names).
-func normalizeSet(ss []string) map[string]bool {
-	m := make(map[string]bool, len(ss))
-	for _, s := range ss {
-		m[strings.ToLower(strings.TrimSpace(s))] = true
 	}
 	return m
 }
