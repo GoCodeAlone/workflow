@@ -48,9 +48,9 @@ func TestRunScaffoldTemplate_List(t *testing.T) {
 
 // TestRunScaffoldTemplate_UnknownErrors (Task 10): an unknown template errors.
 func TestRunScaffoldTemplate_UnknownErrors(t *testing.T) {
-	// Flags must precede the positional project name (Go flag parsing stops at
-	// the first non-flag argument).
-	err := runScaffoldTemplate([]string{"-template", "no-such-template", "x", "-output", t.TempDir()})
+	// Errors before any rendering, so no output dir is needed. Flags must precede
+	// the positional project name (Go flag parsing stops at the first non-flag).
+	err := runScaffoldTemplate([]string{"-template", "no-such-template", "x"})
 	if err == nil || !strings.Contains(err.Error(), "unknown template") {
 		t.Fatalf("expected unknown-template error, got: %v", err)
 	}

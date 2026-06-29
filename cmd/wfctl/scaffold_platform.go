@@ -32,7 +32,8 @@ func runScaffoldCmd(args []string) error {
 	case "template":
 		return runScaffoldTemplate(args[1:])
 	case "-h", "--help", "help":
-		printScaffoldPlatformUsage(os.Stderr)
+		// Help is not an error — print to stdout, matching runCapabilityWithOutput.
+		printScaffoldPlatformUsage(os.Stdout)
 		return nil
 	}
 	// Primary: capability-driven assemble (no subcommand consumed). Delegates to

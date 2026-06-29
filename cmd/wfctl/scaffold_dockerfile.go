@@ -43,7 +43,6 @@ type scaffoldDockerfileArgs struct {
 	outputDir  string // where to write Dockerfile.prebuilt (default: ".")
 }
 
-// runScaffold dispatches wfctl scaffold subcommands.
 // runScaffoldDockerfile implements `wfctl scaffold dockerfile`.
 func runScaffoldDockerfile(args []string) error {
 	fs := flag.NewFlagSet("scaffold dockerfile", flag.ContinueOnError)
