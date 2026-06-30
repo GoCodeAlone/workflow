@@ -20,6 +20,13 @@ type Options struct {
 	Capabilities         []string
 	Categories           []string
 	IncludeUncategorized bool
+
+	// DefaultPlugins is the set of always-available (built-in) plugin names, used
+	// to derive the installRequired selection-fact (D10/AS5). Injected by the
+	// caller (e.g. from all.DefaultPlugins) so this package stays pure (⊥ a heavy
+	// plugins/all import). A provider is installRequired when its Kind is
+	// "external" or "local-plugin" AND its name is not in this set.
+	DefaultPlugins []string
 }
 
 // Recommendation is the filtered + grouped result.
@@ -43,6 +50,12 @@ type ProviderSummary struct {
 	Kind          string `json:"kind"`
 	ReleaseStatus string `json:"releaseStatus,omitempty"`
 	Source        string `json:"source,omitempty"`
+
+	// InstallRequired (D10) is a selection FACT: true when this provider needs
+	// explicit install/setup — Kind is "external" or "local-plugin" AND the name
+	// is not a built-in default. Raw Kind/ReleaseStatus above let the consumer
+	// interpret further; ⊥ wiring-implications (M2) and ⊥ quality-rank (D13).
+	InstallRequired bool `json:"installRequired,omitempty"`
 }
 
 // Recommend filters inv to requested capabilities and groups their providers.
@@ -53,6 +66,7 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 	req := normalize(opts.Capabilities)
 	cats := normalize(opts.Categories)
 	r.Requested = append([]string(nil), keysSorted(req)...)
+	defaults := normalize(opts.DefaultPlugins)
 
 	// matchedTerms records which REQUESTED terms found at least one capability.
 	// A requested term may match by id, name, tag, or description substring, so
@@ -79,7 +93,7 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 				continue
 			}
 		}
-		r.Capabilities = append(r.Capabilities, buildHit(cap))
+		r.Capabilities = append(r.Capabilities, buildHit(cap, defaults))
 	}
 	sort.Slice(r.Capabilities, func(i, j int) bool {
 		if r.Capabilities[i].Category != r.Capabilities[j].Category {
@@ -95,7 +109,7 @@ func Recommend(inv *inventory.Inventory, opts Options) *Recommendation {
 	return r
 }
 
-func buildHit(cap *inventory.Capability) CapabilityHit {
+func buildHit(cap *inventory.Capability, defaults map[string]bool) CapabilityHit {
 	h := CapabilityHit{ID: cap.ID, Category: cap.Category, Name: cap.Name}
 	seen := map[string]bool{}
 	for i := range cap.Providers {
@@ -109,14 +123,26 @@ func buildHit(cap *inventory.Capability) CapabilityHit {
 		}
 		seen[key] = true
 		h.Providers = append(h.Providers, ProviderSummary{
-			Name:          p.Name,
-			Kind:          p.Kind,
-			ReleaseStatus: p.ReleaseStatus,
-			Source:        p.Source,
+			Name:            p.Name,
+			Kind:            p.Kind,
+			ReleaseStatus:   p.ReleaseStatus,
+			Source:          p.Source,
+			InstallRequired: installRequired(p.Kind, p.Name, defaults),
 		})
 	}
 	sort.Slice(h.Providers, func(i, j int) bool { return h.Providers[i].Name < h.Providers[j].Name })
 	return h
+}
+
+// installRequired computes the D10 selection-fact: a provider needs explicit
+// install/setup when its Kind is external or local-plugin AND it is not a
+// built-in default. The name is normalized (lower-cased + trimmed) to match how
+// the defaults set is keyed.
+func installRequired(kind, name string, defaults map[string]bool) bool {
+	if kind != "external" && kind != "local-plugin" {
+		return false
+	}
+	return !defaults[strings.ToLower(strings.TrimSpace(name))]
 }
 
 // termMatches reports whether a single requested term matches cap by id, name,

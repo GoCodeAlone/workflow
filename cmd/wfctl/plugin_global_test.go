@@ -193,6 +193,27 @@ func TestLookupDynamicCLICommandUsesGlobalDir(t *testing.T) {
 	}
 }
 
+func TestLookupDynamicCLICommandUsesProjectDirBeforeGlobal(t *testing.T) {
+	project := t.TempDir()
+	global := t.TempDir()
+	t.Setenv("WFCTL_PLUGIN_DIR", project)
+	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)
+	writeInstalledCLIPlugin(t, project, "infra", "1.0.0", "dns")
+	writeInstalledCLIPlugin(t, global, "global-infra", "1.0.0", "dns")
+
+	entry, err := lookupDynamicCLICommand("dns")
+	if err != nil {
+		t.Fatalf("lookupDynamicCLICommand: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("lookupDynamicCLICommand returned nil entry")
+	}
+	wantBinary := filepath.Join(project, "infra", "infra")
+	if entry.BinaryPath != wantBinary {
+		t.Fatalf("BinaryPath = %q, want project-local binary %q", entry.BinaryPath, wantBinary)
+	}
+}
+
 func TestLookupDynamicCLICommandStaticCommandWins(t *testing.T) {
 	global := t.TempDir()
 	t.Setenv("WFCTL_GLOBAL_PLUGIN_DIR", global)

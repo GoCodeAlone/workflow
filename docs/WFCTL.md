@@ -904,8 +904,11 @@ lifecycle commands install binaries and manifests only; they do not create or
 modify project `wfctl.yaml` or `.wfctl-lock.yaml`. Registry dependency closure
 is installed globally with the parent plugin, and existing global plugin dirs
 are swapped only after the staged parent and dependency set validates.
-Top-level wfctl commands are resolved before global plugin CLI commands, so a
-plugin cannot shadow built-in commands such as `validate` or `plugin`.
+Top-level wfctl commands are resolved before plugin CLI commands, so a plugin
+cannot shadow built-in commands such as `validate` or `plugin`. For
+plugin-owned top-level commands, project-local plugins from `WFCTL_PLUGIN_DIR`
+or `data/plugins` are checked before global plugins, ensuring repo-pinned
+plugins win over operator-global installs in CI and project worktrees.
 
 #### `plugin ci`
 

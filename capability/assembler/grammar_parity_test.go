@@ -1,22 +1,21 @@
-package scaffold
+package assembler
 
 import (
 	"sort"
 	"testing"
 
-	"github.com/GoCodeAlone/workflow/capability/assembler"
+	"github.com/GoCodeAlone/workflow/capability/inventory"
+	"github.com/GoCodeAlone/workflow/capability/scaffold"
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
 // engineGrammarForParity encodes the EXACT v0.82.0 in-code wire() rules as a
-// MergedGrammar, so MC-parity is meaningful (the grammar reproduces what wire()
-// hard-codes): http.router requires + attaches to http.server (emitting
-// workflows.http); http.middleware.* attaches to the router; health.checker is
-// always-selected (the /healthz binding precondition, D15). http.server is the
-// entry point pulled in by http.router.Requires.
-func engineGrammarForParity() MergedGrammar {
-	return MergedGrammar{
+// scaffold.MergedGrammar, so MC-parity is meaningful (the grammar reproduces what
+// wire() hard-codes). The real registry carries the same rules after the glue
+// sweep (Task 6), so TestWire_RealRegistryParity uses the real registry instead.
+func engineGrammarForParity() scaffold.MergedGrammar {
+	return scaffold.MergedGrammar{
 		"http.server": {Provides: []string{"http.Server"}},
 		"http.router": {
 			Requires: []string{"http.server"},
@@ -24,25 +23,26 @@ func engineGrammarForParity() MergedGrammar {
 		},
 		"http.middleware.auth":    {Attaches: &schema.AttachSpec{To: "http.router"}},
 		"http.middleware.logging": {Attaches: &schema.AttachSpec{To: "http.router"}},
-		// health.checker is always-select (P2), not grammar-bearing here.
 	}
 }
 
 // TestWire_ParityWithV082 is the MC-parity regression guard (D6): the
 // grammar-driven wire must reproduce v0.82.0's in-code wire() WIRING — same set
 // of module types, same DependsOn (compared as types), and the same
-// workflows.http entry-point section — across several fixed input sets.
-// Instance names are intentionally NOT compared (runtime resolves by type; the
-// grammar's defaultName differs from wire()'s hand-picked names).
+// workflows.http entry-point section — across several input sets. Instance names
+// are intentionally NOT compared (runtime resolves by type; the grammar's
+// defaultName differs from wire()'s hand-picked names). Config bytes are NOT
+// compared: GrammarWire enriches materialized modules with DefaultConfig (P6)
+// where wire() appended bare modules — the regression risk is the wiring graph.
 //
-// Config bytes are NOT asserted equal: GrammarWire intentionally enriches
-// materialized modules with the registry's DefaultConfig (P6) where v0.82.0's
-// wire() appended bare modules; that enrichment is an accepted delta (the
-// regression risk is the wiring graph, not config cosmetics).
+// This test lives in package assembler (not scaffold) because it compares
+// scaffold.GrammarWire against the v0.82.0 wire()/httpWorkflow() parity
+// reference, avoiding an assembler<->scaffold test import cycle now that the
+// assembler routes prod through scaffold.GrammarWire.
 func TestWire_ParityWithV082(t *testing.T) {
 	eng := engineGrammarForParity()
 	reg := schema.NewModuleSchemaRegistry()
-	alwaysSelect := []string{"http.router", "health.checker"} // P2: entry-point + /healthz
+	alwaysSelect := []string{"http.router", "health.checker"}
 
 	cases := []struct {
 		name string
@@ -60,13 +60,13 @@ func TestWire_ParityWithV082(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			oldMods := assembler.WirePublic(append([]config.ModuleConfig{}, tc.mods...))
-			oldWF := assembler.HttpWorkflowPublic(oldMods)
+			oldMods := wire(append([]config.ModuleConfig{}, tc.mods...))
+			oldWF := httpWorkflow(oldMods)
 
-			res := GrammarWire(append([]config.ModuleConfig{}, tc.mods...), eng, reg, alwaysSelect)
+			res := scaffold.GrammarWire(append([]config.ModuleConfig{}, tc.mods...), eng, reg, alwaysSelect)
 
 			if !moduleGraphsEqual(res.Modules, oldMods) {
-				t.Fatalf("%s: module graph drift (types/names/dependsOn)\ngrammar=%s\nv082=%s",
+				t.Fatalf("%s: module graph drift\ngrammar=%s\nv082=%s",
 					tc.name, dumpGraph(res.Modules), dumpGraph(oldMods))
 			}
 			if !workflowsEqual(res.Workflows, oldWF) {
@@ -79,13 +79,44 @@ func TestWire_ParityWithV082(t *testing.T) {
 	}
 }
 
-// moduleGraphsEqual compares two module lists by their TYPE graph: same set of
-// types, and for each type the same set of depended-on TYPES (each DependsOn
-// NAME resolved to its module type via a name→type index). Instance names are an
-// implementation detail — runtime resolves services by type — so parity guards
-// the type graph, not names (wire() names health.checker "health" while the
-// grammar defaultName yields "checker"; both are the same type). Order-
-// independent. Config excluded (P6 enrichment delta).
+// TestWire_RealRegistryParity (Task 6 verification): the grammar wire reproduces
+// v0.82.0 wiring when the merged grammar comes from the REAL registry (post glue
+// sweep), not a synthetic map.
+func TestWire_RealRegistryParity(t *testing.T) {
+	reg := schema.NewModuleSchemaRegistry()
+	merged, _, err := scaffold.MergeGrammar(reg, &inventory.Inventory{})
+	if err != nil {
+		t.Fatalf("MergeGrammar(real registry): %v", err)
+	}
+	alwaysSelect := []string{"http.router", "health.checker"}
+
+	cases := []struct {
+		name string
+		mods []config.ModuleConfig
+	}{
+		{"db-only", []config.ModuleConfig{{Name: "db", Type: "database.workflow"}}},
+		{"with-middleware", []config.ModuleConfig{
+			{Name: "db", Type: "database.workflow"},
+			{Name: "logging", Type: "http.middleware.logging"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldMods := wire(append([]config.ModuleConfig{}, tc.mods...))
+			oldWF := httpWorkflow(oldMods)
+			res := scaffold.GrammarWire(append([]config.ModuleConfig{}, tc.mods...), merged, reg, alwaysSelect)
+			if !moduleGraphsEqual(res.Modules, oldMods) {
+				t.Fatalf("%s: real-registry graph drift\ngrammar=%s\nv082=%s", tc.name, dumpGraph(res.Modules), dumpGraph(oldMods))
+			}
+			if !workflowsEqual(res.Workflows, oldWF) {
+				t.Fatalf("%s: real-registry workflows.http drift\ngrammar=%#v\nv082=%#v", tc.name, res.Workflows, oldWF)
+			}
+		})
+	}
+}
+
+// --- comparison helpers (type-graph based; instance names are an impl detail) ---
+
 func moduleGraphsEqual(a, b []config.ModuleConfig) bool {
 	ga := typeGraph(a)
 	gb := typeGraph(b)
@@ -101,9 +132,6 @@ func moduleGraphsEqual(a, b []config.ModuleConfig) bool {
 	return true
 }
 
-// typeGraph maps each module type → sorted list of depended-on types (resolving
-// DependsOn names to types). Assumes one instance per type (true for scaffolds:
-// user modules are unique types; materialized modules are one-per-type).
 func typeGraph(mods []config.ModuleConfig) map[string][]string {
 	nameToType := make(map[string]string, len(mods))
 	for _, m := range mods {
@@ -139,11 +167,7 @@ func depSetsEqual(a, b []string) bool {
 	return true
 }
 
-// workflowsEqual compares the workflows.http entry-point section (server/router
-// names) — order-independent map comparison.
-func workflowsEqual(a, b map[string]any) bool {
-	return deepEqual(a, b)
-}
+func workflowsEqual(a, b map[string]any) bool { return deepEqual(a, b) }
 
 func dumpGraph(mods []config.ModuleConfig) string {
 	out := ""
@@ -166,9 +190,6 @@ func joinDeps(xs []string) string {
 	return out
 }
 
-// deepEqual is a small any-comparator for the workflow maps: maps compare
-// order-independent (key set + values); slices ([]map[string]any, []string)
-// compare IN ORDER — route order is significant for crud-route fragments.
 func deepEqual(a, b any) bool {
 	switch av := a.(type) {
 	case map[string]any:

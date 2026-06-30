@@ -15,7 +15,21 @@ import (
 
 	"github.com/GoCodeAlone/workflow/capability/inventory"
 	"github.com/GoCodeAlone/workflow/capability/recommend"
+	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
 )
+
+// defaultPluginNames returns the names of the engine's built-in (always-
+// available) plugins, used to derive the recommend installRequired selection-
+// fact (D10): a recommended provider is installRequired when it is external or
+// local-plugin AND its name is not in this set.
+func defaultPluginNames() []string {
+	plugins := allplugins.DefaultPlugins()
+	names := make([]string, 0, len(plugins))
+	for _, p := range plugins {
+		names = append(names, p.Name())
+	}
+	return names
+}
 
 func runCapability(args []string) error {
 	return runCapabilityWithOutput(args, os.Stdout)
@@ -246,11 +260,16 @@ func runCapabilityRecommend(args []string, out io.Writer) error {
 		Capabilities:         capabilities,
 		Categories:           categories,
 		IncludeUncategorized: includeUncat,
+		DefaultPlugins:       defaultPluginNames(),
 	})
 	var buf bytes.Buffer
 	switch format {
 	case "json":
-		if err := writeCapabilityJSON(&buf, rec); err != nil {
+		// Emit the agent-consumable wizard state (G4/§C4): chosen providers
+		// (+facts), alternatives, glue-gaps, and NextSteps. The plain recommend
+		// command has no grammar wire in flight, so glue-gaps/hooks are empty
+		// here; the scaffold flow populates them when it runs the wire.
+		if err := writeCapabilityJSON(&buf, recommend.BuildWizardState(rec, nil, nil)); err != nil {
 			return err
 		}
 	case "md", "markdown":
