@@ -317,6 +317,9 @@ func lookupDynamicCLICommand(cmd string) (*CLIRegistryEntry, error) {
 	}
 
 	globalPluginDir := defaultGlobalPluginDir()
+	if globalPluginDir == projectPluginDir {
+		return nil, nil
+	}
 	globalRegistry, err := BuildCLIRegistry(globalPluginDir)
 	if err != nil {
 		return nil, fmt.Errorf("load global plugin CLI commands from %s: %w; inspect with 'wfctl plugin list -g' and remove conflicts with 'wfctl plugin remove -g <name>'", globalPluginDir, err)
