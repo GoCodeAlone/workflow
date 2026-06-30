@@ -25,6 +25,10 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ### Fixed
 
+- Plugin-owned top-level wfctl commands now resolve project-local installs from
+  `WFCTL_PLUGIN_DIR` or `data/plugins` before falling back to global plugins, so
+  repo-pinned commands such as `wfctl dns ...` are not shadowed or missed by
+  global-only lookup.
 - `wfctl validate --plugin-dir` now registers plugin `resourceTypes` from both flat manifests and `capabilities.iacProvider.resourceTypes`, so plugin-backed `infra.*` resource modules validate the same way `wfctl infra plan/apply` consume them.
 
 ### Breaking changes (workflow#699 — IaCProvider.Apply hard-removal)

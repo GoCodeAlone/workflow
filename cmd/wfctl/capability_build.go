@@ -43,7 +43,7 @@ func (s *buildSelection) recommendation() *recommend.Recommendation {
 	if len(ids) == 0 {
 		return &recommend.Recommendation{}
 	}
-	return recommend.Recommend(s.inv, recommend.Options{Capabilities: ids})
+	return recommend.Recommend(s.inv, recommend.Options{Capabilities: ids, DefaultPlugins: defaultPluginNames()})
 }
 
 // capabilities returns the sorted inventory capabilities presented on the

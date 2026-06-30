@@ -106,6 +106,14 @@ func NewModuleSchemaRegistry() *ModuleSchemaRegistry {
 	return r
 }
 
+// NewModuleSchemaRegistryWithoutBuiltins returns an empty registry with no
+// pre-registered builtins, so callers (notably grammar-mechanics tests) can
+// control exactly which types carry grammar without the builtin sweep
+// contributing.
+func NewModuleSchemaRegistryWithoutBuiltins() *ModuleSchemaRegistry {
+	return &ModuleSchemaRegistry{schemas: make(map[string]*ModuleSchema)}
+}
+
 // Register adds or replaces a module schema.
 func (r *ModuleSchemaRegistry) Register(s *ModuleSchema) {
 	r.schemas[s.Type] = s
@@ -168,6 +176,9 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		},
 		DefaultConfig: map[string]any{"address": ":8080"},
 		MaxIncoming:   intPtr(0),
+		// Assembly Grammar: HTTP entry-point module (provides the server service
+		// that http.router Requires + Attaches to).
+		Provides: []string{"http.Server"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -192,6 +203,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:       []ServiceIODef{{Name: "request", Type: "http.Request", Description: "Incoming HTTP request to route"}},
 		Outputs:      []ServiceIODef{{Name: "routed", Type: "http.Request", Description: "Routed HTTP request dispatched to handler"}},
 		ConfigFields: []ConfigFieldDef{},
+		// Assembly Grammar: requires the entry-point server; attaching emits the
+		// workflows.http section (server.AddRouter(router) at boot).
+		Requires: []string{"http.server"},
+		Attaches: &AttachSpec{To: "http.server", Emit: "workflows.http"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -278,6 +293,11 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "summaryFields", Label: "Summary Fields", Type: FieldTypeArray, ArrayItemType: "string", Description: "Field names to include in list/summary responses", Group: "advanced"},
 		},
 		DefaultConfig: map[string]any{"resourceName": "resources"},
+		// Assembly Grammar: attaches to the router, applies the auth middleware to
+		// its routes, and emits a crud-route fragment (per-method routes).
+		Attaches:         &AttachSpec{To: "http.router"},
+		RouteMiddlewares: []string{"http.middleware.auth"},
+		Fragment:         &FragmentSpec{Kind: "crud-route", Fields: []string{"resourceName"}},
 	})
 
 	// ---- CQRS API Category ----
@@ -321,6 +341,8 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "authType", Label: "Auth Type", Type: FieldTypeSelect, Options: []string{"Bearer", "Basic", "ApiKey"}, DefaultValue: "Bearer", Description: "Authentication scheme to enforce"},
 		},
 		DefaultConfig: map[string]any{"authType": "Bearer"},
+		// Assembly Grammar: attaches to the router (middleware chain).
+		Attaches: &AttachSpec{To: "http.router"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -334,6 +356,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "logLevel", Label: "Log Level", Type: FieldTypeSelect, Options: []string{"debug", "info", "warn", "error"}, DefaultValue: "info", Description: "Minimum log level for request logging"},
 		},
 		DefaultConfig: map[string]any{"logLevel": "info"},
+		Attaches:      &AttachSpec{To: "http.router"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -348,6 +371,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "burstSize", Label: "Burst Size", Type: FieldTypeNumber, DefaultValue: 10, Description: "Maximum burst of requests allowed above the rate limit"},
 		},
 		DefaultConfig: map[string]any{"requestsPerMinute": 60, "burstSize": 10},
+		Attaches:      &AttachSpec{To: "http.router"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -365,6 +389,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			"allowedOrigins": []string{"*"},
 			"allowedMethods": []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		},
+		Attaches: &AttachSpec{To: "http.router"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -375,6 +400,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Inputs:       []ServiceIODef{{Name: "request", Type: "http.Request", Description: "HTTP request without request ID"}},
 		Outputs:      []ServiceIODef{{Name: "tagged", Type: "http.Request", Description: "HTTP request with X-Request-ID header"}},
 		ConfigFields: []ConfigFieldDef{},
+		Attaches:     &AttachSpec{To: "http.router"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -399,6 +425,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			"referrerPolicy":     "strict-origin-when-cross-origin",
 			"permissionsPolicy":  "camera=(), microphone=(), geolocation=()",
 		},
+		Attaches: &AttachSpec{To: "http.router"},
 	})
 
 	// ---- Messaging Category ----
@@ -632,6 +659,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "autoDiscover", Label: "Auto-Discover", Type: FieldTypeBool, DefaultValue: true, Description: "Automatically discover HealthCheckable services"},
 		},
 		DefaultConfig: map[string]any{"healthPath": "/healthz", "readyPath": "/readyz", "livePath": "/livez", "checkTimeout": "5s", "autoDiscover": true},
+		// Assembly Grammar (Category B — documented runtime precondition): the
+		// observability health-endpoints hook binds /healthz when a health.checker
+		// + http.router are co-selected (fired at boot, ⊥ offline-emit).
+		RuntimeHooks: []string{"observability.health-endpoints"},
 	})
 
 	r.Register(&ModuleSchema{
@@ -681,6 +712,10 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "allowRegistration", Label: "Allow Open Registration", Type: FieldTypeBool, DefaultValue: false, Description: "When true, any visitor may register without admin intervention"},
 		},
 		DefaultConfig: map[string]any{"tokenExpiry": "24h", "issuer": "workflow"},
+		// Assembly Grammar (Category B — documented runtime precondition): the
+		// auth-provider-registration hook wires auth.jwt → http.middleware.auth
+		// enforcement when both are co-selected (fired at boot, ⊥ offline-emit).
+		RuntimeHooks: []string{"auth-provider-registration"},
 	})
 
 	// ---- Integration Category ----
