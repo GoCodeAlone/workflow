@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -18,9 +19,9 @@ import (
 // conflate them:
 //
 //   - MaskSensitiveOutputs (masking.go) is a KEY-name mask: given a structured
-//     outputs map, it zeroes the VALUES of a fixed set of sensitive KEYS
-//     ("password", "token", ...). It does not scan free text and does not need
-//     to know the secret value.
+//     outputs map, it replaces the VALUES of a fixed set of sensitive KEYS
+//     ("password", "token", ...) with the literal "(sensitive)". It does not
+//     scan free text and does not need to know the secret value.
 //
 //   - Redactor (this type) is a VALUE scan: given an arbitrary blob of text, it
 //     finds substrings equal to a previously-seen secret VALUE and replaces
@@ -61,7 +62,7 @@ func NewRedactor() *Redactor {
 // AddValue is concurrency-safe and may be called concurrently with Redact and
 // LoadFromProvider.
 func (r *Redactor) AddValue(label, value string) {
-	if value == "" {
+	if r == nil || value == "" {
 		return
 	}
 	r.mu.Lock()
@@ -118,6 +119,12 @@ func (r *Redactor) LoadFromProvider(ctx context.Context, p Provider) error {
 //
 // Redact is concurrency-safe and may be called concurrently with AddValue and
 // LoadFromProvider. A nil Redactor returns the input text unchanged.
+//
+// Values are applied longest-first so a shorter secret that is a substring of
+// a longer one cannot shadow it (which would leave the longer value partially
+// unredacted). The known set is snapshotted under the read lock, then the
+// substring scan runs lock-free over the snapshot, giving deterministic output
+// independent of map iteration order.
 func (r *Redactor) Redact(text string) string {
 	if r == nil {
 		return text
@@ -127,14 +134,28 @@ func (r *Redactor) Redact(text string) string {
 		r.mu.RUnlock()
 		return text
 	}
-	out := text
+	type kv struct{ label, value string }
+	pairs := make([]kv, 0, len(r.known))
 	for label, value := range r.known {
-		if value == "" || !strings.Contains(out, value) {
-			continue
+		if value != "" {
+			pairs = append(pairs, kv{label, value})
 		}
-		out = strings.ReplaceAll(out, value, "[REDACTED:"+label+"]")
 	}
 	r.mu.RUnlock()
+	// Longest value first: prevents a shorter substring secret from shadowing
+	// a longer one and leaving a partial leak. Tie-break by value for determinism.
+	sort.Slice(pairs, func(i, j int) bool {
+		if len(pairs[i].value) != len(pairs[j].value) {
+			return len(pairs[i].value) > len(pairs[j].value)
+		}
+		return pairs[i].value > pairs[j].value
+	})
+	out := text
+	for _, p := range pairs {
+		if strings.Contains(out, p.value) {
+			out = strings.ReplaceAll(out, p.value, "[REDACTED:"+p.label+"]")
+		}
+	}
 	return out
 }
 

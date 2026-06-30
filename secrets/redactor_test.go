@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -13,16 +14,16 @@ type stubProvider struct {
 	vals map[string]string
 }
 
-func (s stubProvider) Name() string { return "stub" }
+func (s *stubProvider) Name() string { return "stub" }
 
-func (s stubProvider) Get(_ context.Context, key string) (string, error) {
+func (s *stubProvider) Get(_ context.Context, key string) (string, error) {
 	if v, ok := s.vals[key]; ok {
 		return v, nil
 	}
 	return "", ErrNotFound
 }
 
-func (s stubProvider) Set(_ context.Context, key, value string) error {
+func (s *stubProvider) Set(_ context.Context, key, value string) error {
 	if s.vals == nil {
 		s.vals = map[string]string{}
 	}
@@ -30,12 +31,12 @@ func (s stubProvider) Set(_ context.Context, key, value string) error {
 	return nil
 }
 
-func (s stubProvider) Delete(_ context.Context, key string) error {
+func (s *stubProvider) Delete(_ context.Context, key string) error {
 	delete(s.vals, key)
 	return nil
 }
 
-func (s stubProvider) List(_ context.Context) ([]string, error) {
+func (s *stubProvider) List(_ context.Context) ([]string, error) {
 	keys := make([]string, 0, len(s.vals))
 	for k := range s.vals {
 		keys = append(keys, k)
@@ -56,7 +57,7 @@ func TestRedactor_AddValue_Redacts(t *testing.T) {
 func TestRedactor_LoadFromProvider_FullReplace(t *testing.T) {
 	r := NewRedactor()
 	r.AddValue("ENV", "envval")
-	if err := r.LoadFromProvider(context.Background(), stubProvider{vals: map[string]string{"K1": "v1"}}); err != nil {
+	if err := r.LoadFromProvider(context.Background(), &stubProvider{vals: map[string]string{"K1": "v1"}}); err != nil {
 		t.Fatalf("LoadFromProvider error: %v", err)
 	}
 	// full-replace: ENV gone, K1 present
@@ -86,7 +87,7 @@ func TestRedactor_Concurrent(t *testing.T) {
 		wg.Add(3)
 		go func() {
 			defer wg.Done()
-			_ = r.LoadFromProvider(context.Background(), stubProvider{vals: map[string]string{"K": "v"}})
+			_ = r.LoadFromProvider(context.Background(), &stubProvider{vals: map[string]string{"K": "v"}})
 		}()
 		go func() {
 			defer wg.Done()
@@ -98,4 +99,20 @@ func TestRedactor_Concurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait() // -race: no data race
+}
+
+func TestRedactor_LongestValueWins(t *testing.T) {
+	// A shorter secret value that is a substring of a longer one must not shadow
+	// the longer value (which would leave a partial leak). Longest-first wins.
+	r := NewRedactor()
+	r.AddValue("SHORT", "key123")
+	r.AddValue("LONG", "key12345")
+	got := r.Redact("cred=key12345 and also key123")
+	// "key12345" must be fully redacted as LONG; the standalone "key123" as SHORT.
+	if strings.Contains(got, "key12345") || strings.Contains(got, "key123") {
+		t.Fatalf("partial leak: %q (substring-ordering regression)", got)
+	}
+	if !strings.Contains(got, "[REDACTED:LONG]") || !strings.Contains(got, "[REDACTED:SHORT]") {
+		t.Fatalf("expected both labels redacted, got %q", got)
+	}
 }
