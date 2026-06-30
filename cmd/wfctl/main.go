@@ -307,12 +307,21 @@ func lookupDynamicCLICommand(cmd string) (*CLIRegistryEntry, error) {
 	if _, isStatic := commands[cmd]; isStatic {
 		return nil, nil
 	}
-	pluginDir := defaultGlobalPluginDir()
-	registry, err := BuildCLIRegistry(pluginDir)
+	projectPluginDir := defaultPluginCommandDir()
+	projectRegistry, err := BuildCLIRegistry(projectPluginDir)
 	if err != nil {
-		return nil, fmt.Errorf("load global plugin CLI commands from %s: %w; inspect with 'wfctl plugin list -g' and remove conflicts with 'wfctl plugin remove -g <name>'", pluginDir, err)
+		return nil, fmt.Errorf("load project plugin CLI commands from %s: %w; inspect with 'wfctl plugin list --plugin-dir %s' and remove conflicts with 'wfctl plugin remove --plugin-dir %s <name>'", projectPluginDir, err, projectPluginDir, projectPluginDir)
 	}
-	return registry.LookupCLICommand(cmd), nil
+	if entry := projectRegistry.LookupCLICommand(cmd); entry != nil {
+		return entry, nil
+	}
+
+	globalPluginDir := defaultGlobalPluginDir()
+	globalRegistry, err := BuildCLIRegistry(globalPluginDir)
+	if err != nil {
+		return nil, fmt.Errorf("load global plugin CLI commands from %s: %w; inspect with 'wfctl plugin list -g' and remove conflicts with 'wfctl plugin remove -g <name>'", globalPluginDir, err)
+	}
+	return globalRegistry.LookupCLICommand(cmd), nil
 }
 
 func defaultPluginCommandDir() string {
