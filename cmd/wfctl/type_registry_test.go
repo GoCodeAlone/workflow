@@ -215,6 +215,17 @@ func TestKnownStepTypesRequestParseConfigKeys(t *testing.T) {
 	}
 }
 
+func TestKnownStepTypesBuildBinaryConfigKeys(t *testing.T) {
+	info, ok := KnownStepTypes()["step.build_binary"]
+	if !ok {
+		t.Fatal("step.build_binary not found")
+	}
+	want := []string{"config_file", "config_from", "output", "module_path", "go_version", "embed_config", "dry_run", "os", "arch"}
+	if !sameStringSet(info.ConfigKeys, want) {
+		t.Fatalf("step.build_binary ConfigKeys = %v, want %v", info.ConfigKeys, want)
+	}
+}
+
 func TestKnownStepTypesResponseAliasesMatchConfigKeys(t *testing.T) {
 	types := KnownStepTypes()
 	jsonInfo, ok := types["step.json_response"]

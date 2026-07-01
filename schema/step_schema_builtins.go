@@ -1679,16 +1679,28 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	r.Register(&StepSchema{
 		Type:        "step.build_binary",
 		Plugin:      "cicd",
-		Description: "Builds a Go binary from source.",
+		Description: "Generates a Workflow Go project from config and optionally builds a binary.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "source", Type: FieldTypeString, Description: "Source directory or package path", Required: true},
+			{Key: "config_file", Type: FieldTypeString, Description: "Workflow config file to embed; exactly one of config_file or config_from is required"},
+			{Key: "config_from", Type: FieldTypeString, Description: "Pipeline context path resolving to workflow config YAML; exactly one of config_file or config_from is required"},
 			{Key: "output", Type: FieldTypeString, Description: "Output binary path"},
+			{Key: "module_path", Type: FieldTypeString, Description: "Generated Go module path"},
+			{Key: "go_version", Type: FieldTypeString, Description: "Generated go.mod Go version"},
+			{Key: "embed_config", Type: FieldTypeBool, Description: "Embed app.yaml in the generated binary", DefaultValue: true},
+			{Key: "dry_run", Type: FieldTypeBool, Description: "Return generated files without compiling"},
 			{Key: "os", Type: FieldTypeString, Description: "Target OS (GOOS)"},
 			{Key: "arch", Type: FieldTypeString, Description: "Target architecture (GOARCH)"},
-			{Key: "ldflags", Type: FieldTypeString, Description: "Linker flags"},
 		},
 		Outputs: []StepOutputDef{
+			{Key: "dry_run", Type: "boolean", Description: "Whether the step returned generated files without compiling"},
+			{Key: "files", Type: "array", Description: "Generated file paths in dry-run mode"},
+			{Key: "file_contents", Type: "object", Description: "Generated file contents keyed by path in dry-run mode"},
+			{Key: "module_path", Type: "string", Description: "Generated Go module path"},
+			{Key: "go_version", Type: "string", Description: "Generated go.mod Go version"},
+			{Key: "target_os", Type: "string", Description: "Target OS (GOOS)"},
+			{Key: "target_arch", Type: "string", Description: "Target architecture (GOARCH)"},
 			{Key: "binary_path", Type: "string", Description: "Path to the built binary"},
+			{Key: "binary_size", Type: "number", Description: "Built binary size in bytes"},
 		},
 	})
 

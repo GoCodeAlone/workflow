@@ -18,6 +18,7 @@ import (
 type BuildBinaryStep struct {
 	name        string
 	configFile  string
+	configFrom  string
 	output      string
 	targetOS    string
 	targetArch  string
@@ -32,8 +33,12 @@ type BuildBinaryStep struct {
 func NewBuildBinaryStepFactory() StepFactory {
 	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
 		configFile, _ := config["config_file"].(string)
-		if configFile == "" {
-			return nil, fmt.Errorf("build_binary step %q: 'config_file' is required", name)
+		configFrom, _ := config["config_from"].(string)
+		if configFile == "" && configFrom == "" {
+			return nil, fmt.Errorf("build_binary step %q: either 'config_file' or 'config_from' is required", name)
+		}
+		if configFile != "" && configFrom != "" {
+			return nil, fmt.Errorf("build_binary step %q: only one of 'config_file' or 'config_from' may be set", name)
 		}
 
 		output, _ := config["output"].(string)
@@ -71,6 +76,7 @@ func NewBuildBinaryStepFactory() StepFactory {
 		return &BuildBinaryStep{
 			name:        name,
 			configFile:  configFile,
+			configFrom:  configFrom,
 			output:      output,
 			targetOS:    targetOS,
 			targetArch:  targetArch,
@@ -108,9 +114,13 @@ func (s *BuildBinaryStep) Execute(ctx context.Context, pc *PipelineContext) (*St
 	return s.compileProject(ctx, files)
 }
 
-// resolveConfigContent reads the config file from disk, falling back to the
-// pipeline context body if the file is not found.
+// resolveConfigContent reads config from an explicit context path, a file, or
+// the historical pipeline body fallback when a configured file does not exist.
 func (s *BuildBinaryStep) resolveConfigContent(pc *PipelineContext) ([]byte, error) {
+	if s.configFrom != "" {
+		return s.resolveConfigFromContext(pc)
+	}
+
 	if s.configFile != "" {
 		data, err := os.ReadFile(s.configFile) //nolint:gosec // G304: path from trusted pipeline config
 		if err == nil {
@@ -133,6 +143,27 @@ func (s *BuildBinaryStep) resolveConfigContent(pc *PipelineContext) ([]byte, err
 	}
 
 	return nil, fmt.Errorf("config_file %q not found and no body in pipeline context", s.configFile)
+}
+
+func (s *BuildBinaryStep) resolveConfigFromContext(pc *PipelineContext) ([]byte, error) {
+	if pc == nil {
+		return nil, fmt.Errorf("config_from %q requires a pipeline context", s.configFrom)
+	}
+	raw := resolveBodyFrom(s.configFrom, pc)
+	switch v := raw.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("config_from %q resolved to empty string", s.configFrom)
+		}
+		return []byte(v), nil
+	case []byte:
+		if len(v) == 0 {
+			return nil, fmt.Errorf("config_from %q resolved to empty bytes", s.configFrom)
+		}
+		return v, nil
+	default:
+		return nil, fmt.Errorf("config_from %q resolved to %T, want non-empty string or []byte", s.configFrom, raw)
+	}
 }
 
 // generatedFile holds the path and content of a generated file.

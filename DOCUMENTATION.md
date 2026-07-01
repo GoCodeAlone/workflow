@@ -295,7 +295,7 @@ summary fields such as `project_id`, `tenant_id`, or `subscription_id`.
 | `step.artifact_push` | Stores a file in the artifact store for cross-step sharing | cicd |
 | `step.artifact_pull` | Retrieves an artifact from a prior execution, URL, or S3 | cicd |
 | `step.shell_exec` | Executes an arbitrary shell command | cicd |
-| `step.build_binary` | Builds a Go binary using `go build` | cicd |
+| `step.build_binary` | Generates a Workflow Go project from config and optionally builds a binary | cicd |
 | `step.build_from_config` | Builds the workflow server binary from a YAML config | cicd |
 | `step.build_ui` | Builds the UI assets from a frontend config | cicd |
 | `step.deploy` | Deploys a built artifact to an environment | cicd |
@@ -311,6 +311,26 @@ summary fields such as `project_id`, `tenant_id`, or `subscription_id`.
 | `step.codebuild_logs` | Fetches logs from an AWS CodeBuild build | cicd |
 | `step.codebuild_list_builds` | Lists recent AWS CodeBuild builds for a project | cicd |
 | `step.codebuild_delete_project` | Deletes an AWS CodeBuild project | cicd |
+
+`step.build_binary` generates a self-contained Go project from Workflow config.
+Use `config_file` to read config from disk, or `config_from` to resolve config
+YAML from the pipeline context, such as an HTTP route's `request_body`.
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `config_file` | string | exactly one of `config_file`/`config_from` | Workflow config file to embed. |
+| `config_from` | string | exactly one of `config_file`/`config_from` | Pipeline context path resolving to workflow config YAML. |
+| `output` | string | no | Output binary path; defaults to `bin/app`. |
+| `module_path` | string | no | Generated Go module path; defaults to `app`. |
+| `go_version` | string | no | Generated `go.mod` Go version; defaults to `1.22`. |
+| `embed_config` | boolean | no | Embed `app.yaml` in the generated binary; defaults to `true`. |
+| `dry_run` | boolean | no | Return generated files without compiling. |
+| `os` | string | no | Target OS (`GOOS`); defaults to the current OS. |
+| `arch` | string | no | Target architecture (`GOARCH`); defaults to the current architecture. |
+
+**Output fields:** dry-run mode returns `dry_run`, `files`, `file_contents`,
+`module_path`, `go_version`, `target_os`, `target_arch`; build mode returns
+`binary_path`, `binary_size`, `target_os`, `target_arch`.
 
 ### Platform & Infrastructure Pipeline Steps
 | Type | Description | Plugin |

@@ -256,6 +256,47 @@ func TestBuildBinaryStep_DryRun_ConfigFromPipelineContext(t *testing.T) {
 	}
 }
 
+func TestBuildBinaryStep_DryRun_ConfigFromExplicitContextPath(t *testing.T) {
+	yamlContent := "version: 1\nmodules: []\n"
+
+	factory := NewBuildBinaryStepFactory()
+	step, err := factory("bb", map[string]any{
+		"config_from": "request_body",
+		"dry_run":     true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected factory error: %v", err)
+	}
+
+	pc := &PipelineContext{
+		Current: map[string]any{"request_body": yamlContent},
+	}
+
+	result, err := step.Execute(testCtx(t), pc)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	contents := result.Output["file_contents"].(map[string]string)
+	if contents["app.yaml"] != yamlContent {
+		t.Errorf("app.yaml from config_from mismatch: got %q", contents["app.yaml"])
+	}
+}
+
+func TestBuildBinaryStep_ConfigFileAndConfigFromAreMutuallyExclusive(t *testing.T) {
+	factory := NewBuildBinaryStepFactory()
+	_, err := factory("bb", map[string]any{
+		"config_file": "app.yaml",
+		"config_from": "request_body",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error when config_file and config_from are both set")
+	}
+	if !strings.Contains(err.Error(), "only one of 'config_file' or 'config_from'") {
+		t.Fatalf("expected mutually exclusive config error, got %v", err)
+	}
+}
+
 func TestBuildBinaryStep_MissingConfigFileAndNoContext(t *testing.T) {
 	factory := NewBuildBinaryStepFactory()
 	step, err := factory("bb", map[string]any{
