@@ -123,7 +123,7 @@ func parseResourceRefs(raw any) ([]interfaces.ResourceRef, error) {
 
 func resolveResourceRefsFrom(path, stepName, stepType string, pc *PipelineContext) ([]interfaces.ResourceRef, error) {
 	if pc == nil {
-		return nil, fmt.Errorf("%s step %q: refs_from %q resolved to empty/zero refs", stepType, stepName, path)
+		return nil, fmt.Errorf("%s step %q: refs_from %q requires a non-nil pipeline context", stepType, stepName, path)
 	}
 	raw := resolveBodyFrom(path, pc)
 	refs, err := parseResourceRefs(raw)

@@ -234,7 +234,9 @@ func TestIaCProviderListStep_Factory_RefsFromMutuallyExclusive(t *testing.T) {
 	factory := module.NewIaCProviderListStepFactory()
 	for _, cfg := range []map[string]any{
 		{"provider": "my-provider", "refs_from": "steps.parse-request.body.refs", "refs": []any{}},
+		{"provider": "my-provider", "refs_from": "", "refs": []any{}},
 		{"provider": "my-provider", "refs_from": "steps.parse-request.body.refs", "resources": []any{"db"}},
+		{"provider": "my-provider", "refs_from": "", "resources": []any{"db"}},
 	} {
 		_, err := factory("list-step", cfg, nil)
 		if err == nil {
@@ -242,6 +244,22 @@ func TestIaCProviderListStep_Factory_RefsFromMutuallyExclusive(t *testing.T) {
 		}
 		if !containsString(err.Error(), "mutually exclusive") {
 			t.Errorf("expected mutually exclusive error, got: %v", err)
+		}
+	}
+}
+
+func TestIaCProviderListStep_Factory_RefsFromRequiresNonEmptyString(t *testing.T) {
+	factory := module.NewIaCProviderListStepFactory()
+	for _, raw := range []any{"", nil, 123} {
+		_, err := factory("list-step", map[string]any{
+			"provider":  "my-provider",
+			"refs_from": raw,
+		}, nil)
+		if err == nil {
+			t.Fatalf("expected refs_from factory error for %#v, got nil", raw)
+		}
+		if !containsString(err.Error(), "refs_from' must be a non-empty string") {
+			t.Errorf("expected non-empty string error, got: %v", err)
 		}
 	}
 }
@@ -276,6 +294,11 @@ func TestIaCProviderListStep_RefsFromFailures(t *testing.T) {
 			stepOutputs: parseRequestRefsOutputs([]any{}),
 			wantErrSub:  "resolved to empty/zero refs",
 		},
+		{
+			name:        "pipeline context is nil",
+			stepOutputs: nil,
+			wantErrSub:  "requires a non-nil pipeline context",
+		},
 	}
 
 	for _, tc := range cases {
@@ -294,7 +317,11 @@ func TestIaCProviderListStep_RefsFromFailures(t *testing.T) {
 				t.Fatalf("factory error: %v", err)
 			}
 
-			_, err = step.Execute(context.Background(), &module.PipelineContext{StepOutputs: tc.stepOutputs})
+			pc := &module.PipelineContext{StepOutputs: tc.stepOutputs}
+			if tc.name == "pipeline context is nil" {
+				pc = nil
+			}
+			_, err = step.Execute(context.Background(), pc)
 			if err == nil {
 				t.Fatal("expected error, got nil (must not proceed with nil/zero refs)")
 			}

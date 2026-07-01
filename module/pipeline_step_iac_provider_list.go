@@ -44,7 +44,8 @@ func NewIaCProviderListStepFactory() StepFactory {
 		if providerName == "" {
 			return nil, fmt.Errorf("iac_provider_list step %q: 'provider' is required", name)
 		}
-		refsFrom, _ := cfg["refs_from"].(string)
+		rawRefsFrom, hasRefsFrom := cfg["refs_from"]
+		refsFrom, refsFromOK := rawRefsFrom.(string)
 		// Optional: list of refs to query; absent means pass nil to Status
 		// (providers should return all resources when refs is nil/empty).
 		// If "refs" is present but malformed (wrong type or wrong item shape), the
@@ -84,7 +85,7 @@ func NewIaCProviderListStepFactory() StepFactory {
 		if hasRefs {
 			inputSources++
 		}
-		if refsFrom != "" {
+		if hasRefsFrom {
 			inputSources++
 		}
 		if hasResources {
@@ -92,6 +93,9 @@ func NewIaCProviderListStepFactory() StepFactory {
 		}
 		if inputSources > 1 {
 			return nil, fmt.Errorf("iac_provider_list step %q: 'refs', 'refs_from', and 'resources' are mutually exclusive", name)
+		}
+		if hasRefsFrom && (!refsFromOK || refsFrom == "") {
+			return nil, fmt.Errorf("iac_provider_list step %q: 'refs_from' must be a non-empty string", name)
 		}
 		return &IaCProviderListStep{
 			name:      name,

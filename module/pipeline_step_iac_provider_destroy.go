@@ -28,7 +28,8 @@ func NewIaCProviderDestroyStepFactory() StepFactory {
 		if providerName == "" {
 			return nil, fmt.Errorf("iac_provider_destroy step %q: 'provider' is required", name)
 		}
-		refsFrom, _ := cfg["refs_from"].(string)
+		rawRefsFrom, hasRefsFrom := cfg["refs_from"]
+		refsFrom, refsFromOK := rawRefsFrom.(string)
 		_, hasRefs := cfg["refs"]
 		refs, err := parseResourceRefs(cfg["refs"])
 		if err != nil {
@@ -43,7 +44,7 @@ func NewIaCProviderDestroyStepFactory() StepFactory {
 		if hasRefs {
 			inputSources++
 		}
-		if refsFrom != "" {
+		if hasRefsFrom {
 			inputSources++
 		}
 		if hasResources {
@@ -51,6 +52,9 @@ func NewIaCProviderDestroyStepFactory() StepFactory {
 		}
 		if inputSources > 1 {
 			return nil, fmt.Errorf("iac_provider_destroy step %q: 'refs', 'refs_from', and 'resources' are mutually exclusive", name)
+		}
+		if hasRefsFrom && (!refsFromOK || refsFrom == "") {
+			return nil, fmt.Errorf("iac_provider_destroy step %q: 'refs_from' must be a non-empty string", name)
 		}
 		return &IaCProviderDestroyStep{
 			name:      name,
