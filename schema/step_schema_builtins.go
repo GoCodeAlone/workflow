@@ -2062,8 +2062,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Lists current resource statuses from an IaCProvider service.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "refs", Type: FieldTypeArray, Description: "Optional list of resource refs to query; mutually exclusive with resources"},
-			{Key: "resources", Type: FieldTypeArray, Description: "Optional list of named app infra resources to query; mutually exclusive with refs"},
+			{Key: "refs", Type: FieldTypeArray, Description: "Optional list of resource refs to query; mutually exclusive with refs_from and resources"},
+			{Key: "refs_from", Type: FieldTypeString, Description: "Dotted context path to resolve resource refs at Execute time (e.g. steps.parse-request.body.refs); mutually exclusive with refs and resources"},
+			{Key: "resources", Type: FieldTypeArray, Description: "Optional list of named app infra resources to query; mutually exclusive with refs and refs_from"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "provider", Type: "string", Description: "Provider service name"},
@@ -2140,8 +2141,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Destroys resources via an IaCProvider service.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "refs", Type: FieldTypeArray, Description: "Resource refs to destroy (list of {name, type, provider_id}); mutually exclusive with resources"},
-			{Key: "resources", Type: FieldTypeArray, Description: "Named app infra resources to destroy; mutually exclusive with refs"},
+			{Key: "refs", Type: FieldTypeArray, Description: "Resource refs to destroy (list of {name, type, provider_id}); mutually exclusive with refs_from and resources"},
+			{Key: "refs_from", Type: FieldTypeString, Description: "Dotted context path to resolve resource refs at Execute time (e.g. steps.parse-request.body.refs); mutually exclusive with refs and resources"},
+			{Key: "resources", Type: FieldTypeArray, Description: "Named app infra resources to destroy; mutually exclusive with refs and refs_from"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "[]any", Description: "Names of destroyed resources"},

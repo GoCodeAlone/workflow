@@ -82,6 +82,48 @@ func TestIaCProviderDestroyStep_ResourcesResolveInfraModuleRefs(t *testing.T) {
 	}
 }
 
+func TestIaCProviderDestroyStep_RefsFromContext(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		destroyResult: &interfaces.DestroyResult{
+			Destroyed: []string{"web-vpc"},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderDestroyStepFactory()
+	step, err := factory("destroy-step", map[string]any{
+		"provider":  "my-provider",
+		"refs_from": "steps.parse-request.body.refs",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &module.PipelineContext{StepOutputs: parseRequestRefsOutputs([]any{
+		map[string]any{"name": "web-vpc", "type": "infra.vpc"},
+	})}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	destroyed, ok := result.Output["destroyed"].([]string)
+	if !ok {
+		t.Fatalf("expected []string destroyed, got %T", result.Output["destroyed"])
+	}
+	if len(destroyed) != 1 || destroyed[0] != "web-vpc" {
+		t.Fatalf("unexpected destroyed resources: %#v", destroyed)
+	}
+	if len(provider.destroyRefs) != 1 {
+		t.Fatalf("expected one destroy ref, got %d", len(provider.destroyRefs))
+	}
+	if provider.destroyRefs[0].Name != "web-vpc" || provider.destroyRefs[0].Type != "infra.vpc" {
+		t.Fatalf("unexpected destroy refs: %#v", provider.destroyRefs)
+	}
+}
+
 func TestIaCProviderDestroyStep_Execute_UnregisteredProvider(t *testing.T) {
 	app := module.NewMockApplication()
 	factory := module.NewIaCProviderDestroyStepFactory()
@@ -104,6 +146,84 @@ func TestIaCProviderDestroyStep_Factory_RequiresProvider(t *testing.T) {
 	_, err := factory("destroy-step", map[string]any{}, nil)
 	if err == nil {
 		t.Fatal("expected error when 'provider' missing")
+	}
+}
+
+func TestIaCProviderDestroyStep_Factory_RefsFromMutuallyExclusive(t *testing.T) {
+	factory := module.NewIaCProviderDestroyStepFactory()
+	for _, cfg := range []map[string]any{
+		{"provider": "my-provider", "refs_from": "steps.parse-request.body.refs", "refs": []any{}},
+		{"provider": "my-provider", "refs_from": "steps.parse-request.body.refs", "resources": []any{"db"}},
+	} {
+		_, err := factory("destroy-step", cfg, nil)
+		if err == nil {
+			t.Fatal("expected mutually exclusive refs_from factory error, got nil")
+		}
+		if !containsString(err.Error(), "mutually exclusive") {
+			t.Errorf("expected mutually exclusive error, got: %v", err)
+		}
+	}
+}
+
+func TestIaCProviderDestroyStep_RefsFromFailures(t *testing.T) {
+	cases := []struct {
+		name        string
+		stepOutputs map[string]map[string]any
+		wantErrSub  string
+	}{
+		{
+			name:        "path missing from context",
+			stepOutputs: nil,
+			wantErrSub:  "resolved to empty/zero refs",
+		},
+		{
+			name: "body present but lacks refs key",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {"body": map[string]any{}},
+			},
+			wantErrSub: "resolved to empty/zero refs",
+		},
+		{
+			name: "refs resolves to a non-list scalar",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {"body": map[string]any{"refs": "not-a-list"}},
+			},
+			wantErrSub: "resolve refs_from",
+		},
+		{
+			name:        "refs resolves to an empty list",
+			stepOutputs: parseRequestRefsOutputs([]any{}),
+			wantErrSub:  "resolved to empty/zero refs",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := module.NewMockApplication()
+			provider := &stubIaCProvider{}
+			if err := app.RegisterService("my-provider", provider); err != nil {
+				t.Fatal(err)
+			}
+			factory := module.NewIaCProviderDestroyStepFactory()
+			step, err := factory("destroy-step", map[string]any{
+				"provider":  "my-provider",
+				"refs_from": "steps.parse-request.body.refs",
+			}, app)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+
+			_, err = step.Execute(context.Background(), &module.PipelineContext{StepOutputs: tc.stepOutputs})
+			if err == nil {
+				t.Fatal("expected error, got nil (must not proceed with nil/zero refs)")
+			}
+			if !containsString(err.Error(), tc.wantErrSub) {
+				t.Errorf("expected error containing %q, got: %v", tc.wantErrSub, err)
+			}
+			if provider.destroyRefs != nil {
+				t.Errorf("Destroy must not be called on refs_from failure, got refs %#v", provider.destroyRefs)
+			}
+		})
 	}
 }
 

@@ -121,6 +121,21 @@ func parseResourceRefs(raw any) ([]interfaces.ResourceRef, error) {
 	return refs, nil
 }
 
+func resolveResourceRefsFrom(path, stepName, stepType string, pc *PipelineContext) ([]interfaces.ResourceRef, error) {
+	if pc == nil {
+		return nil, fmt.Errorf("%s step %q: refs_from %q resolved to empty/zero refs", stepType, stepName, path)
+	}
+	raw := resolveBodyFrom(path, pc)
+	refs, err := parseResourceRefs(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s step %q: resolve refs_from %q: %w", stepType, stepName, path, err)
+	}
+	if len(refs) == 0 {
+		return nil, fmt.Errorf("%s step %q: refs_from %q resolved to empty/zero refs", stepType, stepName, path)
+	}
+	return refs, nil
+}
+
 func parseResourceNames(raw any, present bool) ([]string, bool, error) {
 	if !present {
 		return nil, false, nil

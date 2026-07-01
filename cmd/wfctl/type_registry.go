@@ -1415,7 +1415,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.iac_provider_list": {
 			Type:       "step.iac_provider_list",
 			Plugin:     "platform",
-			ConfigKeys: []string{"provider", "refs", "resources"},
+			ConfigKeys: []string{"provider", "refs", "refs_from", "resources"},
 		},
 		"step.iac_provider_catalog": {
 			Type:       "step.iac_provider_catalog",
@@ -1435,7 +1435,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.iac_provider_destroy": {
 			Type:       "step.iac_provider_destroy",
 			Plugin:     "platform",
-			ConfigKeys: []string{"provider", "refs", "resources"},
+			ConfigKeys: []string{"provider", "refs", "refs_from", "resources"},
 		},
 		"step.iac_provider_drift": {
 			Type:       "step.iac_provider_drift",

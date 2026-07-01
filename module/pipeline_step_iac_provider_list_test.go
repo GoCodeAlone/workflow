@@ -136,6 +136,44 @@ func TestIaCProviderListStep_ResourcesResolveInfraModuleRefs(t *testing.T) {
 	}
 }
 
+func TestIaCProviderListStep_RefsFromContext(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		statusResult: []interfaces.ResourceStatus{
+			{Name: "web-vpc", Type: "infra.vpc", ProviderID: "pid-vpc", Status: "running"},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderListStepFactory()
+	step, err := factory("list-step", map[string]any{
+		"provider":  "my-provider",
+		"refs_from": "steps.parse-request.body.refs",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := &module.PipelineContext{StepOutputs: parseRequestRefsOutputs([]any{
+		map[string]any{"name": "web-vpc", "type": "infra.vpc"},
+	})}
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Output["count"] != 1 {
+		t.Errorf("expected count=1, got %v", result.Output["count"])
+	}
+	if len(provider.statusRefs) != 1 {
+		t.Fatalf("expected one status ref, got %d", len(provider.statusRefs))
+	}
+	if provider.statusRefs[0].Name != "web-vpc" || provider.statusRefs[0].Type != "infra.vpc" {
+		t.Fatalf("unexpected status refs: %#v", provider.statusRefs)
+	}
+}
+
 func TestIaCProviderListStep_Execute_UnregisteredProvider(t *testing.T) {
 	app := module.NewMockApplication()
 	factory := module.NewIaCProviderListStepFactory()
@@ -192,6 +230,84 @@ func TestIaCProviderListStep_Factory_MalformedRefs_WrongItemType(t *testing.T) {
 	}
 }
 
+func TestIaCProviderListStep_Factory_RefsFromMutuallyExclusive(t *testing.T) {
+	factory := module.NewIaCProviderListStepFactory()
+	for _, cfg := range []map[string]any{
+		{"provider": "my-provider", "refs_from": "steps.parse-request.body.refs", "refs": []any{}},
+		{"provider": "my-provider", "refs_from": "steps.parse-request.body.refs", "resources": []any{"db"}},
+	} {
+		_, err := factory("list-step", cfg, nil)
+		if err == nil {
+			t.Fatal("expected mutually exclusive refs_from factory error, got nil")
+		}
+		if !containsString(err.Error(), "mutually exclusive") {
+			t.Errorf("expected mutually exclusive error, got: %v", err)
+		}
+	}
+}
+
+func TestIaCProviderListStep_RefsFromFailures(t *testing.T) {
+	cases := []struct {
+		name        string
+		stepOutputs map[string]map[string]any
+		wantErrSub  string
+	}{
+		{
+			name:        "path missing from context",
+			stepOutputs: nil,
+			wantErrSub:  "resolved to empty/zero refs",
+		},
+		{
+			name: "body present but lacks refs key",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {"body": map[string]any{}},
+			},
+			wantErrSub: "resolved to empty/zero refs",
+		},
+		{
+			name: "refs resolves to a non-list scalar",
+			stepOutputs: map[string]map[string]any{
+				"parse-request": {"body": map[string]any{"refs": "not-a-list"}},
+			},
+			wantErrSub: "resolve refs_from",
+		},
+		{
+			name:        "refs resolves to an empty list",
+			stepOutputs: parseRequestRefsOutputs([]any{}),
+			wantErrSub:  "resolved to empty/zero refs",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app := module.NewMockApplication()
+			provider := &stubIaCProvider{}
+			if err := app.RegisterService("my-provider", provider); err != nil {
+				t.Fatal(err)
+			}
+			factory := module.NewIaCProviderListStepFactory()
+			step, err := factory("list-step", map[string]any{
+				"provider":  "my-provider",
+				"refs_from": "steps.parse-request.body.refs",
+			}, app)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+
+			_, err = step.Execute(context.Background(), &module.PipelineContext{StepOutputs: tc.stepOutputs})
+			if err == nil {
+				t.Fatal("expected error, got nil (must not proceed with nil/zero refs)")
+			}
+			if !containsString(err.Error(), tc.wantErrSub) {
+				t.Errorf("expected error containing %q, got: %v", tc.wantErrSub, err)
+			}
+			if provider.statusRefs != nil {
+				t.Errorf("Status must not be called on refs_from failure, got refs %#v", provider.statusRefs)
+			}
+		})
+	}
+}
+
 func TestIaCProviderListStep_Factory_AbsentRefs_ListsAll(t *testing.T) {
 	// Absent refs key is fine — the step queries all resources.
 	app := module.NewMockApplication()
@@ -214,6 +330,12 @@ func TestIaCProviderListStep_Factory_AbsentRefs_ListsAll(t *testing.T) {
 	}
 	if result.Output["count"] != 1 {
 		t.Errorf("expected count=1 for list-all, got %v", result.Output["count"])
+	}
+}
+
+func parseRequestRefsOutputs(refs []any) map[string]map[string]any {
+	return map[string]map[string]any{
+		"parse-request": {"body": map[string]any{"refs": refs}},
 	}
 }
 
