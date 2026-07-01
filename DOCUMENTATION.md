@@ -208,8 +208,8 @@ flowchart TD
 | `step.nosql_put` | Writes a document to a NoSQL store | datastores |
 | `step.nosql_delete` | Deletes a document from a NoSQL store by key | datastores |
 | `step.nosql_query` | Queries a NoSQL store with filter expressions | datastores |
-| `step.artifact_upload` | Uploads a file to the artifact store | storage |
-| `step.artifact_download` | Downloads a file from the artifact store | storage |
+| `step.artifact_upload` | Uploads file-backed or context-backed content to the artifact store | storage |
+| `step.artifact_download` | Downloads artifact content to a file or pipeline output | storage |
 | `step.artifact_list` | Lists artifacts in the store for a given prefix | storage |
 | `step.artifact_delete` | Deletes an artifact from the store | storage |
 | `step.secret_rotate` | Rotates a secret in the configured secrets backend | secrets |
@@ -234,6 +234,38 @@ flowchart TD
 | `step.marketplace_installed` | Lists installed marketplace plugins | marketplace |
 | `step.marketplace_uninstall` | Uninstalls a marketplace plugin | marketplace |
 | `step.marketplace_update` | Updates a marketplace plugin to the latest version | marketplace |
+
+### Artifact Pipeline Steps
+
+`step.artifact_upload` stores artifact content in a configured `storage.artifact`
+module. Use `source` to upload a server-local file, or `content_from` to upload
+string content from the pipeline context. `content_encoding` accepts `raw`,
+`text`, or `base64`; omitted encoding is treated as raw text for uploads.
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `store` | string | yes | Artifact store service name. |
+| `key` | string | yes | Artifact key; templates are resolved against the pipeline context. |
+| `source` | string | one of `source`/`content_from` | Server-local file path to upload. |
+| `content_from` | string | one of `source`/`content_from` | Pipeline context path containing artifact content as a string. |
+| `content_encoding` | string | no | Content encoding for `content_from`: `raw`, `text`, or `base64`. |
+| `metadata` | object | no | String metadata values; templates are resolved against the pipeline context. |
+
+**Output fields:** `key`, `store`, `size`.
+
+`step.artifact_download` retrieves artifact content from a configured
+`storage.artifact` module. Use `dest` to write a server-local file, or
+`content_encoding` without `dest` to return artifact bytes in the step output.
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `store` | string | yes | Artifact store service name. |
+| `key` | string | yes | Artifact key; templates are resolved against the pipeline context. |
+| `dest` | string | one of `dest`/`content_encoding` | Server-local file path to write. |
+| `content_encoding` | string | one of `dest`/`content_encoding` | Output encoding when returning content: `raw`, `text`, or `base64`. |
+
+**Output fields:** file mode returns `key`, `dest`, `size`, `metadata`; content
+mode returns `key`, `artifact_content`, `size`, `metadata`.
 
 ### CI/CD Pipeline Steps
 | Type | Description | Plugin |

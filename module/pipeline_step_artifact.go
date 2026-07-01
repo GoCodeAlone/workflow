@@ -1,7 +1,9 @@
 package module
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -29,15 +31,17 @@ func resolveArtifactStore(app modular.Application, storeName, stepName string) (
 
 // ─── step.artifact_upload ───────────────────────────────────────────────────
 
-// ArtifactUploadStep uploads a local file to a named ArtifactStore.
+// ArtifactUploadStep uploads file-backed or context-backed content to a named ArtifactStore.
 type ArtifactUploadStep struct {
-	name     string
-	store    string
-	key      string
-	source   string
-	metadata map[string]string
-	app      modular.Application
-	tmpl     *TemplateEngine
+	name            string
+	store           string
+	key             string
+	source          string
+	contentFrom     string
+	contentEncoding string
+	metadata        map[string]string
+	app             modular.Application
+	tmpl            *TemplateEngine
 }
 
 // NewArtifactUploadStepFactory returns a StepFactory for step.artifact_upload.
@@ -52,8 +56,19 @@ func NewArtifactUploadStepFactory() StepFactory {
 			return nil, fmt.Errorf("artifact_upload step %q: 'key' is required", name)
 		}
 		source, _ := config["source"].(string)
-		if source == "" {
-			return nil, fmt.Errorf("artifact_upload step %q: 'source' is required", name)
+		contentFrom, _ := config["content_from"].(string)
+		contentEncoding, _ := config["content_encoding"].(string)
+		if source == "" && contentFrom == "" {
+			return nil, fmt.Errorf("artifact_upload step %q: either 'source' or 'content_from' is required", name)
+		}
+		if source != "" && contentFrom != "" {
+			return nil, fmt.Errorf("artifact_upload step %q: only one of 'source' or 'content_from' may be set", name)
+		}
+		if source != "" && contentEncoding != "" {
+			return nil, fmt.Errorf("artifact_upload step %q: 'content_encoding' may only be set with 'content_from'", name)
+		}
+		if contentFrom != "" && !isSupportedArtifactContentEncoding(contentEncoding, true) {
+			return nil, fmt.Errorf("artifact_upload step %q: unsupported content_encoding %q", name, contentEncoding)
 		}
 
 		md := map[string]string{}
@@ -64,13 +79,15 @@ func NewArtifactUploadStepFactory() StepFactory {
 		}
 
 		return &ArtifactUploadStep{
-			name:     name,
-			store:    store,
-			key:      key,
-			source:   source,
-			metadata: md,
-			app:      app,
-			tmpl:     NewTemplateEngine(),
+			name:            name,
+			store:           store,
+			key:             key,
+			source:          source,
+			contentFrom:     contentFrom,
+			contentEncoding: contentEncoding,
+			metadata:        md,
+			app:             app,
+			tmpl:            NewTemplateEngine(),
 		}, nil
 	}
 }
@@ -88,11 +105,6 @@ func (s *ArtifactUploadStep) Execute(ctx context.Context, pc *PipelineContext) (
 		return nil, fmt.Errorf("artifact_upload step %q: key template: %w", s.name, err)
 	}
 
-	source, err := s.tmpl.Resolve(s.source, pc)
-	if err != nil {
-		return nil, fmt.Errorf("artifact_upload step %q: source template: %w", s.name, err)
-	}
-
 	// Resolve metadata templates.
 	md := make(map[string]string, len(s.metadata))
 	for k, v := range s.metadata {
@@ -103,38 +115,65 @@ func (s *ArtifactUploadStep) Execute(ctx context.Context, pc *PipelineContext) (
 		md[k] = resolved
 	}
 
-	f, err := os.Open(source)
+	reader, size, err := s.openContent(pc)
 	if err != nil {
-		return nil, fmt.Errorf("artifact_upload step %q: failed to open source %q: %w", s.name, source, err)
+		return nil, err
 	}
-	defer f.Close()
+	defer reader.Close()
 
-	stat, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("artifact_upload step %q: failed to stat source %q: %w", s.name, source, err)
-	}
-
-	if err := store.Upload(ctx, key, f, md); err != nil {
+	if err := store.Upload(ctx, key, reader, md); err != nil {
 		return nil, fmt.Errorf("artifact_upload step %q: %w", s.name, err)
 	}
 
 	return &StepResult{Output: map[string]any{
 		"key":   key,
 		"store": s.store,
-		"size":  stat.Size(),
+		"size":  size,
 	}}, nil
+}
+
+func (s *ArtifactUploadStep) openContent(pc *PipelineContext) (io.ReadCloser, int64, error) {
+	if s.source != "" {
+		source, err := s.tmpl.Resolve(s.source, pc)
+		if err != nil {
+			return nil, 0, fmt.Errorf("artifact_upload step %q: source template: %w", s.name, err)
+		}
+		f, err := os.Open(source)
+		if err != nil {
+			return nil, 0, fmt.Errorf("artifact_upload step %q: failed to open source %q: %w", s.name, source, err)
+		}
+		stat, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return nil, 0, fmt.Errorf("artifact_upload step %q: failed to stat source %q: %w", s.name, source, err)
+		}
+		return f, stat.Size(), nil
+	}
+
+	raw := resolveBodyFrom(s.contentFrom, pc)
+	content, ok := raw.(string)
+	if !ok {
+		return nil, 0, fmt.Errorf("artifact_upload step %q: content_from %q resolved to %T, want string", s.name, s.contentFrom, raw)
+	}
+
+	data, err := decodeArtifactContent(content, s.contentEncoding)
+	if err != nil {
+		return nil, 0, fmt.Errorf("artifact_upload step %q: %w", s.name, err)
+	}
+	return io.NopCloser(bytes.NewReader(data)), int64(len(data)), nil
 }
 
 // ─── step.artifact_download ─────────────────────────────────────────────────
 
-// ArtifactDownloadStep downloads an artifact from a named ArtifactStore to a local path.
+// ArtifactDownloadStep downloads an artifact from a named ArtifactStore to a local path or step output.
 type ArtifactDownloadStep struct {
-	name  string
-	store string
-	key   string
-	dest  string
-	app   modular.Application
-	tmpl  *TemplateEngine
+	name            string
+	store           string
+	key             string
+	dest            string
+	contentEncoding string
+	app             modular.Application
+	tmpl            *TemplateEngine
 }
 
 // NewArtifactDownloadStepFactory returns a StepFactory for step.artifact_download.
@@ -149,17 +188,25 @@ func NewArtifactDownloadStepFactory() StepFactory {
 			return nil, fmt.Errorf("artifact_download step %q: 'key' is required", name)
 		}
 		dest, _ := config["dest"].(string)
-		if dest == "" {
-			return nil, fmt.Errorf("artifact_download step %q: 'dest' is required", name)
+		contentEncoding, _ := config["content_encoding"].(string)
+		if dest == "" && contentEncoding == "" {
+			return nil, fmt.Errorf("artifact_download step %q: either 'dest' or 'content_encoding' is required", name)
+		}
+		if dest != "" && contentEncoding != "" {
+			return nil, fmt.Errorf("artifact_download step %q: only one of 'dest' or 'content_encoding' may be set", name)
+		}
+		if contentEncoding != "" && !isSupportedArtifactContentEncoding(contentEncoding, false) {
+			return nil, fmt.Errorf("artifact_download step %q: unsupported content_encoding %q", name, contentEncoding)
 		}
 
 		return &ArtifactDownloadStep{
-			name:  name,
-			store: store,
-			key:   key,
-			dest:  dest,
-			app:   app,
-			tmpl:  NewTemplateEngine(),
+			name:            name,
+			store:           store,
+			key:             key,
+			dest:            dest,
+			contentEncoding: contentEncoding,
+			app:             app,
+			tmpl:            NewTemplateEngine(),
 		}, nil
 	}
 }
@@ -177,16 +224,33 @@ func (s *ArtifactDownloadStep) Execute(ctx context.Context, pc *PipelineContext)
 		return nil, fmt.Errorf("artifact_download step %q: key template: %w", s.name, err)
 	}
 
-	dest, err := s.tmpl.Resolve(s.dest, pc)
-	if err != nil {
-		return nil, fmt.Errorf("artifact_download step %q: dest template: %w", s.name, err)
-	}
-
 	reader, md, err := store.Download(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("artifact_download step %q: %w", s.name, err)
 	}
 	defer reader.Close()
+
+	if s.dest == "" {
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, fmt.Errorf("artifact_download step %q: failed to read artifact content: %w", s.name, err)
+		}
+		content, err := encodeArtifactContent(data, s.contentEncoding)
+		if err != nil {
+			return nil, fmt.Errorf("artifact_download step %q: %w", s.name, err)
+		}
+		return &StepResult{Output: map[string]any{
+			"key":              key,
+			"artifact_content": content,
+			"size":             int64(len(data)),
+			"metadata":         md,
+		}}, nil
+	}
+
+	dest, err := s.tmpl.Resolve(s.dest, pc)
+	if err != nil {
+		return nil, fmt.Errorf("artifact_download step %q: dest template: %w", s.name, err)
+	}
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return nil, fmt.Errorf("artifact_download step %q: failed to create destination directory: %w", s.name, err)
@@ -209,6 +273,43 @@ func (s *ArtifactDownloadStep) Execute(ctx context.Context, pc *PipelineContext)
 		"size":     written,
 		"metadata": md,
 	}}, nil
+}
+
+func decodeArtifactContent(content, encoding string) ([]byte, error) {
+	switch strings.ToLower(encoding) {
+	case "", "raw", "text":
+		return []byte(content), nil
+	case "base64":
+		data, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return nil, fmt.Errorf("decode base64 content: %w", err)
+		}
+		return data, nil
+	default:
+		return nil, fmt.Errorf("unsupported content_encoding %q", encoding)
+	}
+}
+
+func isSupportedArtifactContentEncoding(encoding string, allowEmpty bool) bool {
+	switch strings.ToLower(encoding) {
+	case "":
+		return allowEmpty
+	case "raw", "text", "base64":
+		return true
+	default:
+		return false
+	}
+}
+
+func encodeArtifactContent(data []byte, encoding string) (string, error) {
+	switch strings.ToLower(encoding) {
+	case "raw", "text":
+		return string(data), nil
+	case "base64":
+		return base64.StdEncoding.EncodeToString(data), nil
+	default:
+		return "", fmt.Errorf("unsupported content_encoding %q", encoding)
+	}
 }
 
 // ─── step.artifact_list ─────────────────────────────────────────────────────

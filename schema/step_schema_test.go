@@ -39,6 +39,56 @@ func TestStepSchemaRegistry_Outputs(t *testing.T) {
 	}
 }
 
+func TestStepSchemaRegistry_ArtifactContentFields(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+
+	upload := reg.Get("step.artifact_upload")
+	if upload == nil {
+		t.Fatal("missing step.artifact_upload schema")
+	}
+	for _, key := range []string{"source", "content_from", "content_encoding"} {
+		if !hasConfigField(upload, key) {
+			t.Errorf("step.artifact_upload missing config field %q", key)
+		}
+	}
+	if !hasStepOutput(upload, "size") {
+		t.Error("step.artifact_upload missing size output")
+	}
+
+	download := reg.Get("step.artifact_download")
+	if download == nil {
+		t.Fatal("missing step.artifact_download schema")
+	}
+	for _, key := range []string{"dest", "content_encoding"} {
+		if !hasConfigField(download, key) {
+			t.Errorf("step.artifact_download missing config field %q", key)
+		}
+	}
+	for _, key := range []string{"dest", "artifact_content", "size", "metadata"} {
+		if !hasStepOutput(download, key) {
+			t.Errorf("step.artifact_download missing output %q", key)
+		}
+	}
+}
+
+func hasConfigField(s *StepSchema, key string) bool {
+	for _, field := range s.ConfigFields {
+		if field.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func hasStepOutput(s *StepSchema, key string) bool {
+	for _, output := range s.Outputs {
+		if output.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
 func TestStepSchemaRegistry_RegisterCustom(t *testing.T) {
 	reg := NewStepSchemaRegistry()
 	custom := &StepSchema{
