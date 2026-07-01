@@ -283,6 +283,46 @@ tests:
 	}
 }
 
+func TestRunTestFile_WithExternalPluginDir(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.Mkdir(pluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	writeTestYAML(t, dir, "external_test.yaml", `
+plugin_dir: plugins
+yaml: |
+  pipelines:
+    external:
+      steps:
+        - name: marker
+          type: step.test_external_marker
+          config:
+            value: loaded
+tests:
+  external-step:
+    trigger:
+      type: pipeline
+      name: external
+    assertions:
+      - step: marker
+        output:
+          external_marker_loaded: true
+          external_marker_value: loaded
+`)
+
+	restore := overrideLocalExternalPluginLoader(t, pluginDir)
+	defer restore()
+
+	pass, fail, err := runTestFile(filepath.Join(dir, "external_test.yaml"), false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pass != 1 || fail != 0 {
+		t.Fatalf("expected pass=1 fail=0, got pass=%d fail=%d", pass, fail)
+	}
+}
+
 // --- runTest (integration) ---
 
 func TestRunTest_DirectoryTarget(t *testing.T) {

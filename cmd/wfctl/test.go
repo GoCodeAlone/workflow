@@ -234,10 +234,11 @@ func printBDDGuidance(featureFiles []string) {
 
 // testFile mirrors wftest.TestFile without the testing.T dependency.
 type testFile struct {
-	Config string              `yaml:"config"`
-	YAML   string              `yaml:"yaml"`
-	Mocks  testMockConfig      `yaml:"mocks"`
-	Tests  map[string]testCase `yaml:"tests"`
+	Config    string              `yaml:"config"`
+	YAML      string              `yaml:"yaml"`
+	PluginDir string              `yaml:"plugin_dir"`
+	Mocks     testMockConfig      `yaml:"mocks"`
+	Tests     map[string]testCase `yaml:"tests"`
 }
 
 type testMockConfig struct {
@@ -305,6 +306,9 @@ func runTestFile(path string, verbose bool) (pass, fail int, err error) {
 	if tf.Config != "" && !filepath.IsAbs(tf.Config) {
 		tf.Config = filepath.Join(filepath.Dir(path), tf.Config)
 	}
+	if tf.PluginDir != "" && !filepath.IsAbs(tf.PluginDir) {
+		tf.PluginDir = filepath.Join(filepath.Dir(path), tf.PluginDir)
+	}
 
 	fmt.Printf("%s\n", filepath.Base(path))
 
@@ -338,12 +342,13 @@ func runTestCase(name string, tf *testFile, tc *testCase) *testResult {
 	merged := mergeTestMocks(&tf.Mocks, tc.Mocks)
 
 	// Build engine.
-	eng, err := buildTestEngine(tf, merged)
+	eng, cleanup, err := buildTestEngine(tf, merged)
 	if err != nil {
 		r.failures = append(r.failures, fmt.Sprintf("engine setup: %v", err))
 		r.duration = time.Since(start)
 		return r
 	}
+	defer cleanup()
 
 	// Execute the trigger.
 	result, stepOutputs, err := executeTestTrigger(eng, tc)
@@ -360,7 +365,7 @@ func runTestCase(name string, tf *testFile, tc *testCase) *testResult {
 }
 
 // buildTestEngine creates a StdEngine from the TestFile config and mocks.
-func buildTestEngine(tf *testFile, mocks *testMockConfig) (*workflow.StdEngine, error) {
+func buildTestEngine(tf *testFile, mocks *testMockConfig) (*workflow.StdEngine, func(), error) {
 	logger := &testDiscardLogger{}
 	app := modular.NewStdApplication(nil, logger)
 	eng := workflow.NewStdEngine(app, logger)
@@ -368,8 +373,12 @@ func buildTestEngine(tf *testFile, mocks *testMockConfig) (*workflow.StdEngine, 
 	// Load all built-in plugins.
 	for _, p := range testBuiltinPlugins() {
 		if err := eng.LoadPlugin(p); err != nil {
-			return nil, fmt.Errorf("LoadPlugin(%s): %w", p.Name(), err)
+			return nil, nil, fmt.Errorf("LoadPlugin(%s): %w", p.Name(), err)
 		}
+	}
+	shutdownExternalPlugins, loadErr := loadExternalPluginsForLocalEngine(eng, tf.PluginDir, slog.Default())
+	if loadErr != nil {
+		return nil, nil, loadErr
 	}
 
 	// Register mock step factories.
@@ -389,17 +398,20 @@ func buildTestEngine(tf *testFile, mocks *testMockConfig) (*workflow.StdEngine, 
 	case tf.Config != "":
 		cfg, err = config.LoadFromFile(tf.Config)
 	default:
-		return nil, fmt.Errorf("test file must set 'yaml' or 'config'")
+		shutdownExternalPlugins()
+		return nil, nil, fmt.Errorf("test file must set 'yaml' or 'config'")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		shutdownExternalPlugins()
+		return nil, nil, fmt.Errorf("load config: %w", err)
 	}
 
 	if err := eng.BuildFromConfig(cfg); err != nil {
-		return nil, fmt.Errorf("BuildFromConfig: %w", err)
+		shutdownExternalPlugins()
+		return nil, nil, fmt.Errorf("BuildFromConfig: %w", err)
 	}
 
-	return eng, nil
+	return eng, shutdownExternalPlugins, nil
 }
 
 // executeTestTrigger runs the trigger and returns output, step outputs, and any error.
