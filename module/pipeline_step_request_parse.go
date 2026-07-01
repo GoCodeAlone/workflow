@@ -18,6 +18,7 @@ type RequestParseStep struct {
 	pathParams   []string
 	queryParams  []string
 	parseBody    bool
+	mergeBody    bool
 	parseHeaders []string
 }
 
@@ -50,6 +51,7 @@ func NewRequestParseStepFactory() StepFactory {
 		if format, _ := config["format"].(string); strings.EqualFold(format, "json") || strings.EqualFold(format, "form") {
 			parseBody = true
 		}
+		mergeBody, _ := config["merge_body"].(bool)
 
 		var parseHeaders []string
 		if ph, ok := config["parse_headers"]; ok {
@@ -67,6 +69,7 @@ func NewRequestParseStepFactory() StepFactory {
 			pathParams:   pathParams,
 			queryParams:  queryParams,
 			parseBody:    parseBody,
+			mergeBody:    mergeBody,
 			parseHeaders: parseHeaders,
 		}, nil
 	}
@@ -154,9 +157,9 @@ func (s *RequestParseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	// then fall back to reading from the HTTP request directly
 	if s.parseBody {
 		if body, ok := pc.TriggerData["body"].(map[string]any); ok {
-			output["body"] = body
+			s.addBodyOutput(output, body)
 		} else if body, ok := pc.Current["body"].(map[string]any); ok {
-			output["body"] = body
+			s.addBodyOutput(output, body)
 		} else {
 			req, _ := pc.Metadata["_http_request"].(*http.Request)
 			if req != nil {
@@ -187,12 +190,12 @@ func (s *RequestParseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 									bodyData[k] = v
 								}
 							}
-							output["body"] = bodyData
+							s.addBodyOutput(output, bodyData)
 						}
 					} else {
 						var bodyData map[string]any
 						if json.Unmarshal(bodyBytes, &bodyData) == nil {
-							output["body"] = bodyData
+							s.addBodyOutput(output, bodyData)
 						}
 					}
 				}
@@ -201,4 +204,14 @@ func (s *RequestParseStep) Execute(_ context.Context, pc *PipelineContext) (*Ste
 	}
 
 	return &StepResult{Output: output}, nil
+}
+
+func (s *RequestParseStep) addBodyOutput(output map[string]any, body map[string]any) {
+	output["body"] = body
+	if !s.mergeBody {
+		return
+	}
+	for k, v := range body {
+		output[k] = v
+	}
 }

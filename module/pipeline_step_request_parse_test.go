@@ -98,6 +98,48 @@ func TestRequestParseStep_ParseBody(t *testing.T) {
 	}
 }
 
+func TestRequestParseStep_MergeBodyPromotesJSONFields(t *testing.T) {
+	factory := NewRequestParseStepFactory()
+	step, err := factory("parse-body", map[string]any{
+		"parse_body": true,
+		"merge_body": true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"remote_id":"bob@example.test","remote_bundle":{"device_id":1},"plaintext":"cHJpdmF0ZQ=="}`)
+	req, _ := http.NewRequest("POST", "/messages", body)
+	req.Header.Set("Content-Type", "application/json")
+
+	pc := NewPipelineContext(nil, map[string]any{
+		"_http_request": req,
+	})
+
+	result, err := step.Execute(context.Background(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	bodyData, ok := result.Output["body"].(map[string]any)
+	if !ok {
+		t.Fatal("expected body in output")
+	}
+	if bodyData["remote_id"] != "bob@example.test" {
+		t.Errorf("expected body.remote_id='bob@example.test', got %v", bodyData["remote_id"])
+	}
+	if result.Output["remote_id"] != "bob@example.test" {
+		t.Errorf("expected promoted remote_id='bob@example.test', got %v", result.Output["remote_id"])
+	}
+	bundle, ok := result.Output["remote_bundle"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected promoted remote_bundle map, got %T", result.Output["remote_bundle"])
+	}
+	if bundle["device_id"] != float64(1) {
+		t.Errorf("expected promoted remote_bundle.device_id=1, got %v", bundle["device_id"])
+	}
+}
+
 func TestRequestParseStep_FormatJSONAlias(t *testing.T) {
 	factory := NewRequestParseStepFactory()
 	step, err := factory("parse-body", map[string]any{
