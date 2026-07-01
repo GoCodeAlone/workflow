@@ -519,6 +519,55 @@ func TestArtifactDownloadStep_ContentBase64Output(t *testing.T) {
 	}
 }
 
+func TestArtifactDownloadStep_ContentOutputMaxBytes(t *testing.T) {
+	store := newMockArtifactStore()
+	store.data["builds/v1/app.bin"] = []byte("too large")
+	app := mockAppWithArtifactStore("artifacts", store)
+
+	factory := NewArtifactDownloadStepFactory()
+	step, err := factory("download-app", map[string]any{
+		"store":            "artifacts",
+		"key":              "builds/v1/app.bin",
+		"content_encoding": "base64",
+		"max_bytes":        3,
+	}, app)
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	_, err = step.Execute(t.Context(), NewPipelineContext(nil, nil))
+	if err == nil {
+		t.Fatal("expected max_bytes error")
+	}
+	if !strings.Contains(err.Error(), "exceeds max_bytes") {
+		t.Fatalf("expected max_bytes error, got %v", err)
+	}
+}
+
+func TestArtifactDownloadStep_EmptyResolvedDest(t *testing.T) {
+	store := newMockArtifactStore()
+	store.data["builds/v1/app.bin"] = []byte("downloaded content")
+	app := mockAppWithArtifactStore("artifacts", store)
+
+	factory := NewArtifactDownloadStepFactory()
+	step, err := factory("download-app", map[string]any{
+		"store": "artifacts",
+		"key":   "builds/v1/app.bin",
+		"dest":  "{{ .missing_dest }}",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	_, err = step.Execute(t.Context(), NewPipelineContext(nil, nil))
+	if err == nil {
+		t.Fatal("expected empty dest error")
+	}
+	if !strings.Contains(err.Error(), "resolved dest is empty") {
+		t.Fatalf("expected empty dest error, got %v", err)
+	}
+}
+
 func TestArtifactDownloadStep_MissingRequiredConfig(t *testing.T) {
 	factory := NewArtifactDownloadStepFactory()
 
@@ -550,6 +599,15 @@ func TestArtifactDownloadStep_MissingRequiredConfig(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Error("expected error for unsupported content_encoding")
+	}
+	_, err = factory("x", map[string]any{
+		"store":            "s",
+		"key":              "k",
+		"content_encoding": "base64",
+		"max_bytes":        -1,
+	}, nil)
+	if err == nil {
+		t.Error("expected error for negative max_bytes")
 	}
 }
 
