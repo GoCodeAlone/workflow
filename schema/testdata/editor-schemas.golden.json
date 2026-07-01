@@ -6199,7 +6199,7 @@
           "key": "body_from",
           "label": "Body From",
           "type": "string",
-          "description": "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)",
+          "description": "Dotted path to resolve body from pipeline context or step outputs; use . for the full current context (e.g., steps.get-company.row)",
           "placeholder": "steps.get-company.row"
         }
       ]
@@ -7011,7 +7011,7 @@
           "key": "body_from",
           "label": "Body From",
           "type": "string",
-          "description": "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)",
+          "description": "Dotted path to resolve body from pipeline context or step outputs; use . for the full current context (e.g., steps.get-company.row)",
           "placeholder": "steps.get-company.row"
         }
       ]

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -254,6 +255,10 @@ func decodeJSONObjectOrArray(value string) any {
 // pipeline context. It looks in StepOutputs first (for "steps.X.Y" paths),
 // then in Current.
 func resolveBodyFrom(path string, pc *PipelineContext) any {
+	if path == "." {
+		return maps.Clone(pc.Current)
+	}
+
 	parts := strings.SplitN(path, ".", 2)
 	if len(parts) < 2 {
 		// Single key — look in Current
