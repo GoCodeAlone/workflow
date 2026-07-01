@@ -1715,9 +1715,11 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cloud",
 		Description: "Validates cloud provider credentials and connectivity.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "account", Type: FieldTypeString, Description: "Name of the cloud.account module", Required: true},
+			{Key: "account", Type: FieldTypeString, Description: "Static name of the cloud.account module; mutually exclusive with account_from"},
+			{Key: "account_from", Type: FieldTypeString, Description: "Pipeline context path resolving to the cloud.account module name; mutually exclusive with account"},
 		},
 		Outputs: []StepOutputDef{
+			{Key: "account", Type: "string", Description: "Validated cloud account service name"},
 			{Key: "valid", Type: "boolean", Description: "Whether credentials are valid"},
 			{Key: "provider", Type: "string", Description: "Cloud provider name"},
 			{Key: "region", Type: "string", Description: "Configured region"},

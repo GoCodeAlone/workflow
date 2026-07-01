@@ -11,22 +11,28 @@ import (
 // and non-empty. It looks up a CloudCredentialProvider from the service registry
 // by account name, calls GetCredentials, and returns a summary JSON result.
 type CloudValidateStep struct {
-	name    string
-	account string // service name of the CloudAccount module
-	app     modular.Application
+	name        string
+	account     string // service name of the CloudAccount module
+	accountFrom string // pipeline context path resolving to a CloudAccount service name
+	app         modular.Application
 }
 
 // NewCloudValidateStepFactory returns a StepFactory for step.cloud_validate.
 func NewCloudValidateStepFactory() StepFactory {
 	return func(name string, config map[string]any, app modular.Application) (PipelineStep, error) {
 		account, _ := config["account"].(string)
-		if account == "" {
-			return nil, fmt.Errorf("cloud_validate step %q: 'account' is required", name)
+		accountFrom, _ := config["account_from"].(string)
+		if account == "" && accountFrom == "" {
+			return nil, fmt.Errorf("cloud_validate step %q: either 'account' or 'account_from' is required", name)
+		}
+		if account != "" && accountFrom != "" {
+			return nil, fmt.Errorf("cloud_validate step %q: only one of 'account' or 'account_from' may be set", name)
 		}
 		return &CloudValidateStep{
-			name:    name,
-			account: account,
-			app:     app,
+			name:        name,
+			account:     account,
+			accountFrom: accountFrom,
+			app:         app,
 		}, nil
 	}
 }
@@ -35,8 +41,13 @@ func NewCloudValidateStepFactory() StepFactory {
 func (s *CloudValidateStep) Name() string { return s.name }
 
 // Execute validates the configured cloud account's credentials.
-func (s *CloudValidateStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
-	provider, err := s.resolveProvider()
+func (s *CloudValidateStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	account, err := s.resolveAccount(pc)
+	if err != nil {
+		return nil, fmt.Errorf("cloud_validate step %q: %w", s.name, err)
+	}
+
+	provider, err := s.resolveProvider(account)
 	if err != nil {
 		return nil, fmt.Errorf("cloud_validate step %q: %w", s.name, err)
 	}
@@ -51,7 +62,7 @@ func (s *CloudValidateStep) Execute(ctx context.Context, _ *PipelineContext) (*S
 	}
 
 	output := map[string]any{
-		"account":  s.account,
+		"account":  account,
 		"provider": provider.Provider(),
 		"region":   provider.Region(),
 		"valid":    valid,
@@ -79,18 +90,33 @@ func (s *CloudValidateStep) Execute(ctx context.Context, _ *PipelineContext) (*S
 	return &StepResult{Output: output}, nil
 }
 
+func (s *CloudValidateStep) resolveAccount(pc *PipelineContext) (string, error) {
+	if s.account != "" {
+		return s.account, nil
+	}
+	if pc == nil {
+		return "", fmt.Errorf("account_from %q requires a pipeline context", s.accountFrom)
+	}
+	raw := resolveBodyFrom(s.accountFrom, pc)
+	account, ok := raw.(string)
+	if !ok || account == "" {
+		return "", fmt.Errorf("account_from %q resolved to %T, want non-empty string", s.accountFrom, raw)
+	}
+	return account, nil
+}
+
 // resolveProvider looks up the CloudCredentialProvider from the service registry.
-func (s *CloudValidateStep) resolveProvider() (CloudCredentialProvider, error) {
+func (s *CloudValidateStep) resolveProvider(account string) (CloudCredentialProvider, error) {
 	if s.app == nil {
 		return nil, fmt.Errorf("no application context")
 	}
-	svc, ok := s.app.SvcRegistry()[s.account]
+	svc, ok := s.app.SvcRegistry()[account]
 	if !ok {
-		return nil, fmt.Errorf("account service %q not found in registry", s.account)
+		return nil, fmt.Errorf("account service %q not found in registry", account)
 	}
 	provider, ok := svc.(CloudCredentialProvider)
 	if !ok {
-		return nil, fmt.Errorf("service %q does not implement CloudCredentialProvider", s.account)
+		return nil, fmt.Errorf("service %q does not implement CloudCredentialProvider", account)
 	}
 	return provider, nil
 }
