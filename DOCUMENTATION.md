@@ -395,8 +395,9 @@ Typed IaC provider steps (`step.iac_provider_plan`, `step.iac_provider_apply`,
 `step.iac_provider_list`, and `step.iac_provider_destroy`) can operate on named
 `infra.*` app modules with `resources: [module-name]`. That keeps resource
 configuration in the module graph while pipelines expose application actions.
-Use `specs` or `specs_from` only when the desired resources are authored or
-provided by the request itself.
+Use `specs`/`specs_from` when desired resources are authored or provided by the
+request itself; use `refs`/`refs_from` when a request selects existing resources
+to inspect or destroy.
 
 ### Expression Syntax
 

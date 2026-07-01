@@ -32,6 +32,7 @@ type IaCProviderListStep struct {
 	name      string
 	provider  string
 	refs      []interfaces.ResourceRef
+	refsFrom  string
 	resources []string
 	app       modular.Application
 }
@@ -43,6 +44,8 @@ func NewIaCProviderListStepFactory() StepFactory {
 		if providerName == "" {
 			return nil, fmt.Errorf("iac_provider_list step %q: 'provider' is required", name)
 		}
+		rawRefsFrom, hasRefsFrom := cfg["refs_from"]
+		refsFrom, refsFromOK := rawRefsFrom.(string)
 		// Optional: list of refs to query; absent means pass nil to Status
 		// (providers should return all resources when refs is nil/empty).
 		// If "refs" is present but malformed (wrong type or wrong item shape), the
@@ -78,13 +81,27 @@ func NewIaCProviderListStepFactory() StepFactory {
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_list step %q: parse resources: %w", name, err)
 		}
-		if hasRefs && hasResources {
-			return nil, fmt.Errorf("iac_provider_list step %q: 'refs' and 'resources' are mutually exclusive", name)
+		inputSources := 0
+		if hasRefs {
+			inputSources++
+		}
+		if hasRefsFrom {
+			inputSources++
+		}
+		if hasResources {
+			inputSources++
+		}
+		if inputSources > 1 {
+			return nil, fmt.Errorf("iac_provider_list step %q: 'refs', 'refs_from', and 'resources' are mutually exclusive", name)
+		}
+		if hasRefsFrom && (!refsFromOK || refsFrom == "") {
+			return nil, fmt.Errorf("iac_provider_list step %q: 'refs_from' must be a non-empty string", name)
 		}
 		return &IaCProviderListStep{
 			name:      name,
 			provider:  providerName,
 			refs:      refs,
+			refsFrom:  refsFrom,
 			resources: resources,
 			app:       app,
 		}, nil
@@ -93,13 +110,19 @@ func NewIaCProviderListStepFactory() StepFactory {
 
 func (s *IaCProviderListStep) Name() string { return s.name }
 
-func (s *IaCProviderListStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *IaCProviderListStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
 	provider, err := resolveIaCProvider(s.app, s.provider, s.name, "iac_provider_list")
 	if err != nil {
 		return nil, err
 	}
 
 	refs := s.refs
+	if s.refsFrom != "" {
+		refs, err = resolveResourceRefsFrom(s.refsFrom, s.name, "iac_provider_list", pc)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if len(s.resources) > 0 {
 		refs, err = resolveResourceRefs(s.app, s.resources)
 		if err != nil {
