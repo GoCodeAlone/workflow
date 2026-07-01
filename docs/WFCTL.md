@@ -45,6 +45,7 @@ graph TD
     wfctl --> validate
     wfctl --> inspect
     wfctl --> run
+    wfctl --> test
     wfctl --> plugin
     wfctl --> pipeline
     wfctl --> schema
@@ -179,7 +180,7 @@ graph TD
 |----------|----------|
 | **Project Setup** | `init`, `run`, `wizard` |
 | **Local Development** | `dev up/down/logs/status/restart` (--local, --k8s, --expose) |
-| **Validation & Inspection** | `validate`, `inspect`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
+| **Validation & Inspection** | `validate`, `inspect`, `test`, `schema`, `compat check`, `template validate`, `editor-schemas`, `dsl-reference` |
 | **API & Contract** | `api extract`, `contract test`, `diff` |
 | **Deployment** | `deploy docker/kubernetes/helm/cloud`, `build-ui`, `generate github-actions` |
 | **Infrastructure** | `infra derive/plan/apply/destroy/status/drift/import/bootstrap/outputs/owners/test`, `infra state list/export/import` |
@@ -1118,6 +1119,7 @@ wfctl pipeline run -c <config.yaml> -p <pipeline-name> [options]
 |------|---------|-------------|
 | `-c` | _(required)_ | Path to workflow config YAML file |
 | `-p` | _(required)_ | Name of the pipeline to run |
+| `--plugin-dir` | _(none)_ | Directory containing installed external plugins; plugin module and step types are loaded before config compilation |
 | `-input` | _(none)_ | Input data as a JSON object |
 | `-verbose` | `false` | Show detailed step output |
 | `-var` | _(none)_ | Variable in `key=value` format (repeatable) |
@@ -1128,6 +1130,58 @@ wfctl pipeline run -c <config.yaml> -p <pipeline-name> [options]
 wfctl pipeline run -c app.yaml -p build-and-deploy
 wfctl pipeline run -c app.yaml -p deploy --var env=staging --var version=1.2.3
 wfctl pipeline run -c app.yaml -p process-data --input '{"items":[1,2,3]}'
+wfctl pipeline run -c app.yaml -p verify --plugin-dir .wfctl/plugins
+```
+
+---
+
+### `test`
+
+Run YAML-based Workflow integration tests. Each `*_test.yaml` file embeds or
+references a Workflow config, triggers one or more pipelines, and asserts final
+pipeline output or individual step output.
+
+```
+wfctl test [options] <file_or_dir> [file_or_dir ...]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-v` | `false` | Print each passing assertion |
+| `--coverage` | `false` | Print pipeline and BDD scenario coverage instead of executing tests |
+| `--strict` | `false` | Fail coverage mode when any pipeline is uncovered |
+
+Test files can set `plugin_dir` to load installed external plugins before the
+Workflow config is compiled. Relative `config` and `plugin_dir` values resolve
+relative to the test file.
+
+```yaml
+plugin_dir: .wfctl/plugins
+yaml: |
+  pipelines:
+    verify:
+      steps:
+        - name: external-step
+          type: step.example_external
+          config:
+            value: ok
+tests:
+  external-step:
+    trigger:
+      type: pipeline
+      name: verify
+    assertions:
+      - step: external-step
+        output:
+          value: ok
+```
+
+**Examples:**
+
+```bash
+wfctl test tests/
+wfctl test -v tests/pipeline_test.yaml
+wfctl test --coverage config.yaml features/
 ```
 
 ---

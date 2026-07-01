@@ -110,6 +110,7 @@ func runPipelineRun(args []string) error {
 	fs := flag.NewFlagSet("pipeline run", flag.ContinueOnError)
 	configPath := fs.String("c", "", "Path to workflow config YAML file (required)")
 	pipelineName := fs.String("p", "", "Name of the pipeline to run (required)")
+	pluginDir := fs.String("plugin-dir", "", "Directory containing installed external plugins")
 	inputJSON := fs.String("input", "", "Input data as JSON object")
 	verbose := fs.Bool("verbose", false, "Show detailed step output")
 	var vars stringSliceFlag
@@ -123,6 +124,7 @@ Examples:
   wfctl pipeline run -c app.yaml -p build-and-deploy
   wfctl pipeline run -c app.yaml -p deploy --var env=staging --var version=1.2.3
   wfctl pipeline run -c app.yaml -p process-data --input '{"items":[1,2,3]}'
+  wfctl pipeline run -c app.yaml -p verify --plugin-dir .wfctl/plugins
 
 Options:
 `)
@@ -192,8 +194,19 @@ Options:
 		WithLogger(logger).
 		WithHandler(handlers.NewPipelineWorkflowHandler()).
 		WithPlugin(pluginpipeline.New()).
-		BuildFromConfig(cfg)
+		Build()
 	if err != nil {
+		return fmt.Errorf("failed to build engine: %w", err)
+	}
+	shutdownExternalPlugins, err := loadExternalPluginsForLocalEngine(eng, *pluginDir, logger)
+	if err != nil {
+		return err
+	}
+	if shutdownExternalPlugins == nil {
+		shutdownExternalPlugins = func() {}
+	}
+	defer shutdownExternalPlugins()
+	if err := eng.BuildFromConfig(cfg); err != nil {
 		return fmt.Errorf("failed to build engine from config: %w", err)
 	}
 

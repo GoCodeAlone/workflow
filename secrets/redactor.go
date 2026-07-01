@@ -93,6 +93,7 @@ func (r *Redactor) LoadFromProvider(ctx context.Context, p Provider) error {
 	keys, err := p.List(ctx)
 	if err != nil {
 		// Graceful-degrade: leave the existing set untouched.
+		//nolint:nilerr // LoadFromProvider intentionally degrades on provider list errors.
 		return nil
 	}
 	fresh := make(map[string]string, len(keys))

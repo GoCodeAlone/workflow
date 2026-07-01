@@ -285,6 +285,33 @@ func TestRunPipelineRunEchoPipeline(t *testing.T) {
 	}
 }
 
+func TestRunPipelineRunWithExternalPluginDir(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.Mkdir(pluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	path := writePipelineConfig(t, dir, "external.yaml", `
+modules: []
+
+pipelines:
+  external:
+    steps:
+      - name: marker
+        type: step.test_external_marker
+        config:
+          value: loaded
+    on_error: stop
+`)
+
+	restore := overrideLocalExternalPluginLoader(t, pluginDir)
+	defer restore()
+
+	if err := runPipelineRun([]string{"-c", path, "-p", "external", "--plugin-dir", pluginDir}); err != nil {
+		t.Fatalf("pipeline run with external plugin dir failed: %v", err)
+	}
+}
+
 // --- stringSliceFlag ---
 
 func TestStringSliceFlag(t *testing.T) {
