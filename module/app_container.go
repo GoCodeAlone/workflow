@@ -205,12 +205,24 @@ func (m *AppContainerModule) RequiresServices() []modular.ServiceDependency {
 // Deploy stores the previous deployment state and creates a new deployment.
 // The mock backend immediately transitions to "active".
 func (m *AppContainerModule) Deploy() (*AppDeployResult, error) {
+	return m.deployWithSpec(m.spec)
+}
+
+// DeployWithSpec deploys using an operation-specific spec without changing the
+// module's configured default spec.
+func (m *AppContainerModule) DeployWithSpec(spec AppContainerSpec) (*AppDeployResult, error) {
+	return m.deployWithSpec(spec)
+}
+
+func (m *AppContainerModule) deployWithSpec(spec AppContainerSpec) (*AppDeployResult, error) {
 	// Preserve current as previous for rollback.
 	if m.current != nil {
 		prev := *m.current
 		m.previous = &prev
 	}
-	result, err := m.backend.deploy(m)
+	deployTarget := *m
+	deployTarget.spec = spec
+	result, err := m.backend.deploy(&deployTarget)
 	if err != nil {
 		return nil, err
 	}
