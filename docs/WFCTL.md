@@ -1119,7 +1119,7 @@ wfctl pipeline run -c <config.yaml> -p <pipeline-name> [options]
 |------|---------|-------------|
 | `-c` | _(required)_ | Path to workflow config YAML file |
 | `-p` | _(required)_ | Name of the pipeline to run |
-| `-plugin-dir` | _(none)_ | Directory containing installed external plugins; plugin module and step types are loaded before config compilation |
+| `--plugin-dir` | _(none)_ | Directory containing installed external plugins; plugin module and step types are loaded before config compilation |
 | `-input` | _(none)_ | Input data as a JSON object |
 | `-verbose` | `false` | Show detailed step output |
 | `-var` | _(none)_ | Variable in `key=value` format (repeatable) |

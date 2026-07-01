@@ -380,6 +380,9 @@ func buildTestEngine(tf *testFile, mocks *testMockConfig) (*workflow.StdEngine, 
 	if loadErr != nil {
 		return nil, nil, loadErr
 	}
+	if shutdownExternalPlugins == nil {
+		shutdownExternalPlugins = func() {}
+	}
 
 	// Register mock step factories.
 	if mocks != nil {

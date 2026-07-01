@@ -124,7 +124,7 @@ Examples:
   wfctl pipeline run -c app.yaml -p build-and-deploy
   wfctl pipeline run -c app.yaml -p deploy --var env=staging --var version=1.2.3
   wfctl pipeline run -c app.yaml -p process-data --input '{"items":[1,2,3]}'
-  wfctl pipeline run -c app.yaml -p verify --plugin-dir .workflow/plugins
+  wfctl pipeline run -c app.yaml -p verify --plugin-dir .wfctl/plugins
 
 Options:
 `)
@@ -201,6 +201,9 @@ Options:
 	shutdownExternalPlugins, err := loadExternalPluginsForLocalEngine(eng, *pluginDir, logger)
 	if err != nil {
 		return err
+	}
+	if shutdownExternalPlugins == nil {
+		shutdownExternalPlugins = func() {}
 	}
 	defer shutdownExternalPlugins()
 	if err := eng.BuildFromConfig(cfg); err != nil {
