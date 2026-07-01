@@ -47,6 +47,41 @@ func TestIaCProviderDestroyStep_Execute_ReturnsDestroyed(t *testing.T) {
 	}
 }
 
+func TestIaCProviderDestroyStep_ResourcesResolveInfraModuleRefs(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		destroyResult: &interfaces.DestroyResult{
+			Destroyed: []string{"staging-ecs"},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+	infra := module.NewInfraModule("staging-ecs", "infra.container_service", map[string]any{"provider": "my-provider"})
+	if err := app.RegisterService("staging-ecs.driver", infra); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderDestroyStepFactory()
+	step, err := factory("destroy-step", map[string]any{
+		"provider":  "my-provider",
+		"resources": []any{"staging-ecs"},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	if _, err := step.Execute(context.Background(), &module.PipelineContext{}); err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(provider.destroyRefs) != 1 {
+		t.Fatalf("expected one destroy ref, got %d", len(provider.destroyRefs))
+	}
+	if provider.destroyRefs[0].Name != "staging-ecs" || provider.destroyRefs[0].Type != "infra.container_service" {
+		t.Fatalf("unexpected destroy refs: %#v", provider.destroyRefs)
+	}
+}
+
 func TestIaCProviderDestroyStep_Execute_UnregisteredProvider(t *testing.T) {
 	app := module.NewMockApplication()
 	factory := module.NewIaCProviderDestroyStepFactory()

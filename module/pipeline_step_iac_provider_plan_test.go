@@ -68,6 +68,45 @@ func TestIaCProviderPlanStep_Execute_ReturnsPlanAndHash(t *testing.T) {
 	}
 }
 
+func TestIaCProviderPlanStep_ResourcesResolveInfraModules(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := makePlanProvider(t)
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+	infra := module.NewInfraModule("staging-ecs", "infra.container_service", map[string]any{
+		"provider": "my-provider",
+		"image":    "public.ecr.aws/nginx/nginx:latest",
+		"replicas": 2,
+	})
+	if err := app.RegisterService("staging-ecs.driver", infra); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderPlanStepFactory()
+	step, err := factory("plan-step", map[string]any{
+		"provider":  "my-provider",
+		"resources": []any{"staging-ecs"},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	if _, err := step.Execute(context.Background(), &module.PipelineContext{}); err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(provider.planDesired) != 1 {
+		t.Fatalf("expected one desired spec, got %d", len(provider.planDesired))
+	}
+	spec := provider.planDesired[0]
+	if spec.Name != "staging-ecs" || spec.Type != "infra.container_service" {
+		t.Fatalf("unexpected desired spec identity: %#v", spec)
+	}
+	if spec.Config["image"] != "public.ecr.aws/nginx/nginx:latest" || spec.Config["replicas"] != 2 {
+		t.Fatalf("unexpected desired spec config: %#v", spec.Config)
+	}
+}
+
 func TestIaCProviderPlanStep_HashStableWhenEnvVarChanges(t *testing.T) {
 	// The NO-OP env resolver in DesiredStateHash must preserve ${ENV_VAR}
 	// placeholders verbatim so the hash is identical regardless of env value.

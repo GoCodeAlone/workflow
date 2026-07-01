@@ -194,6 +194,64 @@ func TestIaCProviderApplyStep_Factory_RequiresHash(t *testing.T) {
 	}
 }
 
+func TestIaCProviderApplyStep_ResourcesResolveInfraModules(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		planResult: &interfaces.IaCPlan{
+			ID: "plan-resource",
+			Actions: []interfaces.PlanAction{
+				{Action: "create", Resource: interfaces.ResourceSpec{Name: "staging-ecs", Type: "infra.container_service"}},
+			},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+	infra := module.NewInfraModule("staging-ecs", "infra.container_service", map[string]any{
+		"provider": "my-provider",
+		"image":    "public.ecr.aws/nginx/nginx:latest",
+		"replicas": 2,
+	})
+	if err := app.RegisterService("staging-ecs.driver", infra); err != nil {
+		t.Fatal(err)
+	}
+
+	planStep, err := module.NewIaCProviderPlanStepFactory()("plan-step", map[string]any{
+		"provider":  "my-provider",
+		"resources": []any{"staging-ecs"},
+	}, app)
+	if err != nil {
+		t.Fatalf("plan factory error: %v", err)
+	}
+	planResult, err := planStep.Execute(context.Background(), &module.PipelineContext{})
+	if err != nil {
+		t.Fatalf("plan Execute error: %v", err)
+	}
+	correctHash := planResult.Output["desired_hash"].(string)
+
+	applyStep, err := module.NewIaCProviderApplyStepFactory(noopApplyFn)("apply-step", map[string]any{
+		"provider":     "my-provider",
+		"resources":    []any{"staging-ecs"},
+		"desired_hash": correctHash,
+	}, app)
+	if err != nil {
+		t.Fatalf("apply factory error: %v", err)
+	}
+	result, err := applyStep.Execute(context.Background(), &module.PipelineContext{})
+	if err != nil {
+		t.Fatalf("apply Execute error: %v", err)
+	}
+	if result.Output["action_count"] != 1 {
+		t.Fatalf("expected action_count=1, got %v", result.Output["action_count"])
+	}
+	if len(provider.planDesired) != 1 {
+		t.Fatalf("expected one desired spec, got %d", len(provider.planDesired))
+	}
+	if got := provider.planDesired[0].Config["image"]; got != "public.ecr.aws/nginx/nginx:latest" {
+		t.Fatalf("unexpected desired image: %v", got)
+	}
+}
+
 // ─── specs_from / desired_hash_from (dynamic input) tests ────────────────────
 
 // parseRequestBodyOutputs builds StepOutputs that mirror the canonical

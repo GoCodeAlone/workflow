@@ -201,6 +201,19 @@ func (m *InfraModule) ResourceConfig() map[string]any {
 	return out
 }
 
+// ResourceSpec returns the desired IaC resource spec represented by this
+// module. Pipeline steps use this to operate on named app resources without
+// duplicating their infrastructure config.
+func (m *InfraModule) ResourceSpec() interfaces.ResourceSpec {
+	return m.buildSpec()
+}
+
+// ResourceRef returns the live IaC resource reference represented by this
+// module.
+func (m *InfraModule) ResourceRef() interfaces.ResourceRef {
+	return interfaces.ResourceRef{Name: m.name, Type: m.infraType}
+}
+
 // Create provisions a new resource by delegating to the underlying driver.
 func (m *InfraModule) Create(ctx context.Context) (*interfaces.ResourceOutput, error) {
 	return m.driver.Create(ctx, m.buildSpec())

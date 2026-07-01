@@ -657,6 +657,13 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 	}
 
 	// Initialize all modules
+	if e.pluginLoader != nil {
+		for _, hook := range e.pluginLoader.PreInitWiringHooks() {
+			if err := hook.Hook(e.app, cfg); err != nil {
+				return fmt.Errorf("pre-init wiring hook %q failed: %w", hook.Name, err)
+			}
+		}
+	}
 	if err := e.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize modules: %w", err)
 	}

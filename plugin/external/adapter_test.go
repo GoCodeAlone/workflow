@@ -407,6 +407,29 @@ func TestModuleFactoriesPropagatesPluginError(t *testing.T) {
 	}
 }
 
+func TestModuleFactoriesFiltersImplicitIaCProviderForTypedProviderPlugins(t *testing.T) {
+	client := &adapterTestPluginServiceClient{
+		manifest:    &pb.Manifest{Name: "workflow-plugin-aws"},
+		moduleTypes: []string{"iac.provider", "aws.credentials"},
+		registry: &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{{
+			Kind:        pb.ContractKind_CONTRACT_KIND_SERVICE,
+			ServiceName: pb.IaCProviderRequired_ServiceDesc.ServiceName,
+		}}},
+	}
+	a, err := NewExternalPluginAdapter("workflow-plugin-aws", &PluginClient{client: client}, nil)
+	if err != nil {
+		t.Fatalf("NewExternalPluginAdapter: %v", err)
+	}
+
+	factories := a.ModuleFactories()
+	if _, ok := factories["iac.provider"]; ok {
+		t.Fatal("typed IaC provider plugins must not register remote iac.provider; core owns the alias module")
+	}
+	if _, ok := factories["aws.credentials"]; !ok {
+		t.Fatal("non-implicit module factory was filtered")
+	}
+}
+
 func TestExternalPluginAdapter_ServiceContractsAttachByModuleType(t *testing.T) {
 	registry := &pb.ContractRegistry{
 		Contracts: []*pb.ContractDescriptor{

@@ -80,11 +80,17 @@ type TriggerFactory func() any
 // (CanHandle, ConfigureWorkflow, ExecuteWorkflow).
 type WorkflowHandlerFactory func() any
 
-// WiringHook is called after module initialization to wire cross-module integrations.
+// WiringHook wires cross-module integrations.
 type WiringHook struct {
 	Name     string
 	Priority int // higher priority runs first
 	Hook     func(app modular.Application, cfg *config.WorkflowConfig) error
+}
+
+// PreInitWiringHookProvider is optionally implemented by plugins that need to
+// register services after modules are registered but before app.Init runs.
+type PreInitWiringHookProvider interface {
+	PreInitWiringHooks() []WiringHook
 }
 
 // ConfigTransformHook runs BEFORE module registration in BuildFromConfig,

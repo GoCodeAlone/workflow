@@ -471,6 +471,9 @@ func (a *ExternalPluginAdapter) ModuleFactories() map[string]plugin.ModuleFactor
 	factories := make(map[string]plugin.ModuleFactory, len(resp.Types))
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
+		if tn == "iac.provider" && a.advertisesIaCProviderRequiredService() {
+			continue
+		}
 		factories[tn] = func(name string, cfg map[string]any) modular.Module {
 			config, typedConfig, configErr := createTypedConfigRequest(a.contracts.module(tn), cfg, a.contractTypes)
 			if configErr != nil {
@@ -675,7 +678,7 @@ func (a *ExternalPluginAdapter) advertisedOptionalIaCServices() map[string]bool 
 // adapter's capability accessors (RegionLister(), DriftDetector(), Runner(),
 // ResourceDriver()) return nil / ErrProviderMethodUnimplemented for unadvertised
 // services — ensuring fallback paths remain reachable.
-func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
+func (a *ExternalPluginAdapter) iacProviderWiringHooks() []plugin.WiringHook {
 	if !a.advertisesIaCProviderRequiredService() {
 		return nil
 	}
@@ -702,6 +705,10 @@ func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 				if conn == nil {
 					return fmt.Errorf("plugin %q advertises IaCProviderRequired but has no gRPC connection", name)
 				}
+				var existing any
+				if err := app.GetService(name, &existing); err == nil && existing != nil {
+					return nil
+				}
 				adapter := providerclient.New(conn, optionalServices)
 				if err := app.RegisterService(name, adapter); err != nil {
 					return fmt.Errorf("plugin %q: register IaCProvider service: %w", name, err)
@@ -710,6 +717,14 @@ func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
 			},
 		},
 	}
+}
+
+func (a *ExternalPluginAdapter) PreInitWiringHooks() []plugin.WiringHook {
+	return a.iacProviderWiringHooks()
+}
+
+func (a *ExternalPluginAdapter) WiringHooks() []plugin.WiringHook {
+	return a.iacProviderWiringHooks()
 }
 
 func (a *ExternalPluginAdapter) DeployTargets() map[string]deploy.DeployTarget {

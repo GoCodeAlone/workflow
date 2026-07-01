@@ -29,10 +29,11 @@ func resolveIaCProvider(app modular.Application, providerName, stepName, stepTyp
 
 // IaCProviderListStep resolves an IaCProvider and lists current resource statuses.
 type IaCProviderListStep struct {
-	name     string
-	provider string
-	refs     []interfaces.ResourceRef
-	app      modular.Application
+	name      string
+	provider  string
+	refs      []interfaces.ResourceRef
+	resources []string
+	app       modular.Application
 }
 
 // NewIaCProviderListStepFactory returns a StepFactory for step.iac_provider_list.
@@ -48,6 +49,7 @@ func NewIaCProviderListStepFactory() StepFactory {
 		// factory returns a config error — silently widening to list-all would mask a
 		// misconfigured step that was intended to be a filtered query.
 		var refs []interfaces.ResourceRef
+		_, hasRefs := cfg["refs"]
 		if rawRefs, ok := cfg["refs"]; ok {
 			refList, ok := rawRefs.([]any)
 			if !ok {
@@ -71,11 +73,19 @@ func NewIaCProviderListStepFactory() StepFactory {
 				refs = append(refs, ref)
 			}
 		}
+		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_list step %q: parse resources: %w", name, err)
+		}
+		if hasRefs && hasResources {
+			return nil, fmt.Errorf("iac_provider_list step %q: 'refs' and 'resources' are mutually exclusive", name)
+		}
 		return &IaCProviderListStep{
-			name:     name,
-			provider: providerName,
-			refs:     refs,
-			app:      app,
+			name:      name,
+			provider:  providerName,
+			refs:      refs,
+			resources: resources,
+			app:       app,
 		}, nil
 	}
 }
@@ -88,7 +98,15 @@ func (s *IaCProviderListStep) Execute(ctx context.Context, _ *PipelineContext) (
 		return nil, err
 	}
 
-	statuses, err := provider.Status(ctx, s.refs)
+	refs := s.refs
+	if len(s.resources) > 0 {
+		refs, err = resolveResourceRefs(s.app, s.resources)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_list step %q: resolve resources: %w", s.name, err)
+		}
+	}
+
+	statuses, err := provider.Status(ctx, refs)
 	if err != nil {
 		return nil, fmt.Errorf("iac_provider_list step %q: Status: %w", s.name, err)
 	}

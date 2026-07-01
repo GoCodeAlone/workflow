@@ -2655,6 +2655,22 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 	// ---- IaC State ----
 
 	r.Register(&ModuleSchema{
+		Type:        "iac.provider",
+		Label:       "IaC Provider",
+		Category:    "infrastructure",
+		Description: "Aliases an external plugin-served IaC provider into the application service graph",
+		Inputs:      []ServiceIODef{{Name: "provider", Type: "IaCProvider", Description: "External plugin-served provider"}},
+		Outputs:     []ServiceIODef{{Name: "provider", Type: "IaCProvider", Description: "App-local IaC provider service"}},
+		ConfigFields: []ConfigFieldDef{
+			{Key: "plugin", Label: "Plugin", Type: FieldTypeString, Required: true, Description: "External plugin service name, for example workflow-plugin-aws"},
+			{Key: "provider", Label: "Provider", Type: FieldTypeString, Description: "Provider shorthand: aws, azure, digitalocean, or gcp"},
+			{Key: "mode", Label: "Mode", Type: FieldTypeString, Description: "Provider-specific mode such as mock"},
+			{Key: "region", Label: "Region", Type: FieldTypeString, Description: "Primary provider region"},
+			{Key: "credentials", Label: "Credentials", Type: FieldTypeMap, Description: "Provider-specific credential configuration"},
+		},
+	})
+
+	r.Register(&ModuleSchema{
 		Type:        "iac.state",
 		Label:       "IaC State Store",
 		Category:    "infrastructure",

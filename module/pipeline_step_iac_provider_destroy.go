@@ -13,10 +13,11 @@ import (
 // IaCProviderDestroyStep resolves an IaCProvider and destroys the specified
 // resources by ref list.
 type IaCProviderDestroyStep struct {
-	name     string
-	provider string
-	refs     []interfaces.ResourceRef
-	app      modular.Application
+	name      string
+	provider  string
+	refs      []interfaces.ResourceRef
+	resources []string
+	app       modular.Application
 }
 
 // NewIaCProviderDestroyStepFactory returns a StepFactory for step.iac_provider_destroy.
@@ -26,15 +27,24 @@ func NewIaCProviderDestroyStepFactory() StepFactory {
 		if providerName == "" {
 			return nil, fmt.Errorf("iac_provider_destroy step %q: 'provider' is required", name)
 		}
+		_, hasRefs := cfg["refs"]
 		refs, err := parseResourceRefs(cfg["refs"])
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_destroy step %q: parse refs: %w", name, err)
 		}
+		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_destroy step %q: parse resources: %w", name, err)
+		}
+		if hasRefs && hasResources {
+			return nil, fmt.Errorf("iac_provider_destroy step %q: 'refs' and 'resources' are mutually exclusive", name)
+		}
 		return &IaCProviderDestroyStep{
-			name:     name,
-			provider: providerName,
-			refs:     refs,
-			app:      app,
+			name:      name,
+			provider:  providerName,
+			refs:      refs,
+			resources: resources,
+			app:       app,
 		}, nil
 	}
 }
@@ -47,7 +57,15 @@ func (s *IaCProviderDestroyStep) Execute(ctx context.Context, _ *PipelineContext
 		return nil, err
 	}
 
-	result, err := provider.Destroy(ctx, s.refs)
+	refs := s.refs
+	if len(s.resources) > 0 {
+		refs, err = resolveResourceRefs(s.app, s.resources)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_destroy step %q: resolve resources: %w", s.name, err)
+		}
+	}
+
+	result, err := provider.Destroy(ctx, refs)
 	if err != nil {
 		return nil, fmt.Errorf("iac_provider_destroy step %q: Destroy: %w", s.name, err)
 	}

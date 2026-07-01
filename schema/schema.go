@@ -182,6 +182,7 @@ var coreModuleTypes = []string{
 	"http.router",
 	"http.server",
 	"http.simple_proxy",
+	"iac.provider",
 	"iac.state",
 	"jsonschema.modular",
 	"license.validator",

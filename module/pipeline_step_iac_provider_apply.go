@@ -25,6 +25,7 @@ type IaCProviderApplyStep struct {
 	desiredHashFrom string // dotted context path; mutually exclusive with submittedHash
 	specs           []interfaces.ResourceSpec
 	specsFrom       string // dotted context path; mutually exclusive with specs
+	resources       []string
 	app             modular.Application
 	applyFn         func(ctx context.Context, p interfaces.IaCProvider, plan *interfaces.IaCPlan) (*interfaces.ApplyResult, error)
 }
@@ -45,8 +46,22 @@ func NewIaCProviderApplyStepFactory(applyFn func(ctx context.Context, p interfac
 
 		specsFrom, _ := cfg["specs_from"].(string)
 		_, hasStaticSpecs := cfg["specs"]
-		if specsFrom != "" && hasStaticSpecs {
-			return nil, fmt.Errorf("iac_provider_apply step %q: 'specs' and 'specs_from' are mutually exclusive", name)
+		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_apply step %q: parse resources: %w", name, err)
+		}
+		inputSources := 0
+		if hasStaticSpecs {
+			inputSources++
+		}
+		if specsFrom != "" {
+			inputSources++
+		}
+		if hasResources {
+			inputSources++
+		}
+		if inputSources > 1 {
+			return nil, fmt.Errorf("iac_provider_apply step %q: 'specs', 'specs_from', and 'resources' are mutually exclusive", name)
 		}
 
 		desiredHashFrom, _ := cfg["desired_hash_from"].(string)
@@ -80,6 +95,7 @@ func NewIaCProviderApplyStepFactory(applyFn func(ctx context.Context, p interfac
 			desiredHashFrom: desiredHashFrom,
 			specs:           specs,
 			specsFrom:       specsFrom,
+			resources:       resources,
 			app:             app,
 			applyFn:         applyFn,
 		}, nil
@@ -103,6 +119,13 @@ func (s *IaCProviderApplyStep) Execute(ctx context.Context, pc *PipelineContext)
 		// applying over zero specs is a destroy-everything footgun.
 		if len(specs) == 0 {
 			return nil, fmt.Errorf("iac_provider_apply step %q: specs_from %q resolved to empty/zero specs", s.name, s.specsFrom)
+		}
+	}
+	if len(s.resources) > 0 {
+		var err error
+		specs, err = resolveResourceSpecs(s.app, s.resources)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_apply step %q: resolve resources: %w", s.name, err)
 		}
 	}
 

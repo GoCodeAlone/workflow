@@ -28,6 +28,7 @@ type PluginLoader struct {
 	triggerFactories     map[string]TriggerFactory
 	handlerFactories     map[string]WorkflowHandlerFactory
 	wiringHooks          []WiringHook
+	preInitWiringHooks   []WiringHook
 	configTransformHooks []ConfigTransformHook
 	schemaRegistry       *schema.ModuleSchemaRegistry
 	stepSchemaRegistry   *schema.StepSchemaRegistry
@@ -275,6 +276,9 @@ func (l *PluginLoader) loadPlugin(p EnginePlugin, allowOverride bool) error {
 
 	// Collect wiring hooks.
 	l.wiringHooks = append(l.wiringHooks, p.WiringHooks()...)
+	if preInitProvider, ok := p.(PreInitWiringHookProvider); ok {
+		l.preInitWiringHooks = append(l.preInitWiringHooks, preInitProvider.PreInitWiringHooks()...)
+	}
 
 	// Collect config transform hooks.
 	l.configTransformHooks = append(l.configTransformHooks, p.ConfigTransformHooks()...)
@@ -368,6 +372,16 @@ func (l *PluginLoader) WorkflowHandlerFactories() map[string]WorkflowHandlerFact
 func (l *PluginLoader) WiringHooks() []WiringHook {
 	hooks := make([]WiringHook, len(l.wiringHooks))
 	copy(hooks, l.wiringHooks)
+	sort.Slice(hooks, func(i, j int) bool {
+		return hooks[i].Priority > hooks[j].Priority
+	})
+	return hooks
+}
+
+// PreInitWiringHooks returns all registered pre-init wiring hooks sorted by priority (highest first).
+func (l *PluginLoader) PreInitWiringHooks() []WiringHook {
+	hooks := make([]WiringHook, len(l.preInitWiringHooks))
+	copy(hooks, l.preInitWiringHooks)
 	sort.Slice(hooks, func(i, j int) bool {
 		return hooks[i].Priority > hooks[j].Priority
 	})
