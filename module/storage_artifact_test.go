@@ -3,6 +3,7 @@ package module
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"os"
 	"path/filepath"
@@ -356,6 +357,48 @@ func TestArtifactUploadStep_Basic(t *testing.T) {
 	}
 }
 
+func TestArtifactUploadStep_ContentFromBase64(t *testing.T) {
+	store := newMockArtifactStore()
+	app := mockAppWithArtifactStore("artifacts", store)
+
+	factory := NewArtifactUploadStepFactory()
+	step, err := factory("upload-app", map[string]any{
+		"store":            "artifacts",
+		"key":              "{{ .artifact_key }}",
+		"content_from":     "content_b64",
+		"content_encoding": "base64",
+		"metadata": map[string]any{
+			"version": "{{ .version }}",
+		},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{
+		"artifact_key": "builds/v1/app.bin",
+		"content_b64":  base64.StdEncoding.EncodeToString([]byte("client supplied artifact")),
+		"version":      "1.2.3",
+	}, nil)
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if result.Output["key"] != "builds/v1/app.bin" {
+		t.Errorf("key: got %v", result.Output["key"])
+	}
+	if result.Output["size"] != int64(len("client supplied artifact")) {
+		t.Errorf("size: got %v", result.Output["size"])
+	}
+	if string(store.data["builds/v1/app.bin"]) != "client supplied artifact" {
+		t.Errorf("stored content mismatch: %q", store.data["builds/v1/app.bin"])
+	}
+	if store.metadata["builds/v1/app.bin"]["version"] != "1.2.3" {
+		t.Errorf("metadata version: got %q", store.metadata["builds/v1/app.bin"]["version"])
+	}
+}
+
 func TestArtifactUploadStep_MissingRequiredConfig(t *testing.T) {
 	factory := NewArtifactUploadStepFactory()
 
@@ -370,6 +413,15 @@ func TestArtifactUploadStep_MissingRequiredConfig(t *testing.T) {
 	_, err = factory("x", map[string]any{"store": "s", "key": "k"}, nil)
 	if err == nil {
 		t.Error("expected error for missing source")
+	}
+	_, err = factory("x", map[string]any{
+		"store":        "s",
+		"key":          "k",
+		"source":       "f",
+		"content_from": "content",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for source and content_from")
 	}
 }
 
@@ -408,6 +460,70 @@ func TestArtifactDownloadStep_Basic(t *testing.T) {
 	}
 	if string(content) != "downloaded content" {
 		t.Errorf("content mismatch: %q", content)
+	}
+}
+
+func TestArtifactDownloadStep_ContentBase64Output(t *testing.T) {
+	store := newMockArtifactStore()
+	store.data["builds/v1/app.bin"] = []byte("downloaded client artifact")
+	store.metadata["builds/v1/app.bin"] = map[string]string{"version": "1.2.3"}
+	app := mockAppWithArtifactStore("artifacts", store)
+
+	factory := NewArtifactDownloadStepFactory()
+	step, err := factory("download-app", map[string]any{
+		"store":            "artifacts",
+		"key":              "{{ .artifact_key }}",
+		"content_encoding": "base64",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{"artifact_key": "builds/v1/app.bin"}, nil)
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	wantContent := base64.StdEncoding.EncodeToString([]byte("downloaded client artifact"))
+	if result.Output["content"] != wantContent {
+		t.Errorf("content: got %v, want %s", result.Output["content"], wantContent)
+	}
+	if result.Output["size"] != int64(len("downloaded client artifact")) {
+		t.Errorf("size: got %v", result.Output["size"])
+	}
+	md, ok := result.Output["metadata"].(map[string]string)
+	if !ok {
+		t.Fatalf("metadata type: %T", result.Output["metadata"])
+	}
+	if md["version"] != "1.2.3" {
+		t.Errorf("metadata version: got %q", md["version"])
+	}
+}
+
+func TestArtifactDownloadStep_MissingRequiredConfig(t *testing.T) {
+	factory := NewArtifactDownloadStepFactory()
+
+	_, err := factory("x", map[string]any{"key": "k", "dest": "d"}, nil)
+	if err == nil {
+		t.Error("expected error for missing store")
+	}
+	_, err = factory("x", map[string]any{"store": "s", "dest": "d"}, nil)
+	if err == nil {
+		t.Error("expected error for missing key")
+	}
+	_, err = factory("x", map[string]any{"store": "s", "key": "k"}, nil)
+	if err == nil {
+		t.Error("expected error for missing dest or content_encoding")
+	}
+	_, err = factory("x", map[string]any{
+		"store":            "s",
+		"key":              "k",
+		"dest":             "d",
+		"content_encoding": "base64",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for dest and content_encoding")
 	}
 }
 
