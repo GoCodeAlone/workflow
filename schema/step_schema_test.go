@@ -87,6 +87,24 @@ func TestStepSchemaRegistry_CloudValidateAccountFrom(t *testing.T) {
 	}
 }
 
+func TestStepSchemaRegistry_BuildBinaryConfigFields(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	s := reg.Get("step.build_binary")
+	if s == nil {
+		t.Fatal("missing step.build_binary schema")
+	}
+	for _, key := range []string{"config_file", "config_from", "output", "module_path", "go_version", "embed_config", "dry_run", "os", "arch"} {
+		if !hasConfigField(s, key) {
+			t.Errorf("step.build_binary missing config field %q", key)
+		}
+	}
+	for _, key := range []string{"dry_run", "files", "file_contents", "module_path", "go_version", "target_os", "target_arch", "binary_path", "binary_size"} {
+		if !hasStepOutput(s, key) {
+			t.Errorf("step.build_binary missing output %q", key)
+		}
+	}
+}
+
 func hasConfigField(s *StepSchema, key string) bool {
 	for _, field := range s.ConfigFields {
 		if field.Key == key {

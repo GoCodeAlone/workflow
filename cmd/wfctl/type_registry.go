@@ -1182,7 +1182,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.build_binary": {
 			Type:       "step.build_binary",
 			Plugin:     "cicd",
-			ConfigKeys: []string{"config_file", "output", "os", "arch"},
+			ConfigKeys: []string{"config_file", "config_from", "output", "module_path", "go_version", "embed_config", "dry_run", "os", "arch"},
 		},
 		"step.codebuild_create_project": {
 			Type:       "step.codebuild_create_project",
