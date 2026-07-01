@@ -553,7 +553,7 @@ func TestArtifactDownloadStep_EmptyResolvedDest(t *testing.T) {
 	step, err := factory("download-app", map[string]any{
 		"store": "artifacts",
 		"key":   "builds/v1/app.bin",
-		"dest":  "{{ .missing_dest }}",
+		"dest":  "{{ .missing_dest }}.bin",
 	}, app)
 	if err != nil {
 		t.Fatalf("factory: %v", err)

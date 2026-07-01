@@ -258,10 +258,7 @@ func (s *ArtifactDownloadStep) Execute(ctx context.Context, pc *PipelineContext)
 	if err != nil {
 		return nil, fmt.Errorf("artifact_download step %q: dest template: %w", s.name, err)
 	}
-	if strings.TrimSpace(dest) == "" ||
-		dest == "<no value>" ||
-		strings.Contains(dest, "{{") ||
-		strings.Contains(dest, "}}") {
+	if strings.TrimSpace(dest) == "" || strings.Contains(dest, "<no value>") {
 		return nil, fmt.Errorf("artifact_download step %q: resolved dest is empty", s.name)
 	}
 
@@ -359,7 +356,7 @@ func readArtifactContent(reader io.Reader, maxBytes int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, fmt.Errorf("artifact size %d exceeds max_bytes %d", len(data), maxBytes)
+		return nil, fmt.Errorf("artifact content exceeds max_bytes %d", maxBytes)
 	}
 	return data, nil
 }
