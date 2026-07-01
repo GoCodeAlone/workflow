@@ -149,6 +149,45 @@ func TestJSONResponseStep_BodyFrom(t *testing.T) {
 	}
 }
 
+func TestJSONResponseStep_BodyFromCurrentContext(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("from-current", map[string]any{
+		"status":    200,
+		"body_from": ".",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	pc := NewPipelineContext(map[string]any{"request_id": "req-1"}, map[string]any{
+		"_http_response_writer": recorder,
+	})
+	pc.MergeStepOutput("plan", map[string]any{
+		"cluster":  "production-cluster",
+		"provider": "kind",
+	})
+
+	_, err = step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["request_id"] != "req-1" {
+		t.Errorf("expected request_id='req-1', got %v", body["request_id"])
+	}
+	if body["cluster"] != "production-cluster" {
+		t.Errorf("expected cluster='production-cluster', got %v", body["cluster"])
+	}
+	if body["provider"] != "kind" {
+		t.Errorf("expected provider='kind', got %v", body["provider"])
+	}
+}
+
 func TestJSONResponseStep_TemplateBody(t *testing.T) {
 	factory := NewJSONResponseStepFactory()
 	step, err := factory("templated", map[string]any{

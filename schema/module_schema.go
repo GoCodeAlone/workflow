@@ -1207,7 +1207,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "status_from", Label: "Status From", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g., steps.call_upstream.status_code). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599).", Placeholder: "steps.call_upstream.status_code"},
 			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Additional response headers"},
 			{Key: "body", Label: "Body", Type: FieldTypeMap, Description: "Response body as JSON (supports template expressions)"},
-			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from pipeline context or step outputs; use . for the full current context (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
 		},
 	})
 
@@ -1223,7 +1223,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "status_from", Label: "Status From", Type: FieldTypeString, Description: "Dotted path to resolve HTTP status code dynamically (e.g., steps.call_upstream.status_code). Takes precedence over 'status' when resolved to a valid HTTP status code (100-599).", Placeholder: "steps.call_upstream.status_code"},
 			{Key: "headers", Label: "Headers", Type: FieldTypeMap, MapValueType: "string", Description: "Additional response headers"},
 			{Key: "body", Label: "Body", Type: FieldTypeMap, Description: "Response body as JSON (supports template expressions)"},
-			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from step outputs (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
+			{Key: "body_from", Label: "Body From", Type: FieldTypeString, Description: "Dotted path to resolve body from pipeline context or step outputs; use . for the full current context (e.g., steps.get-company.row)", Placeholder: "steps.get-company.row"},
 		},
 	})
 
