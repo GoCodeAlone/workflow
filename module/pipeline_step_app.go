@@ -83,6 +83,7 @@ func appContainerSpecWithOverrides(base AppContainerSpec, raw any) (AppContainer
 		return base, fmt.Errorf("spec must be a map, got %T", raw)
 	}
 	spec := base
+	_, hasHealthPortOverride := firstOverride(overrides, "health_port", "healthPort")
 	if image, ok := overrides["image"].(string); ok {
 		if image == "" {
 			return base, fmt.Errorf("image must be non-empty")
@@ -102,7 +103,7 @@ func appContainerSpecWithOverrides(base AppContainerSpec, raw any) (AppContainer
 			return base, err
 		}
 		spec.Ports = ports
-		if spec.HealthPort == 0 && len(ports) > 0 {
+		if !hasHealthPortOverride && len(ports) > 0 {
 			spec.HealthPort = ports[0]
 		}
 	}
