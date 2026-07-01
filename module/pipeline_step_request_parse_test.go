@@ -101,15 +101,16 @@ func TestRequestParseStep_ParseBody(t *testing.T) {
 func TestRequestParseStep_MergeBodyPromotesJSONFields(t *testing.T) {
 	factory := NewRequestParseStepFactory()
 	step, err := factory("parse-body", map[string]any{
-		"parse_body": true,
-		"merge_body": true,
+		"parse_body":   true,
+		"merge_body":   true,
+		"query_params": []any{"trace"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
 	}
 
-	body := bytes.NewBufferString(`{"remote_id":"bob@example.test","remote_bundle":{"device_id":1},"plaintext":"cHJpdmF0ZQ=="}`)
-	req, _ := http.NewRequest("POST", "/messages", body)
+	body := bytes.NewBufferString(`{"remote_id":"bob@example.test","remote_bundle":{"device_id":1},"plaintext":"cHJpdmF0ZQ==","body":"reserved","query":"reserved"}`)
+	req, _ := http.NewRequest("POST", "/messages?trace=req-123", body)
 	req.Header.Set("Content-Type", "application/json")
 
 	pc := NewPipelineContext(nil, map[string]any{
@@ -137,6 +138,16 @@ func TestRequestParseStep_MergeBodyPromotesJSONFields(t *testing.T) {
 	}
 	if bundle["device_id"] != float64(1) {
 		t.Errorf("expected promoted remote_bundle.device_id=1, got %v", bundle["device_id"])
+	}
+	if result.Output["body"] == "reserved" {
+		t.Fatal("expected reserved body output to remain parsed body map")
+	}
+	query, ok := result.Output["query"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected reserved query output to remain query map, got %T", result.Output["query"])
+	}
+	if query["trace"] != "req-123" {
+		t.Errorf("expected query.trace='req-123', got %v", query["trace"])
 	}
 }
 

@@ -22,6 +22,13 @@ type RequestParseStep struct {
 	parseHeaders []string
 }
 
+var requestParseReservedOutputKeys = map[string]struct{}{
+	"body":        {},
+	"headers":     {},
+	"path_params": {},
+	"query":       {},
+}
+
 // NewRequestParseStepFactory returns a StepFactory that creates RequestParseStep instances.
 func NewRequestParseStepFactory() StepFactory {
 	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
@@ -212,6 +219,12 @@ func (s *RequestParseStep) addBodyOutput(output map[string]any, body map[string]
 		return
 	}
 	for k, v := range body {
+		if _, reserved := requestParseReservedOutputKeys[k]; reserved {
+			continue
+		}
+		if _, exists := output[k]; exists {
+			continue
+		}
 		output[k] = v
 	}
 }

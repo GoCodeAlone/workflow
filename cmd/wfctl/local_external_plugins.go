@@ -14,6 +14,8 @@ import (
 
 type localExternalPluginLoader func(*workflow.StdEngine, string, *slog.Logger) (func(), error)
 
+// NOTE: package-level state. Tests overriding this MUST NOT call t.Parallel(),
+// or they can leak the override into other wfctl tests.
 var loadExternalPluginsForLocalEngine localExternalPluginLoader = loadExternalPluginsFromDir
 
 func loadExternalPluginsFromDir(eng *workflow.StdEngine, pluginDir string, logger *slog.Logger) (func(), error) {
