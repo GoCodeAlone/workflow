@@ -107,6 +107,20 @@ func TestIaCProviderPlanStep_ResourcesResolveInfraModules(t *testing.T) {
 	}
 }
 
+func TestIaCProviderPlanStep_FactoryRejectsNullResources(t *testing.T) {
+	factory := module.NewIaCProviderPlanStepFactory()
+	_, err := factory("plan-step", map[string]any{
+		"provider":  "my-provider",
+		"resources": nil,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected factory error for null resources")
+	}
+	if want := "resources must be a list"; !containsString(err.Error(), want) {
+		t.Fatalf("expected error containing %q, got %v", want, err)
+	}
+}
+
 func TestIaCProviderPlanStep_HashStableWhenEnvVarChanges(t *testing.T) {
 	// The NO-OP env resolver in DesiredStateHash must preserve ${ENV_VAR}
 	// placeholders verbatim so the hash is identical regardless of env value.

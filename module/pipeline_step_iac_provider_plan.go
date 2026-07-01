@@ -39,7 +39,8 @@ func NewIaCProviderPlanStepFactory() StepFactory {
 
 		specsFrom, _ := cfg["specs_from"].(string)
 		_, hasStaticSpecs := cfg["specs"]
-		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		rawResources, hasResourcesKey := cfg["resources"]
+		resources, hasResources, err := parseResourceNames(rawResources, hasResourcesKey)
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_plan step %q: parse resources: %w", name, err)
 		}
@@ -120,9 +121,12 @@ func parseResourceRefs(raw any) ([]interfaces.ResourceRef, error) {
 	return refs, nil
 }
 
-func parseResourceNames(raw any) ([]string, bool, error) {
-	if raw == nil {
+func parseResourceNames(raw any, present bool) ([]string, bool, error) {
+	if !present {
 		return nil, false, nil
+	}
+	if raw == nil {
+		return nil, true, fmt.Errorf("resources must be a list, got <nil>")
 	}
 	list, ok := raw.([]any)
 	if !ok {

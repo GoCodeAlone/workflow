@@ -46,7 +46,8 @@ func NewIaCProviderApplyStepFactory(applyFn func(ctx context.Context, p interfac
 
 		specsFrom, _ := cfg["specs_from"].(string)
 		_, hasStaticSpecs := cfg["specs"]
-		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		rawResources, hasResourcesKey := cfg["resources"]
+		resources, hasResources, err := parseResourceNames(rawResources, hasResourcesKey)
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_apply step %q: parse resources: %w", name, err)
 		}

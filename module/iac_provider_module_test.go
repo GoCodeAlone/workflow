@@ -73,6 +73,28 @@ func TestIaCProviderModule_InitAcceptsProviderShorthand(t *testing.T) {
 	}
 }
 
+func TestIaCProviderModule_InitAcceptsServiceAlias(t *testing.T) {
+	provider := &recordingIaCProvider{}
+	app := NewMockApplication()
+	if err := app.RegisterService("workflow-plugin-aws", provider); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+
+	m := NewIaCProviderModule("aws-provider", map[string]any{
+		"service": "workflow-plugin-aws",
+		"mode":    "mock",
+	})
+	if err := m.Init(app); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, ok := provider.initCfg["service"]; ok {
+		t.Fatalf("Initialize config leaked service alias: %#v", provider.initCfg)
+	}
+	if provider.initCfg["mode"] != "mock" {
+		t.Fatalf("Initialize config = %#v", provider.initCfg)
+	}
+}
+
 func TestIaCProviderModule_InitRequiresPluginService(t *testing.T) {
 	m := NewIaCProviderModule("aws-provider", map[string]any{"mode": "mock"})
 	err := m.Init(NewMockApplication())

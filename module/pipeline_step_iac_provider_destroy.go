@@ -32,7 +32,8 @@ func NewIaCProviderDestroyStepFactory() StepFactory {
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_destroy step %q: parse refs: %w", name, err)
 		}
-		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		rawResources, hasResourcesKey := cfg["resources"]
+		resources, hasResources, err := parseResourceNames(rawResources, hasResourcesKey)
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_destroy step %q: parse resources: %w", name, err)
 		}

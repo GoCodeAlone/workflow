@@ -73,7 +73,8 @@ func NewIaCProviderListStepFactory() StepFactory {
 				refs = append(refs, ref)
 			}
 		}
-		resources, hasResources, err := parseResourceNames(cfg["resources"])
+		rawResources, hasResourcesKey := cfg["resources"]
+		resources, hasResources, err := parseResourceNames(rawResources, hasResourcesKey)
 		if err != nil {
 			return nil, fmt.Errorf("iac_provider_list step %q: parse resources: %w", name, err)
 		}

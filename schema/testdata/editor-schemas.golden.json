@@ -1862,14 +1862,19 @@
           "key": "plugin",
           "label": "Plugin",
           "type": "string",
-          "description": "External plugin service name, for example workflow-plugin-aws",
-          "required": true
+          "description": "External plugin service name, for example workflow-plugin-aws; one of plugin, service, or provider is required"
+        },
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "Alias for plugin: external IaC provider service name"
         },
         {
           "key": "provider",
           "label": "Provider",
           "type": "string",
-          "description": "Provider shorthand: aws, azure, digitalocean, or gcp"
+          "description": "Provider shorthand: aws, azure, digitalocean, or gcp; one of plugin, service, or provider is required"
         },
         {
           "key": "mode",
