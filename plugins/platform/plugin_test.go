@@ -87,6 +87,7 @@ func TestModuleFactories(t *testing.T) {
 	expectedModules := []string{
 		"platform.kubernetes",
 		"platform.dns",
+		"iac.provider",
 		"iac.state",
 		"platform.provider",
 		"platform.resource",

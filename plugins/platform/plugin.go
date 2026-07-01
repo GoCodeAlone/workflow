@@ -94,7 +94,7 @@ func New() *Plugin {
 				Author:        "GoCodeAlone",
 				Description:   "Platform infrastructure modules, workflow handler, reconciliation trigger, and template step",
 				Tier:          plugin.TierCore,
-				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.dns", "platform.region", "platform.region_router", "iac.state", "app.container", "argo.workflows"},
+				ModuleTypes:   []string{"platform.provider", "platform.resource", "platform.context", "platform.kubernetes", "platform.dns", "platform.region", "platform.region_router", "iac.provider", "iac.state", "app.container", "argo.workflows"},
 				StepTypes:     []string{"step.platform_template", "step.k8s_plan", "step.k8s_apply", "step.k8s_status", "step.k8s_destroy", "step.iac_plan", "step.iac_apply", "step.iac_status", "step.iac_destroy", "step.iac_drift_detect", "step.iac_provider_list", "step.iac_provider_catalog", "step.iac_provider_plan", "step.iac_provider_apply", "step.iac_provider_destroy", "step.iac_provider_drift", "step.iac_secret_reachability", "step.iac_commit_back", "step.iac_provider_reconcile", "step.dns_plan", "step.dns_apply", "step.dns_status", "step.app_deploy", "step.app_status", "step.app_rollback", "step.region_deploy", "step.region_promote", "step.region_failover", "step.region_status", "step.region_weight", "step.region_sync", "step.argo_submit", "step.argo_status", "step.argo_logs", "step.argo_delete", "step.argo_list"},
 				TriggerTypes:  []string{"reconciliation"},
 				WorkflowTypes: []string{"platform"},
@@ -114,6 +114,9 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 		},
 		"iac.state": func(name string, cfg map[string]any) modular.Module {
 			return module.NewIaCModule(name, cfg)
+		},
+		"iac.provider": func(name string, cfg map[string]any) modular.Module {
+			return module.NewIaCProviderModule(name, cfg)
 		},
 		"platform.provider": func(name string, cfg map[string]any) modular.Module {
 			providerName := ""

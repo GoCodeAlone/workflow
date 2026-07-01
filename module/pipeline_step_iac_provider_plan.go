@@ -24,6 +24,7 @@ type IaCProviderPlanStep struct {
 	env       string
 	specs     []interfaces.ResourceSpec
 	specsFrom string // dotted context path; mutually exclusive with specs
+	resources []string
 	app       modular.Application
 }
 
@@ -38,10 +39,25 @@ func NewIaCProviderPlanStepFactory() StepFactory {
 
 		specsFrom, _ := cfg["specs_from"].(string)
 		_, hasStaticSpecs := cfg["specs"]
+		rawResources, hasResourcesKey := cfg["resources"]
+		resources, hasResources, err := parseResourceNames(rawResources, hasResourcesKey)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_plan step %q: parse resources: %w", name, err)
+		}
 
-		// specs and specs_from are mutually exclusive.
-		if specsFrom != "" && hasStaticSpecs {
-			return nil, fmt.Errorf("iac_provider_plan step %q: 'specs' and 'specs_from' are mutually exclusive", name)
+		// specs, specs_from, and resources are mutually exclusive.
+		inputSources := 0
+		if hasStaticSpecs {
+			inputSources++
+		}
+		if specsFrom != "" {
+			inputSources++
+		}
+		if hasResources {
+			inputSources++
+		}
+		if inputSources > 1 {
+			return nil, fmt.Errorf("iac_provider_plan step %q: 'specs', 'specs_from', and 'resources' are mutually exclusive", name)
 		}
 
 		// Parse static specs from config (nil-safe; skipped when specs_from is set).
@@ -60,6 +76,7 @@ func NewIaCProviderPlanStepFactory() StepFactory {
 			env:       env,
 			specs:     specs,
 			specsFrom: specsFrom,
+			resources: resources,
 			app:       app,
 		}, nil
 	}
@@ -104,6 +121,97 @@ func parseResourceRefs(raw any) ([]interfaces.ResourceRef, error) {
 	return refs, nil
 }
 
+func parseResourceNames(raw any, present bool) ([]string, bool, error) {
+	if !present {
+		return nil, false, nil
+	}
+	if raw == nil {
+		return nil, true, fmt.Errorf("resources must be a list, got <nil>")
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, true, fmt.Errorf("resources must be a list, got %T", raw)
+	}
+	names := make([]string, 0, len(list))
+	for i, item := range list {
+		name, ok := item.(string)
+		if !ok || name == "" {
+			return nil, true, fmt.Errorf("resources[%d] must be a non-empty string, got %T", i, item)
+		}
+		names = append(names, name)
+	}
+	return names, true, nil
+}
+
+type resourceSpecProvider interface {
+	ResourceSpec() interfaces.ResourceSpec
+}
+
+type resourceRefProvider interface {
+	ResourceRef() interfaces.ResourceRef
+}
+
+func resolveResourceService(app modular.Application, name string) (any, error) {
+	if app == nil {
+		return nil, fmt.Errorf("no application context")
+	}
+	for _, serviceName := range []string{name + ".driver", name} {
+		var svc any
+		if err := app.GetService(serviceName, &svc); err == nil && svc != nil {
+			return svc, nil
+		}
+	}
+	return nil, fmt.Errorf("resource %q is not registered as %q or %q", name, name+".driver", name)
+}
+
+func resolveResourceSpecs(app modular.Application, names []string) ([]interfaces.ResourceSpec, error) {
+	specs := make([]interfaces.ResourceSpec, 0, len(names))
+	for _, name := range names {
+		svc, err := resolveResourceService(app, name)
+		if err != nil {
+			return nil, err
+		}
+		provider, ok := svc.(resourceSpecProvider)
+		if !ok {
+			return nil, fmt.Errorf("resource %q service does not expose ResourceSpec (got %T)", name, svc)
+		}
+		spec := provider.ResourceSpec()
+		if spec.Name == "" || spec.Type == "" {
+			return nil, fmt.Errorf("resource %q produced incomplete spec", name)
+		}
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+func resolveResourceRefs(app modular.Application, names []string) ([]interfaces.ResourceRef, error) {
+	refs := make([]interfaces.ResourceRef, 0, len(names))
+	for _, name := range names {
+		svc, err := resolveResourceService(app, name)
+		if err != nil {
+			return nil, err
+		}
+		if provider, ok := svc.(resourceRefProvider); ok {
+			ref := provider.ResourceRef()
+			if ref.Name == "" || ref.Type == "" {
+				return nil, fmt.Errorf("resource %q produced incomplete ref", name)
+			}
+			refs = append(refs, ref)
+			continue
+		}
+		if provider, ok := svc.(resourceSpecProvider); ok {
+			spec := provider.ResourceSpec()
+			if spec.Name == "" || spec.Type == "" {
+				return nil, fmt.Errorf("resource %q produced incomplete spec", name)
+			}
+			refs = append(refs, interfaces.ResourceRef{Name: spec.Name, Type: spec.Type})
+			continue
+		}
+		return nil, fmt.Errorf("resource %q service does not expose ResourceRef or ResourceSpec (got %T)", name, svc)
+	}
+	return refs, nil
+}
+
 func (s *IaCProviderPlanStep) Name() string { return s.name }
 
 func (s *IaCProviderPlanStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
@@ -121,6 +229,13 @@ func (s *IaCProviderPlanStep) Execute(ctx context.Context, pc *PipelineContext) 
 		// planning over zero specs is a destroy-everything footgun.
 		if len(specs) == 0 {
 			return nil, fmt.Errorf("iac_provider_plan step %q: specs_from %q resolved to empty/zero specs", s.name, s.specsFrom)
+		}
+	}
+	if len(s.resources) > 0 {
+		var err error
+		specs, err = resolveResourceSpecs(s.app, s.resources)
+		if err != nil {
+			return nil, fmt.Errorf("iac_provider_plan step %q: resolve resources: %w", s.name, err)
 		}
 	}
 

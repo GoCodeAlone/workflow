@@ -1838,6 +1838,64 @@
         }
       ]
     },
+    "iac.provider": {
+      "type": "iac.provider",
+      "label": "IaC Provider",
+      "category": "infrastructure",
+      "description": "Aliases an external plugin-served IaC provider into the application service graph",
+      "inputs": [
+        {
+          "name": "provider",
+          "type": "IaCProvider",
+          "description": "External plugin-served provider"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "provider",
+          "type": "IaCProvider",
+          "description": "App-local IaC provider service"
+        }
+      ],
+      "configFields": [
+        {
+          "key": "plugin",
+          "label": "Plugin",
+          "type": "string",
+          "description": "External plugin service name, for example workflow-plugin-aws; one of plugin, service, or provider is required"
+        },
+        {
+          "key": "service",
+          "label": "Service",
+          "type": "string",
+          "description": "Alias for plugin: external IaC provider service name"
+        },
+        {
+          "key": "provider",
+          "label": "Provider",
+          "type": "string",
+          "description": "Provider shorthand: aws, azure, digitalocean, or gcp; one of plugin, service, or provider is required"
+        },
+        {
+          "key": "mode",
+          "label": "Mode",
+          "type": "string",
+          "description": "Provider-specific mode such as mock"
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "string",
+          "description": "Primary provider region"
+        },
+        {
+          "key": "credentials",
+          "label": "Credentials",
+          "type": "map",
+          "description": "Provider-specific credential configuration"
+        }
+      ]
+    },
     "iac.state": {
       "type": "iac.state",
       "label": "IaC State Store",

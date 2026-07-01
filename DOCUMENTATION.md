@@ -387,8 +387,16 @@ YAML from the pipeline context, such as an HTTP route's `request_body`.
 
 **DigitalOcean IaC steps** were removed from workflow core in v0.52.0 and moved to the
 [workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
-external plugin. After loading the plugin, use the generic `step.iac_*` pipeline steps.
+external plugin. After loading the plugin, prefer typed `step.iac_provider_*`
+pipeline steps with named `infra.*` resources.
 See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+
+Typed IaC provider steps (`step.iac_provider_plan`, `step.iac_provider_apply`,
+`step.iac_provider_list`, and `step.iac_provider_destroy`) can operate on named
+`infra.*` app modules with `resources: [module-name]`. That keeps resource
+configuration in the module graph while pipelines expose application actions.
+Use `specs` or `specs_from` only when the desired resources are authored or
+provided by the request itself.
 
 ### Expression Syntax
 
@@ -572,12 +580,13 @@ Strict mode applies to **both** direct dot-access (`{{ .steps.auth.field }}`) an
 **DigitalOcean IaC modules** were removed from workflow core in v0.52.0 and moved to the
 [workflow-plugin-digitalocean](https://github.com/GoCodeAlone/workflow-plugin-digitalocean)
 external plugin. After loading the plugin, use the generic `infra.*` module
-types with `provider: digitalocean` and the generic `step.iac_*` pipeline
-steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
+types with an `iac.provider` module and the typed `step.iac_provider_*`
+pipeline steps. See [v0.52.0 migration guide](docs/migrations/v0.52.0-godo-removal.md).
 
 **AWS IaC modules** (`platform.ecs`, `platform.networking`, `platform.apigateway`, `platform.autoscaling`) were removed from workflow core in v0.53.0 and are provided by the
 [workflow-plugin-aws](https://github.com/GoCodeAlone/workflow-plugin-aws) v0.2.0+ plugin.
-Use the generic `infra.*` module types with `provider: aws` and `step.iac_*` pipeline steps.
+Use the generic `infra.*` module types with an `iac.provider` module and
+typed `step.iac_provider_*` pipeline steps.
 See [v0.53.0 migration guide](docs/migrations/v0.53.0-aws-iac-removal.md).
 | `iac.provider` | Cloud provider configuration (aws, gcp, azure, digitalocean) for IaC operations | platform |
 | `iac.state` | IaC state persistence (memory + filesystem + postgres in-core; spaces / s3 / gcs / azure_blob via plugins) | platform |

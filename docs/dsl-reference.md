@@ -108,6 +108,38 @@ modules:
 - `http.server.config.address` is the canonical listen address. `port: 8080` is accepted as an authoring alias and normalizes to `":8080"` when `address` is omitted.
 - Use `wfctl modernize --apply` to rewrite accepted aliases back to canonical fields before committing long-lived config.
 
+### Typed IaC Provider Modules
+Use `iac.provider` to alias an external typed IaC plugin into the app service
+graph, then point `infra.*` resources at that provider module. Typed IaC
+pipeline steps can use `resources` to operate on those named app resources
+without duplicating resource specs inside every route.
+
+```yaml
+modules:
+  - name: aws-provider
+    type: iac.provider
+    config:
+      plugin: workflow-plugin-aws
+      mode: mock
+      region: us-east-1
+
+  - name: staging-ecs
+    type: infra.container_service
+    config:
+      provider: aws-provider
+      image: public.ecr.aws/nginx/nginx:latest
+      replicas: 2
+
+pipelines:
+  plan-service:
+    steps:
+      - name: plan
+        type: step.iac_provider_plan
+        config:
+          provider: aws-provider
+          resources: [staging-ecs]
+```
+
 ---
 
 <!-- section: workflows -->
@@ -699,7 +731,29 @@ The `infrastructure:` section declares infrastructure resources the application 
     - `connection` (object) — connection details when `strategy: existing`:
       - `host` (string, required) — hostname or IP
       - `port` (int) — port number
-      - `auth` (string) — authentication reference (e.g., a secret name)
+    - `auth` (string) — authentication reference (e.g., a secret name)
+
+### `iac.provider` Modules
+
+`iac.provider` aliases an external typed-IaC provider plugin into the application service graph for `infra.*` modules and IaC pipeline steps. Use `plugin` for the exact external plugin service name, or `provider` as a shorthand for the common provider plugins.
+
+```yaml
+modules:
+  - name: aws-provider
+    type: iac.provider
+    config:
+      plugin: workflow-plugin-aws
+      mode: mock
+      region: us-east-1
+
+  - name: web
+    type: infra.container_service
+    config:
+      provider: aws-provider
+      image: public.ecr.aws/nginx/nginx:latest
+```
+
+Supported provider shorthands are `aws`, `azure`, `digitalocean`, and `gcp`; for example `provider: aws` resolves to `workflow-plugin-aws` while preserving `provider: aws` in the config passed to the provider.
 
 ### `sidecars` Fields
 - `sidecars` (array) — list of sidecar container definitions

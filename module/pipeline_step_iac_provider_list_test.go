@@ -12,11 +12,14 @@ import (
 type stubIaCProvider struct {
 	statusResult  []interfaces.ResourceStatus
 	statusErr     error
+	statusRefs    []interfaces.ResourceRef
 	caps          []interfaces.IaCCapabilityDeclaration
 	planResult    *interfaces.IaCPlan
 	planErr       error
+	planDesired   []interfaces.ResourceSpec
 	destroyResult *interfaces.DestroyResult
 	destroyErr    error
+	destroyRefs   []interfaces.ResourceRef
 	driftResult   []interfaces.DriftResult
 	driftErr      error
 }
@@ -25,13 +28,16 @@ func (s *stubIaCProvider) Name() string                                         
 func (s *stubIaCProvider) Version() string                                      { return "0.0.0" }
 func (s *stubIaCProvider) Initialize(_ context.Context, _ map[string]any) error { return nil }
 func (s *stubIaCProvider) Capabilities() []interfaces.IaCCapabilityDeclaration  { return s.caps }
-func (s *stubIaCProvider) Plan(_ context.Context, _ []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+func (s *stubIaCProvider) Plan(_ context.Context, desired []interfaces.ResourceSpec, _ []interfaces.ResourceState) (*interfaces.IaCPlan, error) {
+	s.planDesired = append([]interfaces.ResourceSpec(nil), desired...)
 	return s.planResult, s.planErr
 }
-func (s *stubIaCProvider) Destroy(_ context.Context, _ []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+func (s *stubIaCProvider) Destroy(_ context.Context, refs []interfaces.ResourceRef) (*interfaces.DestroyResult, error) {
+	s.destroyRefs = append([]interfaces.ResourceRef(nil), refs...)
 	return s.destroyResult, s.destroyErr
 }
-func (s *stubIaCProvider) Status(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+func (s *stubIaCProvider) Status(_ context.Context, refs []interfaces.ResourceRef) ([]interfaces.ResourceStatus, error) {
+	s.statusRefs = append([]interfaces.ResourceRef(nil), refs...)
 	return s.statusResult, s.statusErr
 }
 func (s *stubIaCProvider) DetectDrift(_ context.Context, _ []interfaces.ResourceRef) ([]interfaces.DriftResult, error) {
@@ -92,6 +98,41 @@ func TestIaCProviderListStep_Execute_ReturnsSummaries(t *testing.T) {
 	}
 	if result.Output["count"] != 2 {
 		t.Errorf("expected count=2, got %v", result.Output["count"])
+	}
+}
+
+func TestIaCProviderListStep_ResourcesResolveInfraModuleRefs(t *testing.T) {
+	app := module.NewMockApplication()
+	provider := &stubIaCProvider{
+		statusResult: []interfaces.ResourceStatus{
+			{Name: "staging-ecs", Type: "infra.container_service", ProviderID: "pid-ecs", Status: "running"},
+		},
+	}
+	if err := app.RegisterService("my-provider", provider); err != nil {
+		t.Fatal(err)
+	}
+	infra := module.NewInfraModule("staging-ecs", "infra.container_service", map[string]any{"provider": "my-provider"})
+	if err := app.RegisterService("staging-ecs.driver", infra); err != nil {
+		t.Fatal(err)
+	}
+
+	factory := module.NewIaCProviderListStepFactory()
+	step, err := factory("list-step", map[string]any{
+		"provider":  "my-provider",
+		"resources": []any{"staging-ecs"},
+	}, app)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	if _, err := step.Execute(context.Background(), &module.PipelineContext{}); err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(provider.statusRefs) != 1 {
+		t.Fatalf("expected one status ref, got %d", len(provider.statusRefs))
+	}
+	if provider.statusRefs[0].Name != "staging-ecs" || provider.statusRefs[0].Type != "infra.container_service" {
+		t.Fatalf("unexpected status refs: %#v", provider.statusRefs)
 	}
 }
 

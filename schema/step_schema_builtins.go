@@ -2062,7 +2062,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Lists current resource statuses from an IaCProvider service.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "refs", Type: FieldTypeArray, Description: "Optional list of resource refs to query; empty queries all"},
+			{Key: "refs", Type: FieldTypeArray, Description: "Optional list of resource refs to query; mutually exclusive with resources"},
+			{Key: "resources", Type: FieldTypeArray, Description: "Optional list of named app infra resources to query; mutually exclusive with refs"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "provider", Type: "string", Description: "Provider service name"},
@@ -2097,8 +2098,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Plans infrastructure changes against an IaCProvider service; computes a stable desired-state hash using a no-op env resolver.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs (list of {name, type, config, size}); mutually exclusive with specs_from"},
-			{Key: "specs_from", Type: FieldTypeString, Description: "Dotted context path to resolve specs at Execute time (e.g. steps.parse-request.body.specs); mutually exclusive with specs"},
+			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs (list of {name, type, config, size}); mutually exclusive with specs_from and resources"},
+			{Key: "specs_from", Type: FieldTypeString, Description: "Dotted context path to resolve specs at Execute time (e.g. steps.parse-request.body.specs); mutually exclusive with specs and resources"},
+			{Key: "resources", Type: FieldTypeArray, Description: "Named app infra resources to resolve into desired specs; mutually exclusive with specs and specs_from"},
 			{Key: "env", Type: FieldTypeString, Description: "Environment name (reserved; unused by hash computation)"},
 		},
 		Outputs: []StepOutputDef{
@@ -2116,8 +2118,9 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Applies an IaC plan via two-phase hash guard: recomputes DesiredStateHash and rejects with 'plan hash mismatch' when hashes diverge.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs passed to plan and hash recomputation; mutually exclusive with specs_from"},
-			{Key: "specs_from", Type: FieldTypeString, Description: "Dotted context path to resolve specs at Execute time (e.g. steps.parse-request.body.specs); mutually exclusive with specs"},
+			{Key: "specs", Type: FieldTypeArray, Description: "Desired resource specs passed to plan and hash recomputation; mutually exclusive with specs_from and resources"},
+			{Key: "specs_from", Type: FieldTypeString, Description: "Dotted context path to resolve specs at Execute time (e.g. steps.parse-request.body.specs); mutually exclusive with specs and resources"},
+			{Key: "resources", Type: FieldTypeArray, Description: "Named app infra resources to resolve into desired specs; mutually exclusive with specs and specs_from"},
 			{Key: "desired_hash", Type: FieldTypeString, Description: "Client-submitted hash from the plan step; must match recomputed hash; mutually exclusive with desired_hash_from"},
 			{Key: "desired_hash_from", Type: FieldTypeString, Description: "Dotted context path to resolve the client-submitted hash at Execute time (e.g. steps.parse-request.body.desired_hash); mutually exclusive with desired_hash"},
 		},
@@ -2137,7 +2140,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Destroys resources via an IaCProvider service.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "provider", Type: FieldTypeString, Description: "Name of the registered IaCProvider service", Required: true},
-			{Key: "refs", Type: FieldTypeArray, Description: "Resource refs to destroy (list of {name, type, provider_id})"},
+			{Key: "refs", Type: FieldTypeArray, Description: "Resource refs to destroy (list of {name, type, provider_id}); mutually exclusive with resources"},
+			{Key: "resources", Type: FieldTypeArray, Description: "Named app infra resources to destroy; mutually exclusive with refs"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "destroyed", Type: "[]any", Description: "Names of destroyed resources"},
