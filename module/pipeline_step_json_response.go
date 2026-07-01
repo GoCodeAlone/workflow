@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -255,7 +256,7 @@ func decodeJSONObjectOrArray(value string) any {
 // then in Current.
 func resolveBodyFrom(path string, pc *PipelineContext) any {
 	if path == "." {
-		return pc.Current
+		return maps.Clone(pc.Current)
 	}
 
 	parts := strings.SplitN(path, ".", 2)

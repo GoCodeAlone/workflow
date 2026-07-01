@@ -188,6 +188,33 @@ func TestJSONResponseStep_BodyFromCurrentContext(t *testing.T) {
 	}
 }
 
+func TestJSONResponseStep_BodyFromCurrentContextNoWriterDoesNotCreateCycle(t *testing.T) {
+	factory := NewJSONResponseStepFactory()
+	step, err := factory("from-current", map[string]any{
+		"status":    200,
+		"body_from": ".",
+	}, nil)
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+
+	pc := NewPipelineContext(map[string]any{"request_id": "req-1"}, nil)
+	pc.MergeStepOutput("plan", map[string]any{
+		"cluster":  "production-cluster",
+		"provider": "kind",
+	})
+
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	pc.MergeStepOutput(step.Name(), result.Output)
+
+	if _, err := json.Marshal(pc.Current); err != nil {
+		t.Fatalf("marshal merged pipeline context: %v", err)
+	}
+}
+
 func TestJSONResponseStep_TemplateBody(t *testing.T) {
 	factory := NewJSONResponseStepFactory()
 	step, err := factory("templated", map[string]any{
