@@ -3,6 +3,7 @@ package module_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -308,6 +309,22 @@ func TestCloudValidateStep_AccountFromContext(t *testing.T) {
 	}
 	if result.Output["valid"] != true {
 		t.Errorf("expected valid=true, got %v", result.Output["valid"])
+	}
+}
+
+func TestCloudValidateStep_AccountFromNilContext(t *testing.T) {
+	factory := module.NewCloudValidateStepFactory()
+	step, err := factory("validate", map[string]any{"account_from": "account"}, module.NewMockApplication())
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	_, err = step.Execute(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected nil context error")
+	}
+	if got, want := err.Error(), `account_from "account" requires a pipeline context`; !strings.Contains(got, want) {
+		t.Fatalf("expected %q in error, got %v", want, err)
 	}
 }
 

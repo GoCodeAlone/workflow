@@ -94,6 +94,9 @@ func (s *CloudValidateStep) resolveAccount(pc *PipelineContext) (string, error) 
 	if s.account != "" {
 		return s.account, nil
 	}
+	if pc == nil {
+		return "", fmt.Errorf("account_from %q requires a pipeline context", s.accountFrom)
+	}
 	raw := resolveBodyFrom(s.accountFrom, pc)
 	account, ok := raw.(string)
 	if !ok || account == "" {
