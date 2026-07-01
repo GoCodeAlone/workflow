@@ -71,6 +71,22 @@ func TestStepSchemaRegistry_ArtifactContentFields(t *testing.T) {
 	}
 }
 
+func TestStepSchemaRegistry_CloudValidateAccountFrom(t *testing.T) {
+	reg := NewStepSchemaRegistry()
+	s := reg.Get("step.cloud_validate")
+	if s == nil {
+		t.Fatal("missing step.cloud_validate schema")
+	}
+	for _, key := range []string{"account", "account_from"} {
+		if !hasConfigField(s, key) {
+			t.Errorf("step.cloud_validate missing config field %q", key)
+		}
+	}
+	if !hasStepOutput(s, "account") {
+		t.Error("step.cloud_validate missing account output")
+	}
+}
+
 func hasConfigField(s *StepSchema, key string) bool {
 	for _, field := range s.ConfigFields {
 		if field.Key == key {

@@ -1175,7 +1175,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.cloud_validate": {
 			Type:       "step.cloud_validate",
 			Plugin:     "cloud",
-			ConfigKeys: []string{"account"},
+			ConfigKeys: []string{"account", "account_from"},
 		},
 
 		// cicd plugin steps (build_binary + codebuild)

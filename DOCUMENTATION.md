@@ -267,6 +267,21 @@ string content from the pipeline context. `content_encoding` accepts `raw`,
 **Output fields:** file mode returns `key`, `dest`, `size`, `metadata`; content
 mode returns `key`, `artifact_content`, `size`, `metadata`.
 
+### Cloud Pipeline Steps
+
+`step.cloud_validate` validates a configured `cloud.account` module. Use
+`account` for a static account name, or `account_from` to resolve the account
+name from the pipeline context at execution time. Exactly one of the two fields
+is required.
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `account` | string | one of `account`/`account_from` | Static `cloud.account` module name. |
+| `account_from` | string | one of `account`/`account_from` | Pipeline context path containing the `cloud.account` module name. |
+
+**Output fields:** `account`, `valid`, `provider`, `region`, and provider-specific
+summary fields such as `project_id`, `tenant_id`, or `subscription_id`.
+
 ### CI/CD Pipeline Steps
 | Type | Description | Plugin |
 |------|-------------|--------|

@@ -272,12 +272,58 @@ func TestCloudValidateStep(t *testing.T) {
 	}
 }
 
+func TestCloudValidateStep_AccountFromContext(t *testing.T) {
+	app := module.NewMockApplication()
+	for name, region := range map[string]string{
+		"prod-account":    "us-east-1",
+		"staging-account": "us-west-2",
+	} {
+		acc := module.NewCloudAccount(name, map[string]any{
+			"provider": "mock",
+			"region":   region,
+		})
+		if err := acc.Init(app); err != nil {
+			t.Fatalf("cloud account %q Init failed: %v", name, err)
+		}
+	}
+
+	factory := module.NewCloudValidateStepFactory()
+	step, err := factory("validate", map[string]any{"account_from": "account"}, app)
+	if err != nil {
+		t.Fatalf("factory failed: %v", err)
+	}
+
+	result, err := step.Execute(context.Background(), &module.PipelineContext{
+		Current: map[string]any{"account": "staging-account"},
+	})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if result.Output["account"] != "staging-account" {
+		t.Errorf("expected account=staging-account, got %v", result.Output["account"])
+	}
+	if result.Output["region"] != "us-west-2" {
+		t.Errorf("expected region=us-west-2, got %v", result.Output["region"])
+	}
+	if result.Output["valid"] != true {
+		t.Errorf("expected valid=true, got %v", result.Output["valid"])
+	}
+}
+
 // TestCloudValidateStep_MissingAccount verifies the factory requires an account name.
 func TestCloudValidateStep_MissingAccount(t *testing.T) {
 	factory := module.NewCloudValidateStepFactory()
 	_, err := factory("validate", map[string]any{}, module.NewMockApplication())
 	if err == nil {
 		t.Error("expected error when account is missing")
+	}
+	_, err = factory("validate", map[string]any{
+		"account":      "static-account",
+		"account_from": "account",
+	}, module.NewMockApplication())
+	if err == nil {
+		t.Error("expected error when account and account_from are both set")
 	}
 }
 
