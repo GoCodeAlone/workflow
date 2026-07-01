@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/modular"
@@ -35,6 +38,33 @@ func overrideLocalExternalPluginLoader(t *testing.T, wantPluginDir string) func(
 			t.Fatal("external plugin shutdown was not called")
 		}
 	}
+}
+
+func TestLocalExternalPluginStdLoggerUsesProvidedSlog(t *testing.T) {
+	var defaultLog bytes.Buffer
+	defaultWriter := log.Writer()
+	log.SetOutput(&defaultLog)
+	defer log.SetOutput(defaultWriter)
+
+	var slogOutput bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&slogOutput, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	stdLogger := newLocalExternalPluginStdLogger(logger)
+
+	stdLogger.Print("external plugin detail")
+
+	if defaultLog.Len() != 0 {
+		t.Fatalf("external plugin logger wrote to process default logger: %q", defaultLog.String())
+	}
+	if got := slogOutput.String(); !strings.Contains(got, "external plugin detail") {
+		t.Fatalf("external plugin log was not routed to provided slog logger: %q", got)
+	}
+}
+
+func TestLocalExternalPluginStdLoggerNilLoggerDiscards(t *testing.T) {
+	t.Parallel()
+
+	stdLogger := newLocalExternalPluginStdLogger(nil)
+	stdLogger.Print("discarded detail")
 }
 
 type testExternalMarkerPlugin struct {
