@@ -248,13 +248,11 @@ func (m *AppContainerModule) Rollback() (*AppDeployResult, error) {
 	if m.previous == nil {
 		return nil, fmt.Errorf("app.container %q: no previous deployment to roll back to", m.name)
 	}
-	result, err := m.backend.rollback(m, m.previous.Image)
-	if err != nil {
-		return nil, err
-	}
-	m.current = result
+	result := *m.previous
+	result.Status = "rolled_back"
+	m.current = &result
 	m.previous = nil
-	return result, nil
+	return &result, nil
 }
 
 // Manifests returns the generated platform-specific resource manifests.

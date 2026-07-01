@@ -241,6 +241,39 @@ func TestAppContainer_RollbackRevertsToPreviewImage(t *testing.T) {
 	}
 }
 
+// TestAppContainer_RollbackRestoresPreviousRuntimeReplicas verifies rollback
+// restores the previous operation-specific deploy result, not the static module
+// default replica count.
+func TestAppContainer_RollbackRestoresPreviousRuntimeReplicas(t *testing.T) {
+	_, m := setupAppContainerWithK8s(t)
+	base := m.Spec()
+
+	first := base
+	first.Image = "registry.example.com/my-api:v1"
+	first.Replicas = 4
+	if _, err := m.DeployWithSpec(first); err != nil {
+		t.Fatalf("first DeployWithSpec: %v", err)
+	}
+
+	second := base
+	second.Image = "registry.example.com/my-api:v2"
+	second.Replicas = 6
+	if _, err := m.DeployWithSpec(second); err != nil {
+		t.Fatalf("second DeployWithSpec: %v", err)
+	}
+
+	rolledBack, err := m.Rollback()
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if rolledBack.Image != first.Image {
+		t.Errorf("expected rollback image=%q, got %q", first.Image, rolledBack.Image)
+	}
+	if rolledBack.Replicas != first.Replicas {
+		t.Errorf("expected rollback replicas=%d, got %d", first.Replicas, rolledBack.Replicas)
+	}
+}
+
 // TestAppContainer_RollbackNoPreviousReturnsError verifies Rollback fails when no previous exists.
 func TestAppContainer_RollbackNoPreviousReturnsError(t *testing.T) {
 	_, m := setupAppContainerWithK8s(t)
