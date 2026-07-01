@@ -263,6 +263,7 @@ string content from the pipeline context. `content_encoding` accepts `raw`,
 | `key` | string | yes | Artifact key; templates are resolved against the pipeline context. |
 | `dest` | string | one of `dest`/`content_encoding` | Server-local file path to write. |
 | `content_encoding` | string | one of `dest`/`content_encoding` | Output encoding when returning content: `raw`, `text`, or `base64`. |
+| `max_bytes` | number | no | Maximum whole-number bytes to load in content-output mode; `0` means unlimited. |
 
 **Output fields:** file mode returns `key`, `dest`, `size`, `metadata`; content
 mode returns `key`, `artifact_content`, `size`, `metadata`.

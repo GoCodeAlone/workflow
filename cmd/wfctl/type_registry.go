@@ -1153,12 +1153,12 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.artifact_upload": {
 			Type:       "step.artifact_upload",
 			Plugin:     "storage",
-			ConfigKeys: []string{"store", "key", "source", "metadata"},
+			ConfigKeys: []string{"store", "key", "source", "content_from", "content_encoding", "metadata"},
 		},
 		"step.artifact_download": {
 			Type:       "step.artifact_download",
 			Plugin:     "storage",
-			ConfigKeys: []string{"store", "key", "dest"},
+			ConfigKeys: []string{"store", "key", "dest", "content_encoding", "max_bytes"},
 		},
 		"step.artifact_list": {
 			Type:       "step.artifact_list",

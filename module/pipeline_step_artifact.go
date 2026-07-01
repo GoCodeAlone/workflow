@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/GoCodeAlone/modular"
@@ -172,6 +173,7 @@ type ArtifactDownloadStep struct {
 	key             string
 	dest            string
 	contentEncoding string
+	maxBytes        int64
 	app             modular.Application
 	tmpl            *TemplateEngine
 }
@@ -198,6 +200,10 @@ func NewArtifactDownloadStepFactory() StepFactory {
 		if contentEncoding != "" && !isSupportedArtifactContentEncoding(contentEncoding, false) {
 			return nil, fmt.Errorf("artifact_download step %q: unsupported content_encoding %q", name, contentEncoding)
 		}
+		maxBytes, err := parseArtifactMaxBytes(config["max_bytes"])
+		if err != nil {
+			return nil, fmt.Errorf("artifact_download step %q: %w", name, err)
+		}
 
 		return &ArtifactDownloadStep{
 			name:            name,
@@ -205,6 +211,7 @@ func NewArtifactDownloadStepFactory() StepFactory {
 			key:             key,
 			dest:            dest,
 			contentEncoding: contentEncoding,
+			maxBytes:        maxBytes,
 			app:             app,
 			tmpl:            NewTemplateEngine(),
 		}, nil
@@ -231,7 +238,7 @@ func (s *ArtifactDownloadStep) Execute(ctx context.Context, pc *PipelineContext)
 	defer reader.Close()
 
 	if s.dest == "" {
-		data, err := io.ReadAll(reader)
+		data, err := readArtifactContent(reader, s.maxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("artifact_download step %q: failed to read artifact content: %w", s.name, err)
 		}
@@ -250,6 +257,9 @@ func (s *ArtifactDownloadStep) Execute(ctx context.Context, pc *PipelineContext)
 	dest, err := s.tmpl.Resolve(s.dest, pc)
 	if err != nil {
 		return nil, fmt.Errorf("artifact_download step %q: dest template: %w", s.name, err)
+	}
+	if strings.TrimSpace(dest) == "" || strings.Contains(dest, "<no value>") {
+		return nil, fmt.Errorf("artifact_download step %q: resolved dest is empty", s.name)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
@@ -299,6 +309,56 @@ func isSupportedArtifactContentEncoding(encoding string, allowEmpty bool) bool {
 	default:
 		return false
 	}
+}
+
+func parseArtifactMaxBytes(raw any) (int64, error) {
+	if raw == nil {
+		return 0, nil
+	}
+	var maxBytes int64
+	switch v := raw.(type) {
+	case int:
+		maxBytes = int64(v)
+	case int64:
+		maxBytes = v
+	case int32:
+		maxBytes = int64(v)
+	case float64:
+		if v != float64(int64(v)) {
+			return 0, fmt.Errorf("max_bytes must be a whole number")
+		}
+		maxBytes = int64(v)
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0, nil
+		}
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("max_bytes must be a whole number: %w", err)
+		}
+		maxBytes = parsed
+	default:
+		return 0, fmt.Errorf("max_bytes has unsupported type %T", raw)
+	}
+	if maxBytes < 0 {
+		return 0, fmt.Errorf("max_bytes must be >= 0")
+	}
+	return maxBytes, nil
+}
+
+func readArtifactContent(reader io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return io.ReadAll(reader)
+	}
+	limited := io.LimitReader(reader, maxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("artifact content exceeds max_bytes %d", maxBytes)
+	}
+	return data, nil
 }
 
 func encodeArtifactContent(data []byte, encoding string) (string, error) {

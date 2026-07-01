@@ -1626,9 +1626,11 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 			{Key: "key", Type: FieldTypeString, Description: "Artifact key to download", Required: true},
 			{Key: "dest", Type: FieldTypeString, Description: "Local path to write the artifact; mutually exclusive with content_encoding"},
 			{Key: "content_encoding", Type: FieldTypeString, Description: "Return content in step output using this encoding when dest is omitted (raw, text, base64)"},
+			{Key: "max_bytes", Type: FieldTypeNumber, Description: "Maximum whole-number bytes to load in content-output mode; 0 means unlimited"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "dest", Type: "string", Description: "Local path where artifact was written"},
+			{Key: "key", Type: "string", Description: "Artifact key"},
+			{Key: "dest", Type: "string", Description: "Local path where artifact was written in file mode"},
 			{Key: "artifact_content", Type: "string", Description: "Artifact content when content_encoding is used"},
 			{Key: "size", Type: "number", Description: "Artifact size in bytes"},
 			{Key: "metadata", Type: "object", Description: "Artifact metadata"},
