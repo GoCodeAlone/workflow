@@ -283,6 +283,20 @@ func TestBuildBinaryStep_DryRun_ConfigFromExplicitContextPath(t *testing.T) {
 	}
 }
 
+func TestBuildBinaryStep_ConfigFileAndConfigFromAreMutuallyExclusive(t *testing.T) {
+	factory := NewBuildBinaryStepFactory()
+	_, err := factory("bb", map[string]any{
+		"config_file": "app.yaml",
+		"config_from": "request_body",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error when config_file and config_from are both set")
+	}
+	if !strings.Contains(err.Error(), "only one of 'config_file' or 'config_from'") {
+		t.Fatalf("expected mutually exclusive config error, got %v", err)
+	}
+}
+
 func TestBuildBinaryStep_MissingConfigFileAndNoContext(t *testing.T) {
 	factory := NewBuildBinaryStepFactory()
 	step, err := factory("bb", map[string]any{

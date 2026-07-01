@@ -37,6 +37,9 @@ func NewBuildBinaryStepFactory() StepFactory {
 		if configFile == "" && configFrom == "" {
 			return nil, fmt.Errorf("build_binary step %q: either 'config_file' or 'config_from' is required", name)
 		}
+		if configFile != "" && configFrom != "" {
+			return nil, fmt.Errorf("build_binary step %q: only one of 'config_file' or 'config_from' may be set", name)
+		}
 
 		output, _ := config["output"].(string)
 		if output == "" {

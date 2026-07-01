@@ -1681,8 +1681,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Generates a Workflow Go project from config and optionally builds a binary.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "config_file", Type: FieldTypeString, Description: "Workflow config file to embed; one of config_file or config_from is required"},
-			{Key: "config_from", Type: FieldTypeString, Description: "Pipeline context path resolving to workflow config YAML; one of config_file or config_from is required"},
+			{Key: "config_file", Type: FieldTypeString, Description: "Workflow config file to embed; exactly one of config_file or config_from is required"},
+			{Key: "config_from", Type: FieldTypeString, Description: "Pipeline context path resolving to workflow config YAML; exactly one of config_file or config_from is required"},
 			{Key: "output", Type: FieldTypeString, Description: "Output binary path"},
 			{Key: "module_path", Type: FieldTypeString, Description: "Generated Go module path"},
 			{Key: "go_version", Type: FieldTypeString, Description: "Generated go.mod Go version"},

@@ -318,8 +318,8 @@ YAML from the pipeline context, such as an HTTP route's `request_body`.
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `config_file` | string | one of `config_file`/`config_from` | Workflow config file to embed. |
-| `config_from` | string | one of `config_file`/`config_from` | Pipeline context path resolving to workflow config YAML. |
+| `config_file` | string | exactly one of `config_file`/`config_from` | Workflow config file to embed. |
+| `config_from` | string | exactly one of `config_file`/`config_from` | Pipeline context path resolving to workflow config YAML. |
 | `output` | string | no | Output binary path; defaults to `bin/app`. |
 | `module_path` | string | no | Generated Go module path; defaults to `app`. |
 | `go_version` | string | no | Generated `go.mod` Go version; defaults to `1.22`. |
