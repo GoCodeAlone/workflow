@@ -64,7 +64,7 @@ func TestStepSchemaRegistry_ArtifactContentFields(t *testing.T) {
 			t.Errorf("step.artifact_download missing config field %q", key)
 		}
 	}
-	for _, key := range []string{"dest", "content", "size", "metadata"} {
+	for _, key := range []string{"dest", "artifact_content", "size", "metadata"} {
 		if !hasStepOutput(download, key) {
 			t.Errorf("step.artifact_download missing output %q", key)
 		}

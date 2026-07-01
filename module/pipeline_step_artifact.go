@@ -57,13 +57,19 @@ func NewArtifactUploadStepFactory() StepFactory {
 		}
 		source, _ := config["source"].(string)
 		contentFrom, _ := config["content_from"].(string)
+		contentEncoding, _ := config["content_encoding"].(string)
 		if source == "" && contentFrom == "" {
 			return nil, fmt.Errorf("artifact_upload step %q: either 'source' or 'content_from' is required", name)
 		}
 		if source != "" && contentFrom != "" {
 			return nil, fmt.Errorf("artifact_upload step %q: only one of 'source' or 'content_from' may be set", name)
 		}
-		contentEncoding, _ := config["content_encoding"].(string)
+		if source != "" && contentEncoding != "" {
+			return nil, fmt.Errorf("artifact_upload step %q: 'content_encoding' may only be set with 'content_from'", name)
+		}
+		if contentFrom != "" && !isSupportedArtifactContentEncoding(contentEncoding, true) {
+			return nil, fmt.Errorf("artifact_upload step %q: unsupported content_encoding %q", name, contentEncoding)
+		}
 
 		md := map[string]string{}
 		if raw, ok := config["metadata"].(map[string]any); ok {
@@ -189,6 +195,9 @@ func NewArtifactDownloadStepFactory() StepFactory {
 		if dest != "" && contentEncoding != "" {
 			return nil, fmt.Errorf("artifact_download step %q: only one of 'dest' or 'content_encoding' may be set", name)
 		}
+		if contentEncoding != "" && !isSupportedArtifactContentEncoding(contentEncoding, false) {
+			return nil, fmt.Errorf("artifact_download step %q: unsupported content_encoding %q", name, contentEncoding)
+		}
 
 		return &ArtifactDownloadStep{
 			name:            name,
@@ -231,10 +240,10 @@ func (s *ArtifactDownloadStep) Execute(ctx context.Context, pc *PipelineContext)
 			return nil, fmt.Errorf("artifact_download step %q: %w", s.name, err)
 		}
 		return &StepResult{Output: map[string]any{
-			"key":      key,
-			"content":  content,
-			"size":     int64(len(data)),
-			"metadata": md,
+			"key":              key,
+			"artifact_content": content,
+			"size":             int64(len(data)),
+			"metadata":         md,
 		}}, nil
 	}
 
@@ -278,6 +287,17 @@ func decodeArtifactContent(content, encoding string) ([]byte, error) {
 		return data, nil
 	default:
 		return nil, fmt.Errorf("unsupported content_encoding %q", encoding)
+	}
+}
+
+func isSupportedArtifactContentEncoding(encoding string, allowEmpty bool) bool {
+	switch strings.ToLower(encoding) {
+	case "":
+		return allowEmpty
+	case "raw", "text", "base64":
+		return true
+	default:
+		return false
 	}
 }
 

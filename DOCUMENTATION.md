@@ -265,7 +265,7 @@ string content from the pipeline context. `content_encoding` accepts `raw`,
 | `content_encoding` | string | one of `dest`/`content_encoding` | Output encoding when returning content: `raw`, `text`, or `base64`. |
 
 **Output fields:** file mode returns `key`, `dest`, `size`, `metadata`; content
-mode returns `key`, `content`, `size`, `metadata`.
+mode returns `key`, `artifact_content`, `size`, `metadata`.
 
 ### CI/CD Pipeline Steps
 | Type | Description | Plugin |

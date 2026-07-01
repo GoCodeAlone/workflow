@@ -423,6 +423,24 @@ func TestArtifactUploadStep_MissingRequiredConfig(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for source and content_from")
 	}
+	_, err = factory("x", map[string]any{
+		"store":            "s",
+		"key":              "k",
+		"source":           "f",
+		"content_encoding": "base64",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for content_encoding with source")
+	}
+	_, err = factory("x", map[string]any{
+		"store":            "s",
+		"key":              "k",
+		"content_from":     "content",
+		"content_encoding": "gzip",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for unsupported content_encoding")
+	}
 }
 
 func TestArtifactDownloadStep_Basic(t *testing.T) {
@@ -486,8 +504,8 @@ func TestArtifactDownloadStep_ContentBase64Output(t *testing.T) {
 	}
 
 	wantContent := base64.StdEncoding.EncodeToString([]byte("downloaded client artifact"))
-	if result.Output["content"] != wantContent {
-		t.Errorf("content: got %v, want %s", result.Output["content"], wantContent)
+	if result.Output["artifact_content"] != wantContent {
+		t.Errorf("artifact_content: got %v, want %s", result.Output["artifact_content"], wantContent)
 	}
 	if result.Output["size"] != int64(len("downloaded client artifact")) {
 		t.Errorf("size: got %v", result.Output["size"])
@@ -524,6 +542,14 @@ func TestArtifactDownloadStep_MissingRequiredConfig(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Error("expected error for dest and content_encoding")
+	}
+	_, err = factory("x", map[string]any{
+		"store":            "s",
+		"key":              "k",
+		"content_encoding": "gzip",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for unsupported content_encoding")
 	}
 }
 

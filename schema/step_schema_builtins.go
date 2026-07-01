@@ -1629,7 +1629,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		},
 		Outputs: []StepOutputDef{
 			{Key: "dest", Type: "string", Description: "Local path where artifact was written"},
-			{Key: "content", Type: "string", Description: "Artifact content when content_encoding is used"},
+			{Key: "artifact_content", Type: "string", Description: "Artifact content when content_encoding is used"},
 			{Key: "size", Type: "number", Description: "Artifact size in bytes"},
 			{Key: "metadata", Type: "object", Description: "Artifact metadata"},
 		},

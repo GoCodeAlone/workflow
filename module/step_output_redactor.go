@@ -14,6 +14,8 @@ var SensitiveFieldPatterns = []string{
 	"signature",
 	"request_body",
 	"raw_body",
+	"artifact_content",
+	"content_b64",
 	"transmission_sig",
 	"api_key",
 	"api-key",
