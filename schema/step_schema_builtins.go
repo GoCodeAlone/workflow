@@ -1620,15 +1620,18 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	r.Register(&StepSchema{
 		Type:        "step.artifact_download",
 		Plugin:      "storage",
-		Description: "Downloads an artifact from the artifact store.",
+		Description: "Downloads artifact content from the artifact store to a file or pipeline output.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "store", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
 			{Key: "key", Type: FieldTypeString, Description: "Artifact key to download", Required: true},
-			{Key: "dest", Type: FieldTypeString, Description: "Local path to write the artifact"},
+			{Key: "dest", Type: FieldTypeString, Description: "Local path to write the artifact; mutually exclusive with content_encoding"},
+			{Key: "content_encoding", Type: FieldTypeString, Description: "Return content in step output using this encoding when dest is omitted (raw, text, base64)"},
 		},
 		Outputs: []StepOutputDef{
-			{Key: "path", Type: "string", Description: "Local path where artifact was written"},
+			{Key: "dest", Type: "string", Description: "Local path where artifact was written"},
+			{Key: "content", Type: "string", Description: "Artifact content when content_encoding is used"},
 			{Key: "size", Type: "number", Description: "Artifact size in bytes"},
+			{Key: "metadata", Type: "object", Description: "Artifact metadata"},
 		},
 	})
 
@@ -1653,16 +1656,19 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 	r.Register(&StepSchema{
 		Type:        "step.artifact_upload",
 		Plugin:      "storage",
-		Description: "Uploads a file as an artifact to the artifact store.",
+		Description: "Uploads file-backed or context-backed content to the artifact store.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "store", Type: FieldTypeString, Description: "Name of the storage.artifact module", Required: true},
 			{Key: "key", Type: FieldTypeString, Description: "Artifact key (storage path)", Required: true},
-			{Key: "source", Type: FieldTypeString, Description: "Local file path to upload", Required: true},
+			{Key: "source", Type: FieldTypeString, Description: "Local file path to upload; mutually exclusive with content_from"},
+			{Key: "content_from", Type: FieldTypeString, Description: "Pipeline context path containing artifact content as a string; mutually exclusive with source"},
+			{Key: "content_encoding", Type: FieldTypeString, Description: "Encoding for content_from (raw, text, base64)"},
 			{Key: "metadata", Type: FieldTypeMap, Description: "Additional metadata to attach"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "key", Type: "string", Description: "Stored artifact key"},
 			{Key: "store", Type: "string", Description: "Name of the store used"},
+			{Key: "size", Type: "number", Description: "Stored artifact size in bytes"},
 		},
 	})
 
