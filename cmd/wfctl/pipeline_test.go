@@ -312,6 +312,66 @@ pipelines:
 	}
 }
 
+func TestRunPipelineRunUsesExternalPluginDirEnv(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "plugins")
+	if err := os.Mkdir(pluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir plugin dir: %v", err)
+	}
+	t.Setenv("WFCTL_PLUGIN_DIR", "  "+pluginDir+"  ")
+	path := writePipelineConfig(t, dir, "external.yaml", `
+modules: []
+
+pipelines:
+  external:
+    steps:
+      - name: marker
+        type: step.test_external_marker
+        config:
+          value: loaded
+    on_error: stop
+`)
+
+	restore := overrideLocalExternalPluginLoader(t, pluginDir)
+	defer restore()
+
+	if err := runPipelineRun([]string{"-c", path, "-p", "external"}); err != nil {
+		t.Fatalf("pipeline run with WFCTL_PLUGIN_DIR failed: %v", err)
+	}
+}
+
+func TestRunPipelineRunPluginDirFlagTakesPrecedenceOverEnv(t *testing.T) {
+	dir := t.TempDir()
+	envPluginDir := filepath.Join(dir, "env-plugins")
+	flagPluginDir := filepath.Join(dir, "flag-plugins")
+	if err := os.Mkdir(envPluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir env plugin dir: %v", err)
+	}
+	if err := os.Mkdir(flagPluginDir, 0o755); err != nil {
+		t.Fatalf("mkdir flag plugin dir: %v", err)
+	}
+	t.Setenv("WFCTL_PLUGIN_DIR", envPluginDir)
+	path := writePipelineConfig(t, dir, "external.yaml", `
+modules: []
+
+pipelines:
+  external:
+    steps:
+      - name: marker
+        type: step.test_external_marker
+        config:
+          value: loaded
+    on_error: stop
+`)
+
+	restore := overrideLocalExternalPluginLoader(t, flagPluginDir)
+	defer restore()
+
+	if err := runPipelineRun([]string{"-c", path, "-p", "external", "--plugin-dir", flagPluginDir}); err != nil {
+		t.Fatalf("pipeline run with --plugin-dir precedence failed: %v", err)
+	}
+}
+
 // --- stringSliceFlag ---
 
 func TestStringSliceFlag(t *testing.T) {
