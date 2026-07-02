@@ -467,6 +467,9 @@ func TestAppContainer_AppDeployStepFactory(t *testing.T) {
 	if result.Output["status"] != "active" {
 		t.Errorf("expected status=active, got %v", result.Output["status"])
 	}
+	if result.Output["deployed"] != true {
+		t.Errorf("expected deployed=true, got %v", result.Output["deployed"])
+	}
 	if result.Output["app"] != "my-api" {
 		t.Errorf("expected app=my-api, got %v", result.Output["app"])
 	}

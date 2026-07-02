@@ -67,6 +67,7 @@ func (s *AppDeployStep) Execute(_ context.Context, pc *PipelineContext) (*StepRe
 		return nil, fmt.Errorf("app_deploy step %q: %w", s.name, err)
 	}
 	return &StepResult{Output: map[string]any{
+		"deployed": true,
 		"result":   result,
 		"app":      s.app,
 		"status":   result.Status,
