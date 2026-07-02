@@ -141,6 +141,9 @@ Options:
 		fs.Usage()
 		return fmt.Errorf("-p (pipeline name) is required")
 	}
+	if *pluginDir == "" {
+		*pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
+	}
 
 	// Build initial trigger data from --input JSON
 	triggerData := make(map[string]any)
