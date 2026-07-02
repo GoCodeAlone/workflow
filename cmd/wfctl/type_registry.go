@@ -1464,7 +1464,7 @@ func KnownStepTypes() map[string]StepTypeInfo {
 		"step.app_deploy": {
 			Type:       "step.app_deploy",
 			Plugin:     "platform",
-			ConfigKeys: []string{"app"},
+			ConfigKeys: []string{"app", "spec", "spec_from"},
 		},
 		"step.app_status": {
 			Type:       "step.app_status",

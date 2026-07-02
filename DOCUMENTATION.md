@@ -370,7 +370,7 @@ YAML from the pipeline context, such as an HTTP route's `request_body`.
 | `step.dns_plan` | Plans DNS record changes | platform |
 | `step.dns_apply` | Applies DNS record changes | platform |
 | `step.dns_status` | Retrieves the current DNS records for a domain | platform |
-| `step.app_deploy` | Deploys a containerized application | platform |
+| `step.app_deploy` | Deploys a containerized application; supports static `spec` or runtime `spec_from` overrides | platform |
 | `step.app_status` | Retrieves deployment status of an application | platform |
 | `step.app_rollback` | Rolls back an application to a previous deployment | platform |
 | `step.region_deploy` | Deploys workloads to a specific cloud region | platform |

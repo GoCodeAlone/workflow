@@ -29,6 +29,28 @@ func TestAppDeployStep_ValidConfig(t *testing.T) {
 	}
 }
 
+func TestAppContainerSpecWithOverrides_PortsDefaultHealthPort(t *testing.T) {
+	base := AppContainerSpec{
+		Image:      "registry.example.com/app:v1",
+		Replicas:   1,
+		Ports:      []int{8080},
+		HealthPort: 8080,
+	}
+
+	spec, err := appContainerSpecWithOverrides(base, map[string]any{
+		"ports": []any{9090},
+	})
+	if err != nil {
+		t.Fatalf("appContainerSpecWithOverrides: %v", err)
+	}
+	if spec.Ports[0] != 9090 {
+		t.Fatalf("expected port 9090, got %d", spec.Ports[0])
+	}
+	if spec.HealthPort != 9090 {
+		t.Fatalf("expected health port to follow overridden first port, got %d", spec.HealthPort)
+	}
+}
+
 // ── app_status ─────────────────────────────────────────────────────────────
 
 func TestAppStatusStep_MissingApp(t *testing.T) {

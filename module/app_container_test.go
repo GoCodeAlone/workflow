@@ -2,6 +2,7 @@ package module_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -240,6 +241,39 @@ func TestAppContainer_RollbackRevertsToPreviewImage(t *testing.T) {
 	}
 }
 
+// TestAppContainer_RollbackRestoresPreviousRuntimeReplicas verifies rollback
+// restores the previous operation-specific deploy result, not the static module
+// default replica count.
+func TestAppContainer_RollbackRestoresPreviousRuntimeReplicas(t *testing.T) {
+	_, m := setupAppContainerWithK8s(t)
+	base := m.Spec()
+
+	first := base
+	first.Image = "registry.example.com/my-api:v1"
+	first.Replicas = 4
+	if _, err := m.DeployWithSpec(first); err != nil {
+		t.Fatalf("first DeployWithSpec: %v", err)
+	}
+
+	second := base
+	second.Image = "registry.example.com/my-api:v2"
+	second.Replicas = 6
+	if _, err := m.DeployWithSpec(second); err != nil {
+		t.Fatalf("second DeployWithSpec: %v", err)
+	}
+
+	rolledBack, err := m.Rollback()
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if rolledBack.Image != first.Image {
+		t.Errorf("expected rollback image=%q, got %q", first.Image, rolledBack.Image)
+	}
+	if rolledBack.Replicas != first.Replicas {
+		t.Errorf("expected rollback replicas=%d, got %d", first.Replicas, rolledBack.Replicas)
+	}
+}
+
 // TestAppContainer_RollbackNoPreviousReturnsError verifies Rollback fails when no previous exists.
 func TestAppContainer_RollbackNoPreviousReturnsError(t *testing.T) {
 	_, m := setupAppContainerWithK8s(t)
@@ -435,6 +469,82 @@ func TestAppContainer_AppDeployStepFactory(t *testing.T) {
 	}
 	if result.Output["app"] != "my-api" {
 		t.Errorf("expected app=my-api, got %v", result.Output["app"])
+	}
+}
+
+// TestAppContainer_AppDeployStepSpecFrom verifies that app deployment can use
+// caller-supplied deployment specs from the pipeline context.
+func TestAppContainer_AppDeployStepSpecFrom(t *testing.T) {
+	app, _ := setupAppContainerWithK8s(t)
+
+	factory := module.NewAppDeployStepFactory()
+	step, err := factory("deploy", map[string]any{
+		"app":       "my-api",
+		"spec_from": "body.spec",
+	}, app)
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	result, err := step.Execute(context.Background(), &module.PipelineContext{
+		Current: map[string]any{
+			"body": map[string]any{
+				"spec": map[string]any{
+					"image":       "registry.example.com/my-api:v2.0.0",
+					"replicas":    5,
+					"ports":       []any{9090},
+					"cpu":         "750m",
+					"memory":      "768Mi",
+					"health_path": "/readyz",
+					"health_port": 9090,
+					"env": map[string]any{
+						"LOG_LEVEL": "debug",
+					},
+				},
+			},
+		},
+		StepOutputs: map[string]map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Output["status"] != "active" {
+		t.Errorf("expected status=active, got %v", result.Output["status"])
+	}
+	if result.Output["image"] != "registry.example.com/my-api:v2.0.0" {
+		t.Errorf("expected override image, got %v", result.Output["image"])
+	}
+	if result.Output["replicas"] != 5 {
+		t.Errorf("expected override replicas=5, got %v", result.Output["replicas"])
+	}
+
+	statusStep, err := module.NewAppStatusStepFactory()("status", map[string]any{"app": "my-api"}, app)
+	if err != nil {
+		t.Fatalf("status factory: %v", err)
+	}
+	status, err := statusStep.Execute(context.Background(), &module.PipelineContext{Current: map[string]any{}})
+	if err != nil {
+		t.Fatalf("status Execute: %v", err)
+	}
+	if status.Output["image"] != "registry.example.com/my-api:v2.0.0" {
+		t.Errorf("expected status to expose override image, got %v", status.Output["image"])
+	}
+	if status.Output["replicas"] != 5 {
+		t.Errorf("expected status to expose override replicas=5, got %v", status.Output["replicas"])
+	}
+}
+
+func TestAppDeployStep_SpecAndSpecFromMutuallyExclusive(t *testing.T) {
+	_, err := module.NewAppDeployStepFactory()("deploy", map[string]any{
+		"app":       "my-api",
+		"spec":      map[string]any{"image": "registry.example.com/my-api:v2.0.0"},
+		"spec_from": "body.spec",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for mutually exclusive spec and spec_from")
+	}
+	if !strings.Contains(err.Error(), "'spec' and 'spec_from' are mutually exclusive") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

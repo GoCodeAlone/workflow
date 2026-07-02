@@ -1484,6 +1484,8 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Description: "Deploys an application container to the target platform.",
 		ConfigFields: []ConfigFieldDef{
 			{Key: "app", Type: FieldTypeString, Description: "Name of the app.container module", Required: true},
+			{Key: "spec", Type: FieldTypeMap, Description: "Optional deployment spec overrides for this deploy call; mutually exclusive with spec_from"},
+			{Key: "spec_from", Type: FieldTypeString, Description: "Dotted pipeline context path resolving to deployment spec overrides; mutually exclusive with spec"},
 		},
 		Outputs: []StepOutputDef{
 			{Key: "deployed", Type: "boolean", Description: "Whether deployment succeeded"},
