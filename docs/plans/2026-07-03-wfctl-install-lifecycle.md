@@ -31,7 +31,7 @@
 | 2 | docs: document GoCodeAlone Homebrew tap usage | Task 2 | docs/tap-install-readme |
 | 3 | docs: remove stale wfctl install copy and release docs | Task 3, Task 4 | docs/wfctl-install-copy |
 
-**Status:** Draft
+**Status:** Locked 2026-07-03T23:38:53Z
 
 ### Task 1: Workflow Canonical wfctl Docs
 
