@@ -23,6 +23,7 @@ Make wfctl installation, update, and plugin lifecycle documentation accurate acr
 - Workflow release workflow publishes checksums and dispatches `update-wfctl` to `GoCodeAlone/homebrew-tap` for stable tags.
 - `homebrew-tap` `origin/main` has `Formula/wfctl.rb` at `0.84.3`; local brew cache may lag until `brew update`.
 - `homebrew-tap` `main` has no branch protection as of 2026-07-03, so generated formula PRs are not blocked by required review settings. PR #59 (`automation/update-wfctl-v0.84.3`) merged after CodeQL checks with only a Copilot comment.
+- `claude-skills` exists as a root-level legacy formula file but is not resolved by current Homebrew; see `decisions/0051-homebrew-claude-skills-formula-layout.md`.
 - `wfctl` already supports `update`, `update --check`, project plugin manifest/lock commands, `plugin ci`, and `-g/--global` plugin installs.
 
 ## Recommended Approach
@@ -45,7 +46,7 @@ In scope:
 - Replace stale README install one-liners.
 - Add a dedicated wfctl installation/lifecycle doc covering Homebrew, terminal release download, browser/manual download, source install, self-update, PATH, and verification.
 - Expand plugin lifecycle docs: project manifest, lockfile, CI install, global install, update, remove, and compatibility/checksum notes.
-- Expand the tap README with tap setup, formulas, install/upgrade examples, and automation notes.
+- Expand the tap README with tap setup, formulas, install/upgrade examples, and automation notes, and repair the `claude-skills` formula layout so every documented formula resolves.
 - Verify that generated Homebrew formula PRs can merge without mandatory reviews; if required reviews are later enabled, remove that branch requirement or add an explicit generated-PR bypass before relying on auto-merge.
 - Update website hardcoded wfctl install snippets away from stale `v0.60.17`.
 - After PRs merge, release Workflow and the website as needed, then verify downstream repository dispatches ran: Homebrew tap formula update, workflow-registry sync, workflow-scenarios bump, workflow-editor notification, website docs sync, and multisite ingest.

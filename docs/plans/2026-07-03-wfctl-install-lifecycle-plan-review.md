@@ -15,6 +15,7 @@
 - `P2` [Existence / runtime-validity] [Task 4]: First draft used `gh workflow run release.yml` for tag-driven release workflows. Recommendation: use tag push and monitor workflow runs. _Resolution: Task 4 corrected after inspecting release workflows._
 - `P3` [Verification-class mismatch] [Task 2]: Tap auto-freshness needs settings and PR evidence, not only README syntax checks. Recommendation: verify branch protection and a recent generated wfctl PR. _Resolution: Task 2 includes both checks._
 - `P4` [Manifest trace] [plan headings]: First checked plan used `## Task N` headings, which the scope-lock parser does not count as task headings. Recommendation: use `### Task N:` headings required by `writing-plans`. _Resolution: headings corrected and `plan-scope-check.sh` rerun._
+- `P5` [Existence / runtime-validity] [Task 2 amendment]: `claude-skills` was documented as installable but current Homebrew did not resolve it from the tap root. Recommendation: amend Task 2 to move the formula into `Formula/` and verify local formula resolution. _Resolution: ADR 0051 recorded; Task 2 amended._
 
 **Bug-class scan transcript:**
 

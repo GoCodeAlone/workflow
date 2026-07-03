@@ -31,7 +31,7 @@
 | 2 | docs: document GoCodeAlone Homebrew tap usage | Task 2 | docs/tap-install-readme |
 | 3 | docs: remove stale wfctl install copy and release docs | Task 3, Task 4 | docs/wfctl-install-copy |
 
-**Status:** Locked 2026-07-03T23:38:53Z
+**Status:** Locked 2026-07-03T23:45:22Z
 
 ### Task 1: Workflow Canonical wfctl Docs
 
@@ -88,6 +88,7 @@ Rollback: revert commit; no runtime state changes.
 
 **Files:**
 - Modify: `README.md`
+- Move: `claude-skills.rb` to `Formula/claude-skills.rb`
 - Inspect: `.github/workflows/update-wfctl.yml`
 - External setting: `GoCodeAlone/homebrew-tap` `main` branch protection
 
@@ -96,12 +97,13 @@ Rollback: revert commit; no runtime state changes.
 Expand the tap README with:
 
 - `brew tap gocodealone/tap`.
-- Available formula table for `wfctl`, `ratchet-cli`, and `claude-skills`.
+- Available recipe table for `wfctl`, `ratchet-cli`, `ratchet-cli` cask, and `claude-skills`.
 - Install, upgrade, pin/unpin, uninstall, and inspect examples.
 - Formula-specific examples: `brew install gocodealone/tap/wfctl`, `brew upgrade wfctl`.
 - Troubleshooting for stale formula cache via `brew update` and `brew info gocodealone/tap/wfctl`.
 - Automation note: Workflow releases dispatch `update-wfctl`; generated wfctl formula PRs are expected to auto-merge or admin-merge after checks when no unresolved review threads remain.
 - Branch-protection note: required reviews must not be mandatory for generated formula PRs unless a generated-PR bypass exists.
+- Move the legacy root-level `claude-skills.rb` formula into `Formula/claude-skills.rb` so the documented `brew install gocodealone/tap/claude-skills` path resolves.
 
 **Step 2: Verify tap state**
 
@@ -110,20 +112,24 @@ Run:
 ```bash
 ruby -c Formula/wfctl.rb
 ruby -c Formula/ratchet-cli.rb
+ruby -c Formula/claude-skills.rb
 brew info gocodealone/tap/wfctl
+brew info gocodealone/tap/ratchet-cli
+brew info --cask gocodealone/tap/ratchet-cli
+brew info ./Formula/claude-skills.rb
 gh pr list --repo GoCodeAlone/homebrew-tap --state all --limit 5 --json number,title,state --jq '.[] | [.number,.state,.title] | @tsv'
 gh api repos/GoCodeAlone/homebrew-tap/branches/main/protection --jq '.required_pull_request_reviews' || true
 gh pr view 59 --repo GoCodeAlone/homebrew-tap --json state,mergedAt,reviewDecision,statusCheckRollup --jq '{state,mergedAt,reviewDecision,checks:[.statusCheckRollup[]? | {name,conclusion,status}]}'
 ```
 
-Expected: Ruby syntax OK; `brew info` reports the tap formula; recent PR list shows automated formula updates; branch protection is absent or has no required-review gate for generated formula PRs; recent generated wfctl formula PR merged with green checks.
+Expected: Ruby syntax OK; `brew info` reports the tap formulas/cask; local `Formula/claude-skills.rb` resolves as a formula; recent PR list shows automated formula updates; branch protection is absent or has no required-review gate for generated formula PRs; recent generated wfctl formula PR merged with green checks.
 
 If the branch-protection check reports required reviews and no generated-PR bypass exists, update the repository rule before relying on the automation. If workflow inspection shows generated formula PRs no longer merge after checks, patch `.github/workflows/update-wfctl.yml` to restore the current behavior: open/update the generated PR, request Copilot review as advisory, wait for checks, leave open on failed checks or unresolved review threads, and admin-merge after green checks.
 
 **Step 3: Commit**
 
 ```bash
-git add README.md .github/workflows/update-wfctl.yml
+git add README.md Formula/claude-skills.rb .github/workflows/update-wfctl.yml
 git commit -m "docs: document Homebrew tap usage"
 ```
 
