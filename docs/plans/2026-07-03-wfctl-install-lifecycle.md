@@ -33,7 +33,7 @@
 
 **Status:** Draft
 
-## Task 1: Workflow Canonical wfctl Docs
+### Task 1: Workflow Canonical wfctl Docs
 
 **Files:**
 - Create: `docs/WFCTL_INSTALLATION.md`
@@ -84,7 +84,7 @@ git commit -m "docs: clarify wfctl install lifecycle"
 
 Rollback: revert commit; no runtime state changes.
 
-## Task 2: Homebrew Tap README And Auto-Merge Guard
+### Task 2: Homebrew Tap README And Auto-Merge Guard
 
 **Files:**
 - Modify: `README.md`
@@ -129,7 +129,7 @@ git commit -m "docs: document Homebrew tap usage"
 
 Rollback: revert commit; formulas unchanged.
 
-## Task 3: Website Install Copy
+### Task 3: Website Install Copy
 
 **Files:**
 - Modify: `src/pages/PlatformPage.tsx`
@@ -163,7 +163,7 @@ git commit -m "docs: refresh wfctl install copy"
 
 Rollback: revert commit; no runtime state changes until website release.
 
-## Task 4: Post-Merge Release And Downstream Verification
+### Task 4: Post-Merge Release And Downstream Verification
 
 **Files:**
 - Inspect: `.github/workflows/release.yml`

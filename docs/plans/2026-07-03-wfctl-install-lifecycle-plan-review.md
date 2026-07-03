@@ -14,6 +14,7 @@
 - `P1` [User-intent drift] [Task 4]: First draft omitted post-merge release and downstream execution. Recommendation: add an explicit operational task. _Resolution: Task 4 added._
 - `P2` [Existence / runtime-validity] [Task 4]: First draft used `gh workflow run release.yml` for tag-driven release workflows. Recommendation: use tag push and monitor workflow runs. _Resolution: Task 4 corrected after inspecting release workflows._
 - `P3` [Verification-class mismatch] [Task 2]: Tap auto-freshness needs settings and PR evidence, not only README syntax checks. Recommendation: verify branch protection and a recent generated wfctl PR. _Resolution: Task 2 includes both checks._
+- `P4` [Manifest trace] [plan headings]: First checked plan used `## Task N` headings, which the scope-lock parser does not count as task headings. Recommendation: use `### Task N:` headings required by `writing-plans`. _Resolution: headings corrected and `plan-scope-check.sh` rerun._
 
 **Bug-class scan transcript:**
 
