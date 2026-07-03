@@ -21,7 +21,7 @@
 **Out of scope:**
 - New installer scripts or release asset names.
 - Plugin installer behavior changes.
-- Generated website docs refresh before Workflow docs release.
+- Hand-editing generated website API reference output.
 
 **PR Grouping:**
 
@@ -148,7 +148,10 @@ Rollback: revert commit; formulas unchanged.
 
 **Files:**
 - Modify: `src/pages/PlatformPage.tsx`
-- Optionally modify generated docs only after Workflow docs release/sync.
+- Modify: `src/data/configs/README.md`
+- Modify: `docs/site/src/content/docs/workflow/WFCTL.md`
+- Modify: `docs/site/src/content/docs/workflow/index.md`
+- Create: `docs/site/src/content/docs/workflow/WFCTL_INSTALLATION.md`
 
 **Step 1: Replace stale install snippets**
 
@@ -157,6 +160,8 @@ Replace hardcoded `go install ...@v0.60.17` snippets with current lifecycle copy
 - Primary snippet: `brew install gocodealone/tap/wfctl`.
 - Secondary source command: `go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest`.
 - Link users to Workflow releases/docs for binary downloads rather than duplicating versioned asset names in React copy.
+- Remove stale `v0.60.17` validation text from the checked-in example config README.
+- Update the checked-in generated Workflow docs snapshot for the served wfctl docs pages so the website PR is correct before the next post-release sync. Do not hand-edit generated Go API reference output.
 
 **Step 2: Verify website build**
 
@@ -172,8 +177,8 @@ Expected: build exits `0`.
 **Step 3: Commit**
 
 ```bash
-git add src/pages/PlatformPage.tsx
-git commit -m "docs: refresh wfctl install copy"
+git add src/pages/PlatformPage.tsx src/data/configs/README.md docs/site/src/content/docs/workflow/WFCTL.md docs/site/src/content/docs/workflow/index.md docs/site/src/content/docs/workflow/WFCTL_INSTALLATION.md
+git commit -m "docs: update wfctl install copy"
 ```
 
 Rollback: revert commit; no runtime state changes until website release.
