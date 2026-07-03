@@ -4,20 +4,27 @@
 
 ## Installation
 
-### GitHub Releases (recommended)
+For full install, update, checksum, browser-download, Windows, Homebrew, and
+plugin lifecycle instructions, see
+[wfctl Installation And Plugin Lifecycle](WFCTL_INSTALLATION.md).
+
+### Homebrew
 
 ```bash
-# macOS (Apple Silicon)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-darwin-arm64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+brew tap gocodealone/tap
+brew install wfctl
+```
 
-# macOS (Intel)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-darwin-amd64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+### GitHub Releases
 
-# Linux (x86_64)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-linux-amd64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+Download raw binaries and `checksums.txt` from
+<https://github.com/GoCodeAlone/workflow/releases/latest>. Verify the checksum
+before moving `wfctl` into `PATH`.
 
-# Linux (ARM64)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-linux-arm64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+```bash
+shasum -a 256 --ignore-missing -c checksums.txt
+chmod +x ./wfctl-*
+sudo install -m 0755 ./wfctl-darwin-arm64 /usr/local/bin/wfctl
 ```
 
 ### From Source
@@ -32,6 +39,8 @@ go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
 wfctl update          # install latest release
 wfctl update --check  # check for updates without installing
 ```
+
+Prefer `brew upgrade wfctl` for Homebrew-managed installs.
 
 ---
 

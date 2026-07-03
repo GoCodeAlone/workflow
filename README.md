@@ -179,15 +179,23 @@ docker compose up
 
 `wfctl` is a command-line tool for inspecting, validating, and generating workflow configurations.
 
-**Install from GitHub Releases:**
+**Install with Homebrew:**
 ```bash
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') -o wfctl && chmod +x wfctl
+brew tap gocodealone/tap
+brew install wfctl
 ```
 
 **Install from source:**
 ```bash
 go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
 ```
+
+Direct binary downloads are published on
+[GitHub Releases](https://github.com/GoCodeAlone/workflow/releases/latest)
+with `checksums.txt` for verification. See
+[wfctl Installation And Plugin Lifecycle](docs/WFCTL_INSTALLATION.md) for
+Homebrew, terminal download, browser download, Windows, update, and plugin
+lifecycle instructions.
 
 **Commands:**
 - `wfctl inspect <config.yaml>` — summarize modules, workflows, triggers, and dependencies

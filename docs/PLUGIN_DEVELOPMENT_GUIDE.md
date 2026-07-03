@@ -539,6 +539,13 @@ cp my-plugin data/plugins/my-plugin/
 cp plugin.json data/plugins/my-plugin/
 ```
 
+For installing published plugins as a `wfctl` user, prefer the plugin lifecycle
+commands documented in
+[wfctl Installation And Plugin Lifecycle](WFCTL_INSTALLATION.md): use
+`wfctl plugin add`, `wfctl plugin lock`, and `wfctl plugin ci` for project
+plugins, or `wfctl plugin install -g` and `wfctl plugin update -g --all` for
+operator-global plugins.
+
 ### Discovery and Loading
 
 The engine discovers external plugins through two mechanisms:
