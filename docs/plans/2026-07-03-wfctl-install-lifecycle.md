@@ -116,13 +116,22 @@ ruby -c Formula/claude-skills.rb
 brew info gocodealone/tap/wfctl
 brew info gocodealone/tap/ratchet-cli
 brew info --cask gocodealone/tap/ratchet-cli
-brew info ./Formula/claude-skills.rb
 gh pr list --repo GoCodeAlone/homebrew-tap --state all --limit 5 --json number,title,state --jq '.[] | [.number,.state,.title] | @tsv'
 gh api repos/GoCodeAlone/homebrew-tap/branches/main/protection --jq '.required_pull_request_reviews' || true
 gh pr view 59 --repo GoCodeAlone/homebrew-tap --json state,mergedAt,reviewDecision,statusCheckRollup --jq '{state,mergedAt,reviewDecision,checks:[.statusCheckRollup[]? | {name,conclusion,status}]}'
 ```
 
-Expected: Ruby syntax OK; `brew info` reports the tap formulas/cask; local `Formula/claude-skills.rb` resolves as a formula; recent PR list shows automated formula updates; branch protection is absent or has no required-review gate for generated formula PRs; recent generated wfctl formula PR merged with green checks.
+Expected: Ruby syntax OK; `brew info` reports the tap formulas/cask; recent PR list shows automated formula updates; branch protection is absent or has no required-review gate for generated formula PRs; recent generated wfctl formula PR merged with green checks.
+
+After committing the tap branch, verify the moved `claude-skills` formula through a temporary tap clone:
+
+```bash
+brew tap gocodealone/wfctl-docs-test "$(pwd)"
+brew info gocodealone/wfctl-docs-test/claude-skills
+brew untap gocodealone/wfctl-docs-test
+```
+
+Expected: `brew info` resolves `claude-skills` from the temporary tap.
 
 If the branch-protection check reports required reviews and no generated-PR bypass exists, update the repository rule before relying on the automation. If workflow inspection shows generated formula PRs no longer merge after checks, patch `.github/workflows/update-wfctl.yml` to restore the current behavior: open/update the generated PR, request Copilot review as advisory, wait for checks, leave open on failed checks or unresolved review threads, and admin-merge after green checks.
 
