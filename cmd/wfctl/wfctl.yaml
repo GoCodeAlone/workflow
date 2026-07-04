@@ -71,6 +71,8 @@ workflows:
         description: Manage infrastructure lifecycle
       - name: docs
         description: Generate documentation from workflow configs
+      - name: doctor
+        description: Diagnose wfctl install, project, and plugin lifecycle state
       - name: editor-schemas
         description: Export module schemas and type coercion rules
       - name: editor-bundle
@@ -243,6 +245,10 @@ pipelines:
     trigger: {type: cli, config: {command: docs}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: docs}}
+  cmd-doctor:
+    trigger: {type: cli, config: {command: doctor}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: doctor}}
   cmd-editor-schemas:
     trigger: {type: cli, config: {command: editor-schemas}}
     steps:
