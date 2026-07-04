@@ -43,7 +43,7 @@
 | Docs and examples | Task 3 |
 | Focused + package verification | Task 4 |
 
-## Task 1: Doctor Report Model and Checks
+### Task 1: Doctor Report Model and Checks
 
 **Files:**
 - Create: `cmd/wfctl/doctor.go`
@@ -92,7 +92,7 @@ Expected: PASS.
 
 Rollback: revert `cmd/wfctl/doctor.go` and `cmd/wfctl/doctor_test.go`.
 
-## Task 2: Wire Top-Level Command
+### Task 2: Wire Top-Level Command
 
 **Files:**
 - Modify: `cmd/wfctl/main.go`
@@ -125,7 +125,7 @@ Expected: PASS.
 
 Rollback: revert command map/config wiring.
 
-## Task 3: Documentation
+### Task 3: Documentation
 
 **Files:**
 - Modify: `docs/WFCTL.md`
@@ -148,7 +148,7 @@ Expected: docs and command metadata all contain `doctor`.
 
 Rollback: revert doc additions.
 
-## Task 4: Final Verification and PR
+### Task 4: Final Verification and PR
 
 **Files:**
 - No new source files beyond previous tasks.

@@ -52,3 +52,17 @@
 2. Make `doctor --strict` default to non-zero: better for CI, worse for interactive use; current opt-in strict mode is the safer first release.
 
 **Verdict reasoning:** PASS. Earlier draft issues around `--online`, command wiring paths, and environment-dependent strict smoke expectations were corrected before this report. Remaining findings are execution reminders, not blockers.
+
+## Cycle 2
+
+**Status:** PASS
+
+**Findings:** None.
+
+**Trigger:** `plan-scope-check.sh --plan docs/plans/2026-07-04-wfctl-doctor.md`
+failed because task headings used `## Task N:` instead of the required
+`### Task N:` parser shape.
+
+**Resolution:** Plan headings were updated to `### Task N:`. This is a format
+fix only; task count, PR count, scope, and implementation behavior are
+unchanged.
