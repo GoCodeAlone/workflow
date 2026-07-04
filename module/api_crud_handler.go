@@ -264,7 +264,6 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 	if err := json.NewEncoder(w).Encode(updated); err != nil {
 		_ = err
 	}
-	return
 }
 
 // handleDelete handles DELETE requests for removing resources.
@@ -301,7 +300,6 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-	return
 }
 
 // handleSubActionGet handles GET requests for sub-resource data (e.g., /summary).
