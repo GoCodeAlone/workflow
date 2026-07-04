@@ -65,6 +65,27 @@ func TestRepairMissingManifestIsSuggestionOnly(t *testing.T) {
 	}
 }
 
+func TestRepairCorruptLockfilePlansLockThenInstall(t *testing.T) {
+	fixture := writeDoctorFixture(t, doctorFixtureOptions{})
+	if err := os.WriteFile(fixture.lockPath, []byte("plugins:\n  - bad\n"), 0o600); err != nil {
+		t.Fatalf("write corrupt lockfile: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runRepairWithOutput(fixture.args(), &out); err != nil {
+		t.Fatalf("repair corrupt lockfile: %v\n%s", err, out.String())
+	}
+	text := out.String()
+	for _, want := range []string{"wfctl plugin lock", "wfctl plugin install"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("repair output missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "No automatic repairs available") {
+		t.Fatalf("corrupt lockfile should be automatically repairable:\n%s", text)
+	}
+}
+
 func TestRepairApplyRunsLockThenInstall(t *testing.T) {
 	fixture := writeDoctorFixture(t, doctorFixtureOptions{})
 	lock, err := config.LoadWfctlLockfile(fixture.lockPath)

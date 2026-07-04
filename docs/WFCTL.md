@@ -459,7 +459,7 @@ wfctl repair [options]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--workflow` | `workflow.yaml` | Workflow config path used by plugin lock fallback |
+| `--workflow` | `workflow.yaml` | Workflow config path passed to `plugin lock` |
 | `--manifest` | `wfctl.yaml` | Project plugin manifest |
 | `--lock-file` | `.wfctl-lock.yaml` | Generated plugin lockfile |
 | `--plugin-dir` | `data/plugins` | Project plugin install directory |

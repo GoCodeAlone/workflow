@@ -63,7 +63,7 @@ func runRepairWithOutput(args []string, out io.Writer) error {
 func runRepairWithRunner(args []string, out io.Writer, runner repairRunner) error {
 	fs := flag.NewFlagSet("repair", flag.ContinueOnError)
 	fs.SetOutput(out)
-	workflowPath := fs.String("workflow", "workflow.yaml", "Workflow config path")
+	workflowPath := fs.String("workflow", "workflow.yaml", "Workflow config path passed to plugin lock")
 	manifestPath := fs.String("manifest", wfctlManifestPath, "wfctl plugin manifest path")
 	lockPath := fs.String("lock-file", wfctlLockPath, "wfctl plugin lockfile path")
 	pluginDir := fs.String("plugin-dir", defaultDataDir, "Project plugin install directory")
@@ -161,7 +161,7 @@ func planAutomaticRepairActions(opts doctorOptions) ([]repairAction, map[string]
 	if errors.Is(err, os.ErrNotExist) {
 		lockNeedsRepair = true
 	} else if err != nil {
-		return nil, automatedKinds
+		lockNeedsRepair = true
 	} else if err := config.ValidateWfctlLockfileProvenance(manifest, lock); err != nil {
 		lockNeedsRepair = true
 	} else {
