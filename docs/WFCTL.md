@@ -25,8 +25,11 @@ before moving `wfctl` into `PATH`.
 asset=wfctl-darwin-arm64 # replace with the asset you downloaded
 if command -v shasum >/dev/null 2>&1; then
   grep "  $asset$" checksums.txt | shasum -a 256 -c -
-else
+elif command -v sha256sum >/dev/null 2>&1; then
   grep "  $asset$" checksums.txt | sha256sum -c -
+else
+  echo "missing checksum tool: install shasum or sha256sum" >&2
+  exit 1
 fi
 chmod +x "./$asset"
 sudo install -m 0755 "./$asset" /usr/local/bin/wfctl

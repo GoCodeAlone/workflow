@@ -167,7 +167,7 @@ wfctl plugin add workflow-plugin-auth@v0.4.0
 # Refresh the lockfile after editing wfctl.yaml.
 wfctl plugin lock
 
-# Install all locked project plugins into ./data/plugins.
+# Install all locked project plugins into data/plugins.
 wfctl plugin install
 
 # CI path: install exactly from the lockfile and do not write files.
