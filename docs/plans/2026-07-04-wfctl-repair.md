@@ -30,7 +30,7 @@
 |------|-------|-------|--------|
 | 1 | Add guarded wfctl repair | Task 1, Task 2, Task 3, Task 4 | `feat/wfctl-repair-lifecycle` |
 
-**Status:** Draft
+**Status:** Locked 2026-07-04T05:55:40Z
 
 ### Task 1: Repair Planner Tests
 
