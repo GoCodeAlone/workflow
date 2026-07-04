@@ -22,9 +22,14 @@ Download raw binaries and `checksums.txt` from
 before moving `wfctl` into `PATH`.
 
 ```bash
-shasum -a 256 --ignore-missing -c checksums.txt
-chmod +x ./wfctl-*
-sudo install -m 0755 ./wfctl-darwin-arm64 /usr/local/bin/wfctl
+asset=wfctl-darwin-arm64 # replace with the asset you downloaded
+if command -v shasum >/dev/null 2>&1; then
+  grep "  $asset$" checksums.txt | shasum -a 256 -c -
+else
+  grep "  $asset$" checksums.txt | sha256sum -c -
+fi
+chmod +x "./$asset"
+sudo install -m 0755 "./$asset" /usr/local/bin/wfctl
 ```
 
 ### From Source
