@@ -1,4 +1,4 @@
-# Retro: wfctl Repair
+# Retro: wfctl repair
 
 **PR:** #994 - feat(wfctl): add guarded repair command
 **Merged:** 2026-07-04
