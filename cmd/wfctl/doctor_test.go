@@ -125,6 +125,18 @@ func TestDoctorHealthyProject(t *testing.T) {
 	}
 }
 
+func TestDoctorCommandWiring(t *testing.T) {
+	if commands["doctor"] == nil {
+		t.Fatal("commands map is missing doctor")
+	}
+	configText := string(wfctlConfigBytes)
+	for _, want := range []string{"name: doctor", "cmd-doctor", "command: doctor"} {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("embedded wfctl config missing %q", want)
+		}
+	}
+}
+
 type doctorFixtureOptions struct {
 	pluginInstalled bool
 }

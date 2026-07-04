@@ -142,6 +142,7 @@ var commands = map[string]func([]string) error{
 	"expr-migrate":    runExprMigrate,
 	"infra":           runInfra,
 	"docs":            runDocs,
+	"doctor":          runDoctor,
 	"editor-schemas":  runEditorSchemas,
 	"editor-bundle":   runEditorBundle,
 	"dsl-reference":   runDSLReference,
