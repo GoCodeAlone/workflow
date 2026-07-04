@@ -52,6 +52,16 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ### Added
 
+- **`wfctl doctor app <url>`**: explicitly-online, read-only probe of a deployed app's health
+  endpoint. Runs N sequential + M lightly-concurrent requests and reports latency (p50/p99),
+  failure-origin classification (platform-edge HTML vs. app-origin JSON, using content-type/body
+  shape only), and health flip-flop rate. Flags: `--health-path`, `--probes`, `--concurrency`,
+  `--timeout`, `--format text|json`, `--strict`. See ADR 0054.
+- **`lint/lockio` package**: a reusable `go/analysis`-style checker for "lock held across store
+  I/O," parameterized by lock acquire/release method names, restricted I/O method names, and an
+  allowlist. Exposes `FindViolations` (for a host app's own shrink-only allowlist test) and
+  `NewAnalyzer` (a real `analysis.Analyzer` for golangci-lint/go vet/multichecker integration).
+  See ADR 0054.
 - **GitHub environment secret destinations for IaC output sync**: `secretStores` can now use
   `provider: github` with `config.environment`, including `${WORKFLOW_ENV}`, so
   `wfctl infra apply --env staging` writes to GitHub Actions environment secrets instead of
