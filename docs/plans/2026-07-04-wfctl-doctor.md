@@ -30,7 +30,7 @@
 |------|-------|-------|--------|
 | 1 | Add wfctl doctor lifecycle diagnostics | Task 1, Task 2, Task 3, Task 4 | feat/wfctl-lifecycle-evaluation |
 
-**Status:** Locked 2026-07-04T03:17:58Z
+**Status:** Complete 2026-07-04T03:32:17Z
 
 ## Design Trace
 
