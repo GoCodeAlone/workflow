@@ -200,6 +200,7 @@ lifecycle instructions.
 **Commands:**
 - `wfctl inspect <config.yaml>` — summarize modules, workflows, triggers, and dependencies
 - `wfctl validate <config.yaml>` — deep validation against known module/step types
+- `wfctl doctor` — diagnose install, project, lockfile, and plugin lifecycle state
 - `wfctl api extract <config.yaml>` — generate OpenAPI 3.0 spec from HTTP workflows
 - `wfctl diff <old.yaml> <new.yaml>` — compare configs and detect breaking changes
 - `wfctl manifest <config.yaml>` — produce infrastructure requirements manifest

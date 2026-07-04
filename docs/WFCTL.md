@@ -214,7 +214,7 @@ graph TD
 | **Database Migrations** | `migrate status/diff/apply` |
 | **Git Integration** | `git connect`, `git push` |
 | **Capability Inventory** | `capability ecosystem`, `capability catalog`, `capability crossrefs`, `capability app`, `capability check` |
-| **Platform Inspection** | `audit plans`, `audit plugins`, `audit repo`, `ports list`, `security audit`, `security generate-network-policies` |
+| **Platform Inspection** | `doctor`, `audit plans`, `audit plugins`, `audit repo`, `ports list`, `security audit`, `security generate-network-policies` |
 | **Utilities** | `snippets`, `manifest`, `pipeline`, `update`, `mcp` |
 
 ---
@@ -407,6 +407,44 @@ Public docs should consume ecosystem artifacts from
 `docs/generated/capabilities/`. Application profiles can include private plugin
 names, secret names, service names, and config paths, so review them before
 publishing outside the owning team.
+
+### `doctor`
+
+Diagnose the local `wfctl` binary, project workflow config, plugin manifest,
+lockfile, and installed plugin directory without changing files.
+
+```bash
+wfctl doctor [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--workflow` | `workflow.yaml` | Workflow config to parse |
+| `--manifest` | `wfctl.yaml` | Project plugin manifest |
+| `--lock-file` | `.wfctl-lock.yaml` | Generated plugin lockfile |
+| `--plugin-dir` | `data/plugins` | Project plugin install directory |
+| `--include-global` | `false` | Include global plugin directory summary |
+| `--online` | `false` | Check the latest GitHub release |
+| `--format` | `text` | `text` or `json` |
+| `--strict` | `false` | Exit non-zero on warnings or errors |
+
+Examples:
+
+```bash
+wfctl doctor
+wfctl doctor --online
+wfctl doctor --format json
+wfctl doctor --strict
+```
+
+Common repair commands shown by the report:
+
+```bash
+wfctl validate workflow.yaml
+wfctl plugin lock
+wfctl plugin install
+wfctl update --check
+```
 
 ### `audit`
 
