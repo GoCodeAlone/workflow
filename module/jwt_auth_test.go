@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -504,6 +506,52 @@ func TestJWTAuth_SetupStatus_WithUsers(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["needsSetup"] != false {
 		t.Errorf("expected needsSetup=false, got %v", resp["needsSetup"])
+	}
+}
+
+func TestJWTAuth_StartSeedLoadDoesNotStarveUserCount(t *testing.T) {
+	j := setupJWTAuth(t)
+	seedPath := filepath.Join(t.TempDir(), "users.json")
+	seeds := []map[string]any{}
+	for i := 0; i < 8; i++ {
+		seeds = append(seeds, map[string]any{
+			"id": string(rune('1' + i)),
+			"data": map[string]any{
+				"email":    string(rune('a'+i)) + "@example.com",
+				"name":     "Seed User",
+				"password": "secret123",
+			},
+		})
+	}
+	data, err := json.Marshal(seeds)
+	if err != nil {
+		t.Fatalf("marshal seeds: %v", err)
+	}
+	if err := os.WriteFile(seedPath, data, 0o600); err != nil {
+		t.Fatalf("write seed file: %v", err)
+	}
+	j.SetSeedFile(seedPath)
+
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- j.Start(t.Context())
+	}()
+	time.Sleep(10 * time.Millisecond)
+
+	countDone := make(chan struct{})
+	go func() {
+		_ = j.userCount()
+		close(countDone)
+	}()
+
+	select {
+	case <-countDone:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("userCount blocked behind seed user loading")
+	}
+
+	if err := <-startDone; err != nil {
+		t.Fatalf("Start: %v", err)
 	}
 }
 

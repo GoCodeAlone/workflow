@@ -30,6 +30,7 @@ type PluginInfo struct {
 // PluginManager handles plugin registration, dependency resolution, lifecycle management,
 // enable/disable state persistence, and HTTP route dispatch.
 type PluginManager struct {
+	opsMu   sync.Mutex
 	mu      sync.RWMutex
 	plugins map[string]NativePlugin // all registered plugins
 	enabled map[string]bool         // enabled state
@@ -91,24 +92,24 @@ func (pm *PluginManager) Register(p NativePlugin) error {
 // Returns an error if the plugin is not registered, if a dependency is missing,
 // or if a circular dependency is detected.
 func (pm *PluginManager) Enable(name string) error {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
+	pm.opsMu.Lock()
+	defer pm.opsMu.Unlock()
 
+	pm.mu.RLock()
 	if _, exists := pm.plugins[name]; !exists {
+		pm.mu.RUnlock()
 		return fmt.Errorf("plugin %q is not registered", name)
 	}
 
 	// Resolve enable order via topological sort
 	order, err := pm.resolveEnableOrder(name)
+	pm.mu.RUnlock()
 	if err != nil {
 		return err
 	}
 
 	// Enable each plugin in dependency order
 	for _, pName := range order {
-		if pm.enabled[pName] {
-			continue
-		}
 		if err := pm.enableOne(pName); err != nil {
 			return fmt.Errorf("enable %q: %w", pName, err)
 		}
@@ -119,28 +120,29 @@ func (pm *PluginManager) Enable(name string) error {
 // Disable disables a plugin and all plugins that depend on it (reverse dependency order).
 // Returns an error if the plugin is not registered.
 func (pm *PluginManager) Disable(name string) error {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
+	pm.opsMu.Lock()
+	defer pm.opsMu.Unlock()
 
+	pm.mu.RLock()
 	if _, exists := pm.plugins[name]; !exists {
+		pm.mu.RUnlock()
 		return fmt.Errorf("plugin %q is not registered", name)
 	}
 
 	if !pm.enabled[name] {
+		pm.mu.RUnlock()
 		return nil // already disabled
 	}
 
 	// Find all enabled plugins that transitively depend on this one
 	order, err := pm.resolveDisableOrder(name)
+	pm.mu.RUnlock()
 	if err != nil {
 		return err
 	}
 
 	// Disable in reverse dependency order (dependents first)
 	for _, pName := range order {
-		if !pm.enabled[pName] {
-			continue
-		}
 		if err := pm.disableOne(pName); err != nil {
 			return fmt.Errorf("disable %q: %w", pName, err)
 		}
@@ -172,13 +174,118 @@ func (pm *PluginManager) EnabledPlugins() []NativePlugin {
 	return result
 }
 
+// enableOne enables a single plugin (no dependency resolution). Caller must hold pm.opsMu.
+func (pm *PluginManager) enableOne(name string) error {
+	pm.mu.RLock()
+	p := pm.plugins[name]
+	if p == nil {
+		pm.mu.RUnlock()
+		return fmt.Errorf("plugin %q is not registered", name)
+	}
+	if pm.enabled[name] {
+		pm.mu.RUnlock()
+		return nil
+	}
+	ctx := pm.ctx
+	for _, dep := range p.Dependencies() {
+		depPlugin, ok := pm.plugins[dep.Name]
+		if !ok {
+			pm.mu.RUnlock()
+			return fmt.Errorf("dependency %q not registered", dep.Name)
+		}
+		if dep.MinVersion != "" {
+			ok, err := CheckVersion(depPlugin.Version(), ">="+dep.MinVersion)
+			if err != nil {
+				pm.mu.RUnlock()
+				return fmt.Errorf("check version for dep %q: %w", dep.Name, err)
+			}
+			if !ok {
+				pm.mu.RUnlock()
+				return fmt.Errorf("dependency %q version %s does not satisfy >= %s",
+					dep.Name, depPlugin.Version(), dep.MinVersion)
+			}
+		}
+	}
+	pm.mu.RUnlock()
+
+	// Create a per-plugin mux and register routes
+	mux := http.NewServeMux()
+	p.RegisterRoutes(mux)
+
+	// Call OnEnable
+	if err := p.OnEnable(ctx); err != nil {
+		return fmt.Errorf("OnEnable: %w", err)
+	}
+
+	pm.mu.Lock()
+	if pm.enabled[name] {
+		pm.mu.Unlock()
+		return nil
+	}
+	pm.muxes[name] = mux
+	pm.enabled[name] = true
+	pm.mu.Unlock()
+
+	pm.persistState(name, true, p.Version())
+	pm.logger.Info("Plugin enabled", "plugin", name)
+	return nil
+}
+
+// disableOne disables a single plugin (no dependent resolution). Caller must hold pm.opsMu.
+func (pm *PluginManager) disableOne(name string) error {
+	pm.mu.RLock()
+	p := pm.plugins[name]
+	if p == nil {
+		pm.mu.RUnlock()
+		return fmt.Errorf("plugin %q is not registered", name)
+	}
+	if !pm.enabled[name] {
+		pm.mu.RUnlock()
+		return nil
+	}
+	ctx := pm.ctx
+	pm.mu.RUnlock()
+
+	// Call OnDisable
+	if err := p.OnDisable(ctx); err != nil {
+		pm.logger.Warn("OnDisable error (continuing)", "plugin", name, "error", err)
+	}
+
+	pm.mu.Lock()
+	delete(pm.muxes, name)
+	pm.enabled[name] = false
+	pm.mu.Unlock()
+
+	pm.persistState(name, false, p.Version())
+	pm.logger.Info("Plugin disabled", "plugin", name)
+	return nil
+}
+
 // AllPlugins returns info about all registered plugins sorted by name.
 func (pm *PluginManager) AllPlugins() []PluginInfo {
 	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-
-	result := make([]PluginInfo, 0, len(pm.plugins))
+	snapshots := make([]struct {
+		name    string
+		plugin  NativePlugin
+		enabled bool
+	}, 0, len(pm.plugins))
 	for name, p := range pm.plugins {
+		snapshots = append(snapshots, struct {
+			name    string
+			plugin  NativePlugin
+			enabled bool
+		}{
+			name:    name,
+			plugin:  p,
+			enabled: pm.enabled[name],
+		})
+	}
+	pm.mu.RUnlock()
+
+	result := make([]PluginInfo, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		name := snapshot.name
+		p := snapshot.plugin
 		uiPages := p.UIPages()
 		if uiPages == nil {
 			uiPages = []UIPageDef{}
@@ -192,7 +299,7 @@ func (pm *PluginManager) AllPlugins() []PluginInfo {
 			Name:         name,
 			Version:      p.Version(),
 			Description:  p.Description(),
-			Enabled:      pm.enabled[name],
+			Enabled:      snapshot.enabled,
 			UIPages:      uiPages,
 			Dependencies: deps,
 		}
@@ -373,62 +480,6 @@ func (pm *PluginManager) initDB() error {
 	if err != nil {
 		return fmt.Errorf("create plugin_state table: %w", err)
 	}
-	return nil
-}
-
-// enableOne enables a single plugin (no dependency resolution). Caller must hold pm.mu.
-func (pm *PluginManager) enableOne(name string) error {
-	p := pm.plugins[name]
-
-	// Check version constraints on dependencies
-	for _, dep := range p.Dependencies() {
-		depPlugin, ok := pm.plugins[dep.Name]
-		if !ok {
-			return fmt.Errorf("dependency %q not registered", dep.Name)
-		}
-		if dep.MinVersion != "" {
-			ok, err := CheckVersion(depPlugin.Version(), ">="+dep.MinVersion)
-			if err != nil {
-				return fmt.Errorf("check version for dep %q: %w", dep.Name, err)
-			}
-			if !ok {
-				return fmt.Errorf("dependency %q version %s does not satisfy >= %s",
-					dep.Name, depPlugin.Version(), dep.MinVersion)
-			}
-		}
-	}
-
-	// Create a per-plugin mux and register routes
-	mux := http.NewServeMux()
-	p.RegisterRoutes(mux)
-	pm.muxes[name] = mux
-
-	// Call OnEnable
-	if err := p.OnEnable(pm.ctx); err != nil {
-		delete(pm.muxes, name)
-		return fmt.Errorf("OnEnable: %w", err)
-	}
-
-	pm.enabled[name] = true
-	pm.persistState(name, true, p.Version())
-	pm.logger.Info("Plugin enabled", "plugin", name)
-	return nil
-}
-
-// disableOne disables a single plugin (no dependent resolution). Caller must hold pm.mu.
-func (pm *PluginManager) disableOne(name string) error {
-	p := pm.plugins[name]
-
-	// Call OnDisable
-	if err := p.OnDisable(pm.ctx); err != nil {
-		pm.logger.Warn("OnDisable error (continuing)", "plugin", name, "error", err)
-	}
-
-	// Remove routes
-	delete(pm.muxes, name)
-	pm.enabled[name] = false
-	pm.persistState(name, false, p.Version())
-	pm.logger.Info("Plugin disabled", "plugin", name)
 	return nil
 }
 

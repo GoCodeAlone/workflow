@@ -501,6 +501,36 @@ func TestSQLiteStore_Lock(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_LockDoesNotBlockDifferentContext(t *testing.T) {
+	t.Parallel()
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	handle, err := store.Lock(ctx, "acme/prod", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Lock acme/prod: %v", err)
+	}
+	defer handle.Unlock(ctx)
+
+	lockDone := make(chan error, 1)
+	go func() {
+		other, err := store.Lock(ctx, "acme/staging", 5*time.Minute)
+		if err == nil {
+			err = other.Unlock(ctx)
+		}
+		lockDone <- err
+	}()
+
+	select {
+	case err := <-lockDone:
+		if err != nil {
+			t.Fatalf("Lock acme/staging: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Lock for different context blocked behind existing lock")
+	}
+}
+
 func TestSQLiteStore_Lock_Refresh(t *testing.T) {
 	t.Parallel()
 	store := newTestSQLiteStore(t)

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -16,7 +17,8 @@ import (
 	"github.com/GoCodeAlone/workflow/platform"
 	"github.com/google/uuid"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 //go:embed migrations/001_initial.sql
@@ -252,9 +254,12 @@ func (s *SQLiteStore) Lock(ctx context.Context, contextPath string, ttl time.Dur
 		INSERT INTO platform_locks (context_path, holder, acquired_at, expires_at)
 		VALUES (?, ?, ?, ?)
 	`, contextPath, holderID, now.Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+	s.mu.Unlock()
 	if err != nil {
-		s.mu.Unlock()
-		return nil, &platform.LockConflictError{ContextPath: contextPath}
+		if isSQLiteConstraint(err) {
+			return nil, &platform.LockConflictError{ContextPath: contextPath}
+		}
+		return nil, fmt.Errorf("sqlite lock %q: %w", contextPath, err)
 	}
 
 	return &sqliteLockHandle{
@@ -262,6 +267,11 @@ func (s *SQLiteStore) Lock(ctx context.Context, contextPath string, ttl time.Dur
 		contextPath: contextPath,
 		holderID:    holderID,
 	}, nil
+}
+
+func isSQLiteConstraint(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == sqlite3.SQLITE_CONSTRAINT
 }
 
 // Dependencies returns dependency references for resources that depend on
@@ -377,7 +387,6 @@ func (h *sqliteLockHandle) Unlock(ctx context.Context) error {
 	_, err := h.store.db.ExecContext(ctx, `
 		DELETE FROM platform_locks WHERE context_path = ? AND holder = ?
 	`, h.contextPath, h.holderID)
-	h.store.mu.Unlock()
 	return err
 }
 

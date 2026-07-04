@@ -1,13 +1,94 @@
 package plugin
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // --- PluginManager additional coverage tests ---
+
+var blockingPluginStateDriverCounter atomic.Uint64
+
+type blockingPluginStateDriver struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingPluginStateDB(t *testing.T) (*sql.DB, *blockingPluginStateDriver) {
+	t.Helper()
+	d := &blockingPluginStateDriver{entered: make(chan struct{}), release: make(chan struct{})}
+	name := fmt.Sprintf("blocking_plugin_state_%d", blockingPluginStateDriverCounter.Add(1))
+	sql.Register(name, d)
+	db, err := sql.Open(name, "")
+	if err != nil {
+		t.Fatalf("open blocking driver: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db, d
+}
+
+func (d *blockingPluginStateDriver) Open(string) (driver.Conn, error) {
+	return &blockingPluginStateConn{driver: d}, nil
+}
+
+type blockingPluginStateConn struct {
+	driver *blockingPluginStateDriver
+}
+
+func (c *blockingPluginStateConn) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("prepare not implemented")
+}
+
+func (c *blockingPluginStateConn) Close() error {
+	return nil
+}
+
+func (c *blockingPluginStateConn) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("transactions not implemented")
+}
+
+func (c *blockingPluginStateConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(0), nil
+}
+
+func (c *blockingPluginStateConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	c.driver.once.Do(func() { close(c.driver.entered) })
+	<-c.driver.release
+	return &pluginStateRows{remaining: 1}, nil
+}
+
+type pluginStateRows struct {
+	remaining int
+}
+
+func (r *pluginStateRows) Columns() []string {
+	return []string{"enabled_at", "disabled_at"}
+}
+
+func (r *pluginStateRows) Close() error {
+	return nil
+}
+
+func (r *pluginStateRows) Next(dest []driver.Value) error {
+	if r.remaining == 0 {
+		return io.EOF
+	}
+	r.remaining--
+	dest[0] = "2026-07-04T00:00:00Z"
+	dest[1] = nil
+	return nil
+}
 
 func TestPluginManager_NilDB(t *testing.T) {
 	t.Parallel()
@@ -101,6 +182,46 @@ func TestPluginManager_AllPlugins(t *testing.T) {
 	}
 }
 
+func TestPluginManager_AllPluginsDoesNotStarveRegistrationDuringTimestampQuery(t *testing.T) {
+	db, driver := newBlockingPluginStateDB(t)
+	pm := NewPluginManager(db, nil)
+	if err := pm.Register(newSimplePlugin("alpha", "1.0.0", "Alpha plugin")); err != nil {
+		t.Fatalf("Register alpha: %v", err)
+	}
+
+	listDone := make(chan struct{})
+	go func() {
+		_ = pm.AllPlugins()
+		close(listDone)
+	}()
+
+	select {
+	case <-driver.entered:
+	case <-time.After(time.Second):
+		close(driver.release)
+		t.Fatal("AllPlugins did not reach timestamp query")
+	}
+
+	registerDone := make(chan error, 1)
+	go func() {
+		registerDone <- pm.Register(newSimplePlugin("beta", "1.0.0", "Beta plugin"))
+	}()
+
+	select {
+	case err := <-registerDone:
+		if err != nil {
+			close(driver.release)
+			t.Fatalf("Register beta: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(driver.release)
+		t.Fatal("Register blocked behind AllPlugins timestamp query")
+	}
+
+	close(driver.release)
+	<-listDone
+}
+
 func TestPluginManager_EnabledPlugins(t *testing.T) {
 	t.Parallel()
 
@@ -182,6 +303,54 @@ func TestPluginManager_EnableWithVersionConstraint(t *testing.T) {
 
 	if err := pm.Enable("consumer"); err != nil {
 		t.Fatalf("Enable with valid version constraint: %v", err)
+	}
+}
+
+func TestPluginManager_EnableDoesNotStarveEnabledReadsDuringPluginCallback(t *testing.T) {
+	pm := NewPluginManager(nil, nil)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	blocking := newSimplePlugin("blocking", "1.0.0", "Blocking plugin")
+	blocking.onEnableFn = func(PluginContext) error {
+		close(entered)
+		<-release
+		return nil
+	}
+	if err := pm.Register(blocking); err != nil {
+		t.Fatalf("Register blocking: %v", err)
+	}
+
+	enableDone := make(chan error, 1)
+	go func() {
+		enableDone <- pm.Enable("blocking")
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("Enable did not reach OnEnable callback")
+	}
+
+	readDone := make(chan bool, 1)
+	go func() {
+		readDone <- pm.IsEnabled("unrelated")
+	}()
+
+	select {
+	case enabled := <-readDone:
+		if enabled {
+			close(release)
+			t.Fatal("unexpected enabled result for unrelated plugin")
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		t.Fatal("IsEnabled blocked behind OnEnable callback")
+	}
+
+	close(release)
+	if err := <-enableDone; err != nil {
+		t.Fatalf("Enable: %v", err)
 	}
 }
 

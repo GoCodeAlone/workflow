@@ -95,20 +95,24 @@ type artifactMeta struct {
 func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reader, metadata map[string]string) error {
 	path := m.artifactPath(key)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // G703: key sanitized by artifactPath (TrimPrefix + filepath.Join)
 		return fmt.Errorf("artifact store %q: Upload %q: failed to create directory: %w", m.name, key, err)
 	}
 
-	f, err := os.Create(path) //nolint:gosec // G703: key sanitized by artifactPath
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*") //nolint:gosec // G304: directory and prefix derived from sanitized artifact path
 	if err != nil {
-		return fmt.Errorf("artifact store %q: Upload %q: failed to create file: %w", m.name, key, err)
+		return fmt.Errorf("artifact store %q: Upload %q: failed to create temp file: %w", m.name, key, err)
 	}
+	tmpPath := tmp.Name()
+	cleanupTmp := true
+	defer func() {
+		if cleanupTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
-	size, copyErr := io.Copy(f, reader)
-	closeErr := f.Close()
+	size, copyErr := io.Copy(tmp, reader)
+	closeErr := tmp.Close()
 	if copyErr != nil {
 		return fmt.Errorf("artifact store %q: Upload %q: failed to write: %w", m.name, key, copyErr)
 	}
@@ -117,7 +121,6 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 	}
 
 	if m.cfg.MaxSize > 0 && size > m.cfg.MaxSize {
-		_ = os.Remove(path) //nolint:gosec // G703: key sanitized by artifactPath
 		return fmt.Errorf("artifact store %q: Upload %q: size %d exceeds limit %d", m.name, key, size, m.cfg.MaxSize)
 	}
 
@@ -130,9 +133,34 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 	if err != nil {
 		return fmt.Errorf("artifact store %q: Upload %q: failed to marshal metadata: %w", m.name, key, err)
 	}
-	if err := os.WriteFile(metaPath(path), metaData, 0o600); err != nil { //nolint:gosec // G306
+
+	metaTmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".meta.tmp-*") //nolint:gosec // G304: directory and prefix derived from sanitized artifact path
+	if err != nil {
+		return fmt.Errorf("artifact store %q: Upload %q: failed to create metadata temp file: %w", m.name, key, err)
+	}
+	metaTmpPath := metaTmp.Name()
+	cleanupMetaTmp := true
+	defer func() {
+		if cleanupMetaTmp {
+			_ = os.Remove(metaTmpPath)
+		}
+	}()
+	if _, err := metaTmp.Write(metaData); err != nil {
+		_ = metaTmp.Close()
 		return fmt.Errorf("artifact store %q: Upload %q: failed to write metadata: %w", m.name, key, err)
 	}
+	if err := metaTmp.Close(); err != nil {
+		return fmt.Errorf("artifact store %q: Upload %q: failed to close metadata: %w", m.name, key, err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("artifact store %q: Upload %q: failed to publish file: %w", m.name, key, err)
+	}
+	cleanupTmp = false
+	if err := os.Rename(metaTmpPath, metaPath(path)); err != nil {
+		return fmt.Errorf("artifact store %q: Upload %q: failed to publish metadata: %w", m.name, key, err)
+	}
+	cleanupMetaTmp = false
 
 	return nil
 }
@@ -140,9 +168,6 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 // Download retrieves content and metadata for key.
 func (m *ArtifactFSModule) Download(_ context.Context, key string) (io.ReadCloser, map[string]string, error) {
 	path := m.artifactPath(key)
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -165,9 +190,6 @@ func (m *ArtifactFSModule) Download(_ context.Context, key string) (io.ReadClose
 
 // List returns ArtifactInfo for all artifacts whose key starts with prefix.
 func (m *ArtifactFSModule) List(_ context.Context, prefix string) ([]ArtifactInfo, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	var results []ArtifactInfo
 
 	err := filepath.Walk(m.cfg.BasePath, func(path string, info os.FileInfo, walkErr error) error {
@@ -224,9 +246,6 @@ func (m *ArtifactFSModule) List(_ context.Context, prefix string) ([]ArtifactInf
 func (m *ArtifactFSModule) Delete(_ context.Context, key string) error {
 	path := m.artifactPath(key)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("artifact store %q: Delete %q: not found", m.name, key)
@@ -241,8 +260,6 @@ func (m *ArtifactFSModule) Delete(_ context.Context, key string) error {
 // Exists reports whether an artifact with the given key exists.
 func (m *ArtifactFSModule) Exists(_ context.Context, key string) (bool, error) {
 	path := m.artifactPath(key)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	_, err := os.Stat(path)
 	if err == nil {
 		return true, nil

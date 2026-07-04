@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/module"
 )
@@ -13,6 +14,12 @@ import (
 type mockPGConn struct {
 	rows  map[string]*module.IaCState // resource_id -> state
 	locks map[string]bool
+}
+
+type blockingAcquirePGConn struct {
+	*mockPGConn
+	entered chan struct{}
+	release chan struct{}
 }
 
 type scanErrRows struct {
@@ -104,6 +111,14 @@ func newMockPGConn() *mockPGConn {
 	}
 }
 
+func newBlockingAcquirePGConn() *blockingAcquirePGConn {
+	return &blockingAcquirePGConn{
+		mockPGConn: newMockPGConn(),
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+}
+
 func (m *mockPGConn) UpsertState(_ context.Context, st *module.IaCState) error {
 	if st == nil {
 		return fmt.Errorf("state is nil")
@@ -149,6 +164,16 @@ func (m *mockPGConn) AcquireAdvisoryLock(_ context.Context, key int64) error {
 	}
 	m.locks[k] = true
 	return nil
+}
+
+func (m *blockingAcquirePGConn) AcquireAdvisoryLock(ctx context.Context, key int64) error {
+	select {
+	case <-m.entered:
+	default:
+		close(m.entered)
+		<-m.release
+	}
+	return m.mockPGConn.AcquireAdvisoryLock(ctx, key)
 }
 
 func (m *mockPGConn) ReleaseAdvisoryLock(_ context.Context, key int64) (bool, error) {
@@ -367,6 +392,44 @@ func TestPostgresIaCStateStore_LockUnlock(t *testing.T) {
 	}
 	if err := store.Lock(context.Background(), "res-1"); err != nil {
 		t.Fatalf("Lock after unlock: %v", err)
+	}
+}
+
+func TestPostgresIaCStateStore_LockDoesNotBlockDifferentResource(t *testing.T) {
+	conn := newBlockingAcquirePGConn()
+	store := newTestPostgresStore(conn)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- store.Lock(context.Background(), "res-1")
+	}()
+
+	select {
+	case <-conn.entered:
+	case <-time.After(time.Second):
+		close(conn.release)
+		t.Fatal("first Lock did not reach advisory lock acquisition")
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- store.Lock(context.Background(), "res-2")
+	}()
+
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			close(conn.release)
+			t.Fatalf("second Lock: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(conn.release)
+		t.Fatal("different resource Lock blocked behind advisory lock acquisition")
+	}
+
+	close(conn.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first Lock: %v", err)
 	}
 }
 
