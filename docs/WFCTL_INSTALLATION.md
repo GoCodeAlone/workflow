@@ -57,6 +57,12 @@ base="https://github.com/GoCodeAlone/workflow/releases/latest/download"
 curl -fL "$base/$asset" -o "$tmpdir/$asset"
 curl -fL "$base/checksums.txt" -o "$tmpdir/checksums.txt"
 
+checksum_line="$(grep "  $asset$" "$tmpdir/checksums.txt" || true)"
+if [ -z "$checksum_line" ]; then
+  echo "missing checksum entry for $asset" >&2
+  exit 1
+fi
+
 if command -v shasum >/dev/null 2>&1; then
   checksum_cmd=(shasum -a 256 -c -)
 elif command -v sha256sum >/dev/null 2>&1; then
@@ -66,7 +72,7 @@ else
   exit 1
 fi
 
-(cd "$tmpdir" && grep "  $asset$" checksums.txt | "${checksum_cmd[@]}")
+(cd "$tmpdir" && printf '%s\n' "$checksum_line" | "${checksum_cmd[@]}")
 chmod +x "$tmpdir/$asset"
 sudo install -m 0755 "$tmpdir/$asset" /usr/local/bin/wfctl
 
@@ -98,10 +104,15 @@ macOS or Linux:
 
 ```bash
 asset=wfctl-darwin-arm64 # replace with the asset you downloaded
+checksum_line="$(grep "  $asset$" checksums.txt || true)"
+if [ -z "$checksum_line" ]; then
+  echo "missing checksum entry for $asset" >&2
+  exit 1
+fi
 if command -v shasum >/dev/null 2>&1; then
-  grep "  $asset$" checksums.txt | shasum -a 256 -c -
+  printf '%s\n' "$checksum_line" | shasum -a 256 -c -
 elif command -v sha256sum >/dev/null 2>&1; then
-  grep "  $asset$" checksums.txt | sha256sum -c -
+  printf '%s\n' "$checksum_line" | sha256sum -c -
 else
   echo "missing checksum tool: install shasum or sha256sum" >&2
   exit 1

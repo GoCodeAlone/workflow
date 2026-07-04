@@ -23,10 +23,15 @@ before moving `wfctl` into `PATH`.
 
 ```bash
 asset=wfctl-darwin-arm64 # replace with the asset you downloaded
+checksum_line="$(grep "  $asset$" checksums.txt || true)"
+if [ -z "$checksum_line" ]; then
+  echo "missing checksum entry for $asset" >&2
+  exit 1
+fi
 if command -v shasum >/dev/null 2>&1; then
-  grep "  $asset$" checksums.txt | shasum -a 256 -c -
+  printf '%s\n' "$checksum_line" | shasum -a 256 -c -
 elif command -v sha256sum >/dev/null 2>&1; then
-  grep "  $asset$" checksums.txt | sha256sum -c -
+  printf '%s\n' "$checksum_line" | sha256sum -c -
 else
   echo "missing checksum tool: install shasum or sha256sum" >&2
   exit 1
