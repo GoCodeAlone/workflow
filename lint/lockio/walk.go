@@ -192,20 +192,49 @@ func (w *returnPathWalker) walkBlock(stmts []ast.Stmt, sawAcquire, releaseSeen b
 		case *ast.BlockStmt:
 			w.walkBlock(s.List, sawAcquire, releaseSeen)
 		case *ast.ForStmt:
+			// Init/Cond/Post execute unconditionally on reaching this
+			// statement (Init and Cond at least once; Post only after a
+			// completed iteration, but a call there is still reachable
+			// before any return inside Body), so — like IfStmt's Init/Cond —
+			// they extend the running state for the loop body.
+			if s.Init != nil {
+				sawAcquire = sawAcquire || nodeContainsCall(s.Init, w.cfg.isAcquire)
+				releaseSeen = releaseSeen || nodeContainsSyncCall(s.Init, w.cfg.isRelease)
+			}
+			sawAcquire = sawAcquire || nodeContainsCall(s.Cond, w.cfg.isAcquire)
+			releaseSeen = releaseSeen || nodeContainsSyncCall(s.Cond, w.cfg.isRelease)
+			if s.Post != nil {
+				sawAcquire = sawAcquire || nodeContainsCall(s.Post, w.cfg.isAcquire)
+				releaseSeen = releaseSeen || nodeContainsSyncCall(s.Post, w.cfg.isRelease)
+			}
 			if s.Body != nil {
 				w.walkBlock(s.Body.List, sawAcquire, releaseSeen)
 			}
 		case *ast.RangeStmt:
+			sawAcquire = sawAcquire || nodeContainsCall(s.X, w.cfg.isAcquire)
+			releaseSeen = releaseSeen || nodeContainsSyncCall(s.X, w.cfg.isRelease)
 			if s.Body != nil {
 				w.walkBlock(s.Body.List, sawAcquire, releaseSeen)
 			}
 		case *ast.SwitchStmt:
+			if s.Init != nil {
+				sawAcquire = sawAcquire || nodeContainsCall(s.Init, w.cfg.isAcquire)
+				releaseSeen = releaseSeen || nodeContainsSyncCall(s.Init, w.cfg.isRelease)
+			}
+			sawAcquire = sawAcquire || nodeContainsCall(s.Tag, w.cfg.isAcquire)
+			releaseSeen = releaseSeen || nodeContainsSyncCall(s.Tag, w.cfg.isRelease)
 			for _, c := range s.Body.List {
 				if cc, ok := c.(*ast.CaseClause); ok {
 					w.walkBlock(cc.Body, sawAcquire, releaseSeen)
 				}
 			}
 		case *ast.TypeSwitchStmt:
+			if s.Init != nil {
+				sawAcquire = sawAcquire || nodeContainsCall(s.Init, w.cfg.isAcquire)
+				releaseSeen = releaseSeen || nodeContainsSyncCall(s.Init, w.cfg.isRelease)
+			}
+			sawAcquire = sawAcquire || nodeContainsCall(s.Assign, w.cfg.isAcquire)
+			releaseSeen = releaseSeen || nodeContainsSyncCall(s.Assign, w.cfg.isRelease)
 			for _, c := range s.Body.List {
 				if cc, ok := c.(*ast.CaseClause); ok {
 					w.walkBlock(cc.Body, sawAcquire, releaseSeen)

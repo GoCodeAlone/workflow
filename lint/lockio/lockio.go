@@ -17,13 +17,13 @@
 // The checker enforces two independent rules, both driven purely by method
 // name — no lock-state data-flow tracking, no type information:
 //
-//  1. Restricted I/O (Class ClassRestrictedIO): a call to one of
+//  1. Restricted I/O (ClassRestrictedIO): a call to one of
 //     Config.RestrictedIOMethods is flagged unless the enclosing function is
 //     listed in Config.PermanentIOCallers. These methods are assumed to do
 //     I/O directly under the assumption that the caller already holds the
 //     lock; only sanctioned wrapper functions (or storage backends with no
 //     separable lock/I-O split) should call them.
-//  2. Uncovered return paths (Class ClassUncoveredReturnPath): once a
+//  2. Uncovered return paths (ClassUncoveredReturnPath): once a
 //     function calls one of Config.AcquireMethods using the idiom
 //     `v, err := recv.Acquire(...); if err != nil { return ... }`, every
 //     return path reachable afterward must pass through a call to one of
@@ -33,12 +33,12 @@
 //     with no guarantee of running before (or ever, relative to) the
 //     enclosing function's return.
 //
-// Scope note: Class ClassUncoveredReturnPath checks release-path
+// Scope note: ClassUncoveredReturnPath checks release-path
 // completeness for the acquire idiom above — it does not itself detect I/O
 // happening between a Lock() call and a deferred Unlock(), since a
 // `defer mu.Unlock()` trivially covers every return path by construction. A
 // plain sync.Mutex Lock()/defer Unlock() wrapping a restricted I/O call is
-// still caught, but by Class ClassRestrictedIO (list the I/O method in
+// still caught, but by ClassRestrictedIO (list the I/O method in
 // Config.RestrictedIOMethods), not by ClassUncoveredReturnPath. A cross-repo
 // sweep of Workflow ecosystem code found this exact shape — a lock held
 // across a slow I/O call via Lock()/defer Unlock(), contending with a

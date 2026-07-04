@@ -140,6 +140,46 @@ func (a *App) badAcquireReturnPath() error {
 	}
 }
 
+// The following two fixtures are regressions for a Copilot review finding on
+// the upstream PR: walkBlock previously didn't inspect a for-loop's or
+// switch's header expressions (Init/Cond/Post, Tag, Assign) for acquire/
+// release calls before recursing into the loop/switch body, so a return
+// inside that body could go unflagged even though the critical section began
+// in the header. Both fixtures put the AcquireLease call in the header and a
+// bare return in the body to prove the header now extends the running state
+// into the body, matching how IfStmt's Init/Cond already worked.
+
+func TestForLoopHeaderAcquireIsDetectedInBody(t *testing.T) {
+	fset, f := parseFixture(t, `
+func (a *App) badForInitAcquireLeaksInBody() error {
+	for a.AcquireLease(); true; {
+		return errors.New("nope")
+	}
+	return nil
+}
+`)
+	violations := FindViolations(fset, []*ast.File{f}, testConfig())
+	if !hasViolation(violations, "badForInitAcquireLeaksInBody", ClassUncoveredReturnPath) {
+		t.Fatalf("checker bug: acquire call in a for-loop's Init was not detected inside the loop body; violations=%+v", violations)
+	}
+}
+
+func TestSwitchHeaderAcquireIsDetectedInBody(t *testing.T) {
+	fset, f := parseFixture(t, `
+func (a *App) badSwitchInitAcquireLeaksInBody() error {
+	switch a.AcquireLease(); {
+	case somethingWrong():
+		return errors.New("nope")
+	}
+	return a.Commit(nil)
+}
+`)
+	violations := FindViolations(fset, []*ast.File{f}, testConfig())
+	if !hasViolation(violations, "badSwitchInitAcquireLeaksInBody", ClassUncoveredReturnPath) {
+		t.Fatalf("checker bug: acquire call in a switch's Init was not detected inside a case body; violations=%+v", violations)
+	}
+}
+
 func TestAcquireFullyCoveredPathsAreNotFlagged(t *testing.T) {
 	fset, f := parseFixture(t, `
 func (a *App) goodAcquireReturnPath() error {
