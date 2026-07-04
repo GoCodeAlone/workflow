@@ -51,6 +51,33 @@ func TestDoctorReportsMissingLockedPlugin(t *testing.T) {
 	}
 }
 
+func TestDoctorTreatsMissingManifestAsWarning(t *testing.T) {
+	dir := t.TempDir()
+	workflowPath := filepath.Join(dir, "workflow.yaml")
+	if err := os.WriteFile(workflowPath, []byte("modules: []\n"), 0o600); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := runDoctorWithOutput([]string{
+		"--workflow", workflowPath,
+		"--manifest", filepath.Join(dir, "wfctl.yaml"),
+		"--lock-file", filepath.Join(dir, ".wfctl-lock.yaml"),
+		"--plugin-dir", filepath.Join(dir, "data", "plugins"),
+	}, &out)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, out.String())
+	}
+	for _, want := range []string{"Overall: WARN", "plugin manifest", "not found", "wfctl plugin add"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "ERROR") {
+		t.Fatalf("missing manifest should not be an error:\n%s", out.String())
+	}
+}
+
 func TestDoctorJSONOutput(t *testing.T) {
 	fixture := writeDoctorFixture(t, doctorFixtureOptions{})
 

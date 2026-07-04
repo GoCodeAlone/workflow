@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -178,7 +179,7 @@ func doctorOnlineUpdateCheck() doctorCheck {
 
 func doctorProjectSection(workflowPath string) doctorSection {
 	section := doctorSection{Name: "Project"}
-	if _, err := os.Stat(workflowPath); os.IsNotExist(err) {
+	if _, err := os.Stat(workflowPath); errors.Is(err, os.ErrNotExist) {
 		section.Checks = append(section.Checks, doctorCheck{
 			Status:  doctorStatusWarn,
 			Message: fmt.Sprintf("workflow config %s not found", workflowPath),
@@ -210,7 +211,7 @@ func doctorProjectSection(workflowPath string) doctorSection {
 func doctorPluginSection(manifestPath, lockPath, pluginDir string) doctorSection {
 	section := doctorSection{Name: "Plugins"}
 	manifest, err := config.LoadWfctlManifest(manifestPath)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		section.Checks = append(section.Checks, doctorCheck{
 			Status:  doctorStatusWarn,
 			Message: fmt.Sprintf("plugin manifest %s not found", manifestPath),
@@ -234,7 +235,7 @@ func doctorPluginSection(manifestPath, lockPath, pluginDir string) doctorSection
 	}
 
 	lock, err := config.LoadWfctlLockfile(lockPath)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		section.Checks = append(section.Checks, doctorCheck{
 			Status:  doctorStatusWarn,
 			Message: fmt.Sprintf("lockfile %s not found", lockPath),
@@ -296,7 +297,7 @@ func findLockedPlugin(lock *config.WfctlLockfile, name string) (config.WfctlLock
 func doctorInstalledPluginCheck(pluginDir, name, expectedVersion string) doctorCheck {
 	installName := normalizePluginName(name)
 	installDir := filepath.Join(pluginDir, installName)
-	if _, err := os.Stat(installDir); os.IsNotExist(err) {
+	if _, err := os.Stat(installDir); errors.Is(err, os.ErrNotExist) {
 		return doctorCheck{
 			Status:  doctorStatusWarn,
 			Message: fmt.Sprintf("%s is not installed in %s", name, installDir),
@@ -332,7 +333,7 @@ func doctorInstalledPluginCheck(pluginDir, name, expectedVersion string) doctorC
 func doctorGlobalPluginSection() doctorSection {
 	dir := defaultGlobalPluginDir()
 	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return doctorSection{
 			Name: "Global Plugins",
 			Checks: []doctorCheck{{
