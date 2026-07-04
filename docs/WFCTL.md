@@ -446,6 +446,54 @@ wfctl plugin install
 wfctl update --check
 ```
 
+#### `doctor app` — deployed-app probe
+
+Explicitly-online, read-only probe of a deployed app's health endpoint. Unlike
+plain `wfctl doctor`, which only inspects the local checkout (ADR 0052), this
+subcommand makes real HTTP requests to a URL you provide. It runs N sequential
+requests followed by M lightly-concurrent requests and reports per-request
+latency spread, failure-origin classification, and health flip-flop rate.
+
+```bash
+wfctl doctor app <url> [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--health-path` | `/healthz` | Path appended to `<url>` for each probe |
+| `--probes` | `5` | Number of sequential probes |
+| `--concurrency` | `3` | Number of lightly-concurrent probes fired after the sequential probes |
+| `--timeout` | `10s` | Per-request timeout |
+| `--format` | `text` | `text` or `json` |
+| `--strict` | `false` | Exit non-zero on warnings or errors |
+
+Each probe response is classified by content-type and body shape only — never
+by provider-specific markers:
+
+- **healthy**: a 2xx response.
+- **platform-edge**: a non-2xx response with an HTML body. The request never
+  reached the app; a reverse proxy or load balancer answered with its own
+  default error page (DigitalOcean App Platform, AWS ALB, and nginx all
+  default to an HTML error page in this shape).
+- **app-origin**: a non-2xx response with a JSON body. The request reached the
+  app, which returned its own structured error.
+- **transport-error**: no HTTP response was received at all (connection
+  refused, timeout, DNS/TLS failure).
+- **unknown**: a response that matched neither body shape.
+
+This distinction is the one that costs the most debugging time in practice: an
+edge proxy's HTML error page and the app's own JSON error both surface to a
+human as "the health check failed," but they point at completely different
+places to look next.
+
+Examples:
+
+```bash
+wfctl doctor app https://staging.example.com
+wfctl doctor app https://staging.example.com --health-path /health --probes 10 --concurrency 5
+wfctl doctor app https://staging.example.com --format json --strict
+```
+
 ### `repair`
 
 Plan or apply safe lifecycle repairs for the local project. The command is

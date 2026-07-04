@@ -17,6 +17,7 @@ application directories at the root.
 | `plugins/` | Built-in engine plugins. |
 | `plugin/` | Plugin SDK, manifests, external plugin adapters, and contracts. |
 | `cigen/` | Config-derived CI plan analyzer and built-in renderers. |
+| `lint/` | Reusable go/analysis-style static checkers, parameterized for use by any Workflow host app (e.g. `lint/lockio`). |
 | `iac/`, `infra/`, `platform/`, `provider/` | Infrastructure planning, provider, and platform abstractions. |
 | `ui/` | React visual builder. |
 | `mcp/` | MCP server and tools. |
