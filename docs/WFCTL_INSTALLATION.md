@@ -167,6 +167,35 @@ verifies `checksums.txt` when available, and replaces the current executable.
 It is not recommended for Homebrew-managed binaries because it bypasses
 Homebrew's cellar and formula state.
 
+## Diagnose And Repair Local State
+
+Use `wfctl doctor` to inspect the binary, workflow config, plugin manifest,
+lockfile, and installed project plugins without changing files:
+
+```bash
+wfctl doctor
+wfctl doctor --online
+```
+
+Use `wfctl repair` to turn common project plugin diagnostics into an ordered
+repair plan. The default is a dry-run:
+
+```bash
+wfctl repair
+```
+
+Apply the automatic repairs only when the plan looks correct:
+
+```bash
+wfctl repair --apply
+```
+
+Automatic repair is limited to regenerating `.wfctl-lock.yaml` from
+`wfctl.yaml` and installing locked project plugins into `data/plugins` or the
+directory passed with `--plugin-dir`. Binary updates, missing project files,
+global plugin changes, and provider-specific fixes remain explicit manual
+commands.
+
 ## Project Plugin Lifecycle
 
 Workflow projects should commit a human-edited `wfctl.yaml` manifest and the

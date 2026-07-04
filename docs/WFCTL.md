@@ -446,6 +446,48 @@ wfctl plugin install
 wfctl update --check
 ```
 
+### `repair`
+
+Plan or apply safe lifecycle repairs for the local project. The command is
+dry-run by default: it prints the ordered commands it would run and leaves files
+unchanged. Pass `--apply` to regenerate a stale project plugin lockfile and
+install locked project plugins.
+
+```bash
+wfctl repair [options]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--workflow` | `workflow.yaml` | Workflow config path used by plugin lock fallback |
+| `--manifest` | `wfctl.yaml` | Project plugin manifest |
+| `--lock-file` | `.wfctl-lock.yaml` | Generated plugin lockfile |
+| `--plugin-dir` | `data/plugins` | Project plugin install directory |
+| `--include-global` | `false` | Include global plugin diagnostics as manual suggestions |
+| `--online` | `false` | Check the latest GitHub release for manual suggestions |
+| `--format` | `text` | `text` or `json` |
+| `--apply` | `false` | Run automatic repairs |
+
+Examples:
+
+```bash
+wfctl repair
+wfctl repair --apply
+wfctl repair --format json
+```
+
+Automatic repairs are intentionally narrow:
+
+- run `wfctl plugin lock` when `wfctl.yaml` and `.wfctl-lock.yaml` are out of
+  sync or the lockfile is missing a declared plugin;
+- run `wfctl plugin install` when locked project plugins are missing or stale,
+  or after relocking.
+
+`wfctl repair` does not create workflow configs, create plugin manifests,
+self-update the `wfctl` binary, mutate global plugins, or run provider-specific
+fixes. Those remain manual commands surfaced by `wfctl doctor` and the repair
+report.
+
 ### `audit`
 
 Audit Workflow ecosystem metadata without mutating project code. The command is intended for dogfooding release readiness checks: plans and design docs should carry implementation evidence, plugin repos should expose compatible manifests, and repository files should be portable and safe.
