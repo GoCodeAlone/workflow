@@ -150,6 +150,11 @@ func TestDoctorHealthyProject(t *testing.T) {
 	if !strings.Contains(out.String(), "Overall: OK") {
 		t.Fatalf("expected healthy doctor output, got:\n%s", out.String())
 	}
+	for _, want := range []string{"workflow-plugin-auth installed version v1.2.3", filepath.Join(fixture.pluginDir, "auth")} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("healthy doctor output missing %q:\n%s", want, out.String())
+		}
+	}
 }
 
 func TestDoctorCommandWiring(t *testing.T) {

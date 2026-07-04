@@ -326,7 +326,7 @@ func doctorInstalledPluginCheck(pluginDir, name, expectedVersion string) doctorC
 	}
 	return doctorCheck{
 		Status:  doctorStatusOK,
-		Message: fmt.Sprintf("%s installed at %s", name, installedVersion),
+		Message: fmt.Sprintf("%s installed version %s in %s", name, installedVersion, installDir),
 	}
 }
 
