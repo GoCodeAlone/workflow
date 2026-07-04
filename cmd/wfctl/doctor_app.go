@@ -80,6 +80,18 @@ func hasHTMLBodyShape(body []byte) bool {
 	return bytes.Contains(head, []byte("<html")) || bytes.Contains(head, []byte("<!doctype html"))
 }
 
+// normalizeHealthPath ensures path has a leading "/" before it is appended to
+// a base URL. Without this, a health path passed as "healthz" (no leading
+// slash) would concatenate directly onto the trimmed base URL with no
+// separator (e.g. "https://example.comhealthz"), producing an invalid URL
+// instead of a clear error.
+func normalizeHealthPath(path string) string {
+	if strings.HasPrefix(path, "/") {
+		return path
+	}
+	return "/" + path
+}
+
 // doctorAppProbeResult is one HTTP round trip against the health path.
 type doctorAppProbeResult struct {
 	Sequence   int
@@ -106,7 +118,7 @@ type doctorAppOptions struct {
 // caller-supplied URL, with no retries beyond what net/http already does at
 // the transport layer, and no request volume beyond N+M total.
 func runDoctorAppProbes(ctx context.Context, client *http.Client, opts doctorAppOptions) []doctorAppProbeResult {
-	target := strings.TrimRight(opts.URL, "/") + opts.HealthPath
+	target := strings.TrimRight(opts.URL, "/") + normalizeHealthPath(opts.HealthPath)
 	results := make([]doctorAppProbeResult, 0, opts.Probes+opts.Concurrency)
 
 	probeOnce := func(seq int, concurrent bool) doctorAppProbeResult {
@@ -129,8 +141,20 @@ func runDoctorAppProbes(ctx context.Context, client *http.Client, opts doctorApp
 			}
 		}
 		defer func() { _ = resp.Body.Close() }()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		duration := time.Since(start)
+		if readErr != nil {
+			// A failed body read (truncated connection, mid-stream reset)
+			// leaves body incomplete; classifying against a partial body
+			// would misreport a transport failure as a healthy/platform-edge/
+			// app-origin response depending on what happened to be read
+			// before the failure. Report it as its own transport error
+			// instead of guessing from a partial read.
+			return doctorAppProbeResult{
+				Sequence: seq, Concurrent: concurrent, StartedAt: start,
+				Duration: duration, StatusCode: resp.StatusCode, Class: doctorAppFailureTransport, Err: readErr,
+			}
+		}
 		return doctorAppProbeResult{
 			Sequence:   seq,
 			Concurrent: concurrent,

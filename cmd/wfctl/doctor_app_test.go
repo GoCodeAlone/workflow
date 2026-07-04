@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -264,6 +265,92 @@ func TestRunDoctorAppProbesTransportFailure(t *testing.T) {
 	}
 }
 
+func TestNormalizeHealthPath(t *testing.T) {
+	cases := map[string]string{
+		"/healthz": "/healthz",
+		"healthz":  "/healthz",
+		"":         "/",
+		"/":        "/",
+	}
+	for in, want := range cases {
+		if got := normalizeHealthPath(in); got != want {
+			t.Errorf("normalizeHealthPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestRunDoctorAppProbesHealthPathWithoutLeadingSlash proves the missing
+// separator is fixed end-to-end (not just in the unit-level
+// normalizeHealthPath): a --health-path value with no leading slash must
+// still hit the right route, not get silently concatenated onto the host.
+func TestRunDoctorAppProbesHealthPathWithoutLeadingSlash(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	results := runDoctorAppProbes(t.Context(), srv.Client(), doctorAppOptions{
+		URL: srv.URL, HealthPath: "healthz", Probes: 1, Concurrency: 0, Timeout: 5 * time.Second,
+	})
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if results[0].Class != doctorAppFailureHealthy {
+		t.Fatalf("class = %q, want healthy (request: %+v)", results[0].Class, results[0])
+	}
+	if gotPath != "/healthz" {
+		t.Fatalf("server saw path %q, want /healthz", gotPath)
+	}
+}
+
+// erroringBody is an io.ReadCloser that returns some bytes and then a fixed
+// error, simulating a truncated connection or mid-stream reset.
+type erroringBody struct {
+	remaining []byte
+	err       error
+}
+
+func (b *erroringBody) Read(p []byte) (int, error) {
+	if len(b.remaining) == 0 {
+		return 0, b.err
+	}
+	n := copy(p, b.remaining)
+	b.remaining = b.remaining[n:]
+	return n, nil
+}
+
+func (b *erroringBody) Close() error { return nil }
+
+// TestRunDoctorAppProbesBodyReadFailureIsTransportError proves a failed body
+// read (as opposed to a failed request/connection) is reported as its own
+// transport error rather than silently classifying against whatever partial
+// bytes were read before the failure.
+func TestRunDoctorAppProbesBodyReadFailureIsTransportError(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       &erroringBody{remaining: []byte(`{"stat`), err: io.ErrUnexpectedEOF},
+			}, nil
+		}),
+	}
+	results := runDoctorAppProbes(t.Context(), client, doctorAppOptions{
+		URL: "http://example.invalid", HealthPath: "/healthz", Probes: 1, Concurrency: 0, Timeout: time.Second,
+	})
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if results[0].Class != doctorAppFailureTransport {
+		t.Fatalf("class = %q, want transport-error (body read failed)", results[0].Class)
+	}
+	if results[0].Err == nil {
+		t.Fatal("expected a non-nil Err when the body read fails")
+	}
+}
+
 func TestBuildDoctorAppReportAllHealthy(t *testing.T) {
 	results := []doctorAppProbeResult{
 		{Class: doctorAppFailureHealthy, StartedAt: time.Now(), Duration: 10 * time.Millisecond},
@@ -356,7 +443,14 @@ func TestDoctorAppCLIEndToEndTextAndJSON(t *testing.T) {
 	}
 }
 
-func TestDoctorAppStrictExitsNonZeroOnWarn(t *testing.T) {
+// TestDoctorAppStrictExitsNonZeroOnError covers the total-outage case: 0/1
+// probes healthy, which buildDoctorAppReport marks ERROR. Renamed from a
+// Copilot review finding on the upstream PR: the previous name and comment
+// said "WARN" for this exact fixture, but a single always-failing probe is
+// 0/1 healthy, i.e. ERROR, not WARN — see TestDoctorAppStrictExitsNonZeroOnGenuineWarn
+// below for the actual WARN case (partial degradation), which this fixture
+// never exercised.
+func TestDoctorAppStrictExitsNonZeroOnError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusBadGateway)
@@ -367,7 +461,37 @@ func TestDoctorAppStrictExitsNonZeroOnWarn(t *testing.T) {
 	var out bytes.Buffer
 	err := runDoctorAppWithOutput([]string{"--probes", "1", "--concurrency", "0", "--strict", srv.URL}, &out)
 	if err == nil {
+		t.Fatal("expected --strict to return an error on an ERROR report")
+	}
+	if !strings.Contains(out.String(), "Overall: ERROR") {
+		t.Fatalf("expected this fixture to actually produce ERROR, got:\n%s", out.String())
+	}
+}
+
+// TestDoctorAppStrictExitsNonZeroOnGenuineWarn covers partial degradation
+// (some probes healthy, some not) — the real WARN case that
+// TestDoctorAppStrictExitsNonZeroOnError's name previously claimed to cover
+// but didn't.
+func TestDoctorAppStrictExitsNonZeroOnGenuineWarn(t *testing.T) {
+	var count atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if count.Add(1) <= 2 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(edgeShapeNginxDefault))
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	err := runDoctorAppWithOutput([]string{"--probes", "4", "--concurrency", "0", "--strict", srv.URL}, &out)
+	if err == nil {
 		t.Fatal("expected --strict to return an error on a WARN report")
+	}
+	if !strings.Contains(out.String(), "Overall: WARN") {
+		t.Fatalf("expected a genuine WARN report, got:\n%s", out.String())
 	}
 }
 
