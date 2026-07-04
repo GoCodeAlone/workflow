@@ -180,8 +180,10 @@ regenerate it before installing. Use `wfctl plugin ci` or
 `wfctl plugin install --locked` in CI to fail on stale locks instead of
 modifying the checkout.
 
-By default, project plugins install to `data/plugins`. Override the directory
-with `--plugin-dir` or `WFCTL_PLUGIN_DIR`.
+By default, project plugin install commands write to `data/plugins`. Override
+the install directory with `--plugin-dir`; commands that load installed
+project plugins may also honor `WFCTL_PLUGIN_DIR` as documented in their
+individual help.
 
 ## Global Plugin Lifecycle
 
