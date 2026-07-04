@@ -235,10 +235,10 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	// Check if resource exists
 	if _, ok := h.resources[resourceId]; !ok {
+		h.mu.Unlock()
 		w.WriteHeader(http.StatusNotFound)
 		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"}); err != nil {
 			_ = err
@@ -251,17 +251,20 @@ func (h *RESTAPIHandler) handlePut(resourceId string, w http.ResponseWriter, r *
 		ID:   resourceId,
 		Data: data,
 	}
+	updated := h.resources[resourceId]
+	h.mu.Unlock()
 
 	// Write-through to persistence
 	if h.persistence != nil {
-		if err := h.persistence.SaveResource(h.resourceName, resourceId, data); err != nil {
+		if err := h.persistence.SaveResource(h.resourceName, resourceId, updated.Data); err != nil {
 			h.logger.Warn(fmt.Sprintf("failed to persist resource %s/%s: %v", h.resourceName, resourceId, err))
 		}
 	}
 
-	if err := json.NewEncoder(w).Encode(h.resources[resourceId]); err != nil {
+	if err := json.NewEncoder(w).Encode(updated); err != nil {
 		_ = err
 	}
+	return
 }
 
 // handleDelete handles DELETE requests for removing resources.
@@ -275,10 +278,10 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	// Check if resource exists
 	if _, ok := h.resources[resourceId]; !ok {
+		h.mu.Unlock()
 		w.WriteHeader(http.StatusNotFound)
 		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Resource not found"}); err != nil {
 			_ = err
@@ -288,6 +291,7 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 
 	// Delete the resource
 	delete(h.resources, resourceId)
+	h.mu.Unlock()
 
 	// Write-through to persistence
 	if h.persistence != nil {
@@ -297,6 +301,7 @@ func (h *RESTAPIHandler) handleDelete(resourceId string, w http.ResponseWriter, 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+	return
 }
 
 // handleSubActionGet handles GET requests for sub-resource data (e.g., /summary).

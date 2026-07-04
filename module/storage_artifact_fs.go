@@ -95,9 +95,6 @@ type artifactMeta struct {
 func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reader, metadata map[string]string) error {
 	path := m.artifactPath(key)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil { //nolint:gosec // G703: key sanitized by artifactPath (TrimPrefix + filepath.Join)
 		return fmt.Errorf("artifact store %q: Upload %q: failed to create directory: %w", m.name, key, err)
 	}
@@ -141,9 +138,6 @@ func (m *ArtifactFSModule) Upload(_ context.Context, key string, reader io.Reade
 func (m *ArtifactFSModule) Download(_ context.Context, key string) (io.ReadCloser, map[string]string, error) {
 	path := m.artifactPath(key)
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -165,9 +159,6 @@ func (m *ArtifactFSModule) Download(_ context.Context, key string) (io.ReadClose
 
 // List returns ArtifactInfo for all artifacts whose key starts with prefix.
 func (m *ArtifactFSModule) List(_ context.Context, prefix string) ([]ArtifactInfo, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	var results []ArtifactInfo
 
 	err := filepath.Walk(m.cfg.BasePath, func(path string, info os.FileInfo, walkErr error) error {
@@ -224,9 +215,6 @@ func (m *ArtifactFSModule) List(_ context.Context, prefix string) ([]ArtifactInf
 func (m *ArtifactFSModule) Delete(_ context.Context, key string) error {
 	path := m.artifactPath(key)
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("artifact store %q: Delete %q: not found", m.name, key)
@@ -241,8 +229,6 @@ func (m *ArtifactFSModule) Delete(_ context.Context, key string) error {
 // Exists reports whether an artifact with the given key exists.
 func (m *ArtifactFSModule) Exists(_ context.Context, key string) (bool, error) {
 	path := m.artifactPath(key)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	_, err := os.Stat(path)
 	if err == nil {
 		return true, nil

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 )
@@ -105,6 +106,51 @@ func TestExternalPluginManagerLoadPluginStoresCandidateAfterValidation(t *testin
 	}
 	if _, err := manager.LoadPlugin("safe-plugin"); err == nil {
 		t.Fatal("duplicate load should fail")
+	}
+}
+
+func TestExternalPluginManagerLoadPluginDoesNotStarveLoadedReads(t *testing.T) {
+	manager := NewExternalPluginManager(t.TempDir(), log.Default())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		close(started)
+		<-release
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: &ExternalPluginAdapter{}}, nil
+	}
+
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := manager.LoadPlugin("slow-plugin")
+		loadDone <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("LoadPlugin did not reach start hook")
+	}
+
+	readDone := make(chan bool, 1)
+	go func() {
+		readDone <- manager.IsLoaded("other-plugin")
+	}()
+
+	select {
+	case loaded := <-readDone:
+		if loaded {
+			close(release)
+			t.Fatal("unexpected loaded result for unrelated plugin")
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		t.Fatal("IsLoaded blocked behind plugin startup")
+	}
+
+	close(release)
+	if err := <-loadDone; err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
 	}
 }
 

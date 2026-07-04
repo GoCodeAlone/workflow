@@ -1067,12 +1067,12 @@ func (j *JWTAuthModule) extractPathParam(path, prefix string) string {
 	return path[idx+len(prefix):]
 }
 
-// loadSeedUsers reads a JSON seed file and registers users that don't already exist.
+// loadSeedUsers reads a JSON seed file and prepares seed users for insertion.
 // The seed format matches the api.handler seed format: [{id, data: {email, name, password, role, ...}}]
-func (j *JWTAuthModule) loadSeedUsers(path string) error {
+func (j *JWTAuthModule) loadSeedUsers(path string) ([]*User, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read seed file %s: %w", path, err)
+		return nil, fmt.Errorf("failed to read seed file %s: %w", path, err)
 	}
 
 	var seeds []struct {
@@ -1080,17 +1080,13 @@ func (j *JWTAuthModule) loadSeedUsers(path string) error {
 		Data map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(data, &seeds); err != nil {
-		return fmt.Errorf("failed to parse seed file %s: %w", path, err)
+		return nil, fmt.Errorf("failed to parse seed file %s: %w", path, err)
 	}
 
+	users := make([]*User, 0, len(seeds))
 	for _, seed := range seeds {
 		email, _ := seed.Data["email"].(string)
 		if email == "" {
-			continue
-		}
-
-		// Skip if already loaded from persistence or memory
-		if _, exists := j.users[email]; exists {
 			continue
 		}
 
@@ -1125,28 +1121,10 @@ func (j *JWTAuthModule) loadSeedUsers(path string) error {
 			Metadata:     metadata,
 			CreatedAt:    time.Now(),
 		}
-		j.users[email] = user
-
-		// Track highest numeric ID
-		var idNum int
-		if _, err := fmt.Sscanf(seed.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
-			j.nextID = idNum + 1
-		}
-
-		// Write-through to persistence
-		if j.persistence != nil {
-			_ = j.persistence.SaveUser(UserRecord{
-				ID:           user.ID,
-				Email:        user.Email,
-				Name:         user.Name,
-				PasswordHash: user.PasswordHash,
-				Metadata:     user.Metadata,
-				CreatedAt:    user.CreatedAt,
-			})
-		}
+		users = append(users, user)
 	}
 
-	return nil
+	return users, nil
 }
 
 // Start loads persisted users if available, then seed users.
@@ -1161,39 +1139,70 @@ func (j *JWTAuthModule) Start(ctx context.Context) error {
 		}
 	}
 
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
 	// Load persisted users first (they take priority over seeds)
+	var persisted []UserRecord
 	if j.persistence != nil {
 		users, err := j.persistence.LoadUsers()
 		if err == nil {
-			for _, u := range users {
-				if _, exists := j.users[u.Email]; exists {
-					continue
-				}
-				j.users[u.Email] = &User{
-					ID:           u.ID,
-					Email:        u.Email,
-					Name:         u.Name,
-					PasswordHash: u.PasswordHash,
-					Metadata:     u.Metadata,
-					CreatedAt:    u.CreatedAt,
-				}
-				var idNum int
-				if _, err := fmt.Sscanf(u.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
-					j.nextID = idNum + 1
-				}
-			}
+			persisted = users
 		}
 	}
 
 	// Load seed users (skips any already loaded from persistence)
+	var seedUsers []*User
 	if j.seedFile != "" {
-		if err := j.loadSeedUsers(j.seedFile); err != nil {
+		users, err := j.loadSeedUsers(j.seedFile)
+		if err != nil {
 			// Non-fatal: log but don't prevent startup
 			j.logger.Warn("failed to load seed users", "file", j.seedFile, "error", err)
+		} else {
+			seedUsers = users
 		}
+	}
+
+	var seedRecordsToPersist []UserRecord
+	j.mu.Lock()
+	for _, u := range persisted {
+		if _, exists := j.users[u.Email]; exists {
+			continue
+		}
+		j.users[u.Email] = &User{
+			ID:           u.ID,
+			Email:        u.Email,
+			Name:         u.Name,
+			PasswordHash: u.PasswordHash,
+			Metadata:     u.Metadata,
+			CreatedAt:    u.CreatedAt,
+		}
+		var idNum int
+		if _, err := fmt.Sscanf(u.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
+			j.nextID = idNum + 1
+		}
+	}
+	for _, user := range seedUsers {
+		if _, exists := j.users[user.Email]; exists {
+			continue
+		}
+		j.users[user.Email] = user
+		var idNum int
+		if _, err := fmt.Sscanf(user.ID, "%d", &idNum); err == nil && idNum >= j.nextID {
+			j.nextID = idNum + 1
+		}
+		if j.persistence != nil {
+			seedRecordsToPersist = append(seedRecordsToPersist, UserRecord{
+				ID:           user.ID,
+				Email:        user.Email,
+				Name:         user.Name,
+				PasswordHash: user.PasswordHash,
+				Metadata:     user.Metadata,
+				CreatedAt:    user.CreatedAt,
+			})
+		}
+	}
+	j.mu.Unlock()
+
+	for _, record := range seedRecordsToPersist {
+		_ = j.persistence.SaveUser(record)
 	}
 
 	return nil

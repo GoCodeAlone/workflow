@@ -102,20 +102,24 @@ func (h *RESTAPIHandler) syncResourceStateFromEngine(instanceId, resourceId stri
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
+	var persistID string
+	var persistData map[string]any
 	if res, exists := h.resources[resourceId]; exists {
 		res.State = instance.CurrentState
 		res.LastUpdate = instance.LastUpdated.Format(time.RFC3339)
 		res.Data["state"] = res.State
 		res.Data["lastUpdate"] = res.LastUpdate
 		h.resources[resourceId] = res
+		persistID = res.ID
+		persistData = maps.Clone(res.Data)
+	}
+	h.mu.Unlock()
 
-		// Write-through to persistence
-		if h.persistence != nil {
-			if err := h.persistence.SaveResource(h.resourceName, res.ID, res.Data); err != nil {
-				h.logger.Warn(fmt.Sprintf("failed to persist resource %s/%s: %v", h.resourceName, res.ID, err))
-			}
+	// Write-through to persistence
+	if h.persistence != nil && persistID != "" {
+		if err := h.persistence.SaveResource(h.resourceName, persistID, persistData); err != nil {
+			h.logger.Warn(fmt.Sprintf("failed to persist resource %s/%s: %v", h.resourceName, persistID, err))
 		}
 	}
 }

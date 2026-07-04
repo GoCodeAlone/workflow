@@ -25,9 +25,10 @@ type PostgresConn interface {
 // PostgresIaCStateStore persists IaC state in a PostgreSQL table using pgx/v5.
 // Locking uses pg_advisory_lock() for serialised access per resource.
 type PostgresIaCStateStore struct {
-	conn PostgresConn
-	mu   sync.Mutex
-	held map[string]int64 // resourceID -> advisory key
+	conn      PostgresConn
+	mu        sync.Mutex
+	held      map[string]int64 // resourceID -> advisory key
+	acquiring map[string]struct{}
 }
 
 // NewPostgresIaCStateStore creates a PostgreSQL-backed state store.
@@ -47,16 +48,18 @@ func NewPostgresIaCStateStore(ctx context.Context, dsn string) (*PostgresIaCStat
 		return nil, fmt.Errorf("iac postgres state: create table: %w", err)
 	}
 	return &PostgresIaCStateStore{
-		conn: conn,
-		held: make(map[string]int64),
+		conn:      conn,
+		held:      make(map[string]int64),
+		acquiring: make(map[string]struct{}),
 	}, nil
 }
 
 // NewPostgresIaCStateStoreWithConn creates a store with an injected connection (for testing).
 func NewPostgresIaCStateStoreWithConn(conn PostgresConn) *PostgresIaCStateStore {
 	return &PostgresIaCStateStore{
-		conn: conn,
-		held: make(map[string]int64),
+		conn:      conn,
+		held:      make(map[string]int64),
+		acquiring: make(map[string]struct{}),
 	}
 }
 
@@ -113,32 +116,52 @@ func (s *PostgresIaCStateStore) DeleteState(ctx context.Context, resourceID stri
 // Lock acquires a PostgreSQL advisory lock for the resource.
 func (s *PostgresIaCStateStore) Lock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if _, held := s.held[resourceID]; held {
+		s.mu.Unlock()
 		return fmt.Errorf("iac postgres state: Lock %q: already locked", resourceID)
 	}
+	if s.acquiring == nil {
+		s.acquiring = make(map[string]struct{})
+	}
+	if _, acquiring := s.acquiring[resourceID]; acquiring {
+		s.mu.Unlock()
+		return fmt.Errorf("iac postgres state: Lock %q: already locking", resourceID)
+	}
+	s.acquiring[resourceID] = struct{}{}
+	s.mu.Unlock()
+
 	key := advisoryKey(resourceID)
 	if err := s.conn.AcquireAdvisoryLock(ctx, key); err != nil {
+		s.mu.Lock()
+		delete(s.acquiring, resourceID)
+		s.mu.Unlock()
 		return fmt.Errorf("iac postgres state: Lock %q: %w", resourceID, err)
 	}
+
+	s.mu.Lock()
+	delete(s.acquiring, resourceID)
 	s.held[resourceID] = key
+	s.mu.Unlock()
 	return nil
 }
 
 // Unlock releases the PostgreSQL advisory lock for the resource.
 func (s *PostgresIaCStateStore) Unlock(ctx context.Context, resourceID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	key, held := s.held[resourceID]
 	if !held {
+		s.mu.Unlock()
 		return fmt.Errorf("iac postgres state: Unlock %q: not locked", resourceID)
 	}
+	delete(s.held, resourceID)
+	s.mu.Unlock()
+
 	if _, err := s.conn.ReleaseAdvisoryLock(ctx, key); err != nil {
+		s.mu.Lock()
+		s.held[resourceID] = key
+		s.mu.Unlock()
 		return fmt.Errorf("iac postgres state: Unlock %q: %w", resourceID, err)
 	}
-	delete(s.held, resourceID)
 	return nil
 }
 

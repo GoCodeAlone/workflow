@@ -35,9 +35,6 @@ func NewFileStateStore(baseDir string) (*FileStateStore, error) {
 
 // SaveResource persists a resource output to the state directory.
 func (s *FileStateStore) SaveResource(_ context.Context, contextPath string, output *platform.ResourceOutput) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	dir := s.contextDir(contextPath)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create context directory: %w", err)
@@ -57,9 +54,6 @@ func (s *FileStateStore) SaveResource(_ context.Context, contextPath string, out
 
 // GetResource retrieves a resource's state from the state directory.
 func (s *FileStateStore) GetResource(_ context.Context, contextPath, resourceName string) (*platform.ResourceOutput, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	path := filepath.Join(s.contextDir(contextPath), "resource-"+resourceName+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -78,9 +72,6 @@ func (s *FileStateStore) GetResource(_ context.Context, contextPath, resourceNam
 
 // ListResources returns all resources in a context path.
 func (s *FileStateStore) ListResources(_ context.Context, contextPath string) ([]*platform.ResourceOutput, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	dir := s.contextDir(contextPath)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -116,9 +107,6 @@ func (s *FileStateStore) ListResources(_ context.Context, contextPath string) ([
 
 // DeleteResource removes a resource from state.
 func (s *FileStateStore) DeleteResource(_ context.Context, contextPath, resourceName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	path := filepath.Join(s.contextDir(contextPath), "resource-"+resourceName+".json")
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete resource state: %w", err)
@@ -128,9 +116,6 @@ func (s *FileStateStore) DeleteResource(_ context.Context, contextPath, resource
 
 // SavePlan persists an execution plan.
 func (s *FileStateStore) SavePlan(_ context.Context, plan *platform.Plan) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	dir := filepath.Join(s.baseDir, "plans")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create plans directory: %w", err)
@@ -150,9 +135,6 @@ func (s *FileStateStore) SavePlan(_ context.Context, plan *platform.Plan) error 
 
 // GetPlan retrieves an execution plan by ID.
 func (s *FileStateStore) GetPlan(_ context.Context, planID string) (*platform.Plan, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	// Validate planID to prevent path traversal.
 	if strings.Contains(planID, "/") || strings.Contains(planID, "\\") || strings.Contains(planID, "..") {
 		return nil, fmt.Errorf("invalid plan ID %q", planID)
@@ -176,9 +158,6 @@ func (s *FileStateStore) GetPlan(_ context.Context, planID string) (*platform.Pl
 
 // ListPlans lists plans for a context path, ordered by creation time descending.
 func (s *FileStateStore) ListPlans(_ context.Context, _ string, limit int) ([]*platform.Plan, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	dir := filepath.Join(s.baseDir, "plans")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -240,9 +219,6 @@ func (s *FileStateStore) Lock(_ context.Context, contextPath string, ttl time.Du
 
 // Dependencies returns dependency references for resources that depend on the given resource.
 func (s *FileStateStore) Dependencies(_ context.Context, contextPath, _ string) ([]platform.DependencyRef, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	path := filepath.Join(s.contextDir(contextPath), "dependencies.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -261,9 +237,6 @@ func (s *FileStateStore) Dependencies(_ context.Context, contextPath, _ string) 
 
 // AddDependency records a cross-resource dependency.
 func (s *FileStateStore) AddDependency(_ context.Context, dep platform.DependencyRef) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	dir := s.contextDir(dep.SourceContext)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create context directory: %w", err)

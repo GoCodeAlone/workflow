@@ -252,8 +252,8 @@ func (s *SQLiteStore) Lock(ctx context.Context, contextPath string, ttl time.Dur
 		INSERT INTO platform_locks (context_path, holder, acquired_at, expires_at)
 		VALUES (?, ?, ?, ?)
 	`, contextPath, holderID, now.Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+	s.mu.Unlock()
 	if err != nil {
-		s.mu.Unlock()
 		return nil, &platform.LockConflictError{ContextPath: contextPath}
 	}
 
@@ -377,7 +377,6 @@ func (h *sqliteLockHandle) Unlock(ctx context.Context) error {
 	_, err := h.store.db.ExecContext(ctx, `
 		DELETE FROM platform_locks WHERE context_path = ? AND holder = ?
 	`, h.contextPath, h.holderID)
-	h.store.mu.Unlock()
 	return err
 }
 
