@@ -57,6 +57,69 @@ func (a *App) Commit(before int) error {
 	}
 }
 
+// The following three fixtures are modeled on a cross-repo sweep (team-lead,
+// 2026-07-04; full inventory to land at workflow-compute's
+// docs/validation/2026-07-04-ecosystem-lock-io-scan.md) that found the same
+// lock-across-I/O shape workflow-compute hit in at least nine instances
+// across the ecosystem beyond workflow-compute itself. Each fixture uses a
+// plain sync.Mutex Lock()/defer Unlock() — not the error-returning
+// AcquireLease idiom the Class B fixtures above exercise — to prove Class A
+// (a direct call to a restricted I/O method outside a sanctioned caller)
+// generalizes to that shape too: Class A never reasoned about lock state in
+// the first place, so it flags these the same way it flags workflow-compute's
+// saveLocked, independent of whether Lock()/Unlock() or an error-returning
+// acquire surrounds the call. Method/field names are anonymized generics,
+// not the real identifiers from the swept repos.
+
+func TestRestrictedIOEcosystemShapeSchedulerShutdownHoldsLockAcrossSave(t *testing.T) {
+	// A scheduler's Stop() holds its lock across a slow persistence save.
+	fset, f := parseFixture(t, `
+func (s *Scheduler) Stop() error {
+	s.schedulerLock.Lock()
+	defer s.schedulerLock.Unlock()
+	return s.persistenceHandler.rawWrite()
+}
+`)
+	violations := FindViolations(fset, []*ast.File{f}, testConfig())
+	if !hasViolation(violations, "Stop", ClassRestrictedIO) {
+		t.Fatalf("checker bug: ecosystem-shaped Stop() was not flagged; violations=%+v", violations)
+	}
+}
+
+func TestRestrictedIOEcosystemShapePolicySaveContendsWithHotPathRLock(t *testing.T) {
+	// An authz module holds its mutex across a policy save while every
+	// request-path Enforce() call takes the same mutex to read — contention
+	// on every request during a save.
+	fset, f := parseFixture(t, `
+func (m *Module) SavePolicy() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.enforcer.rawWrite()
+}
+`)
+	violations := FindViolations(fset, []*ast.File{f}, testConfig())
+	if !hasViolation(violations, "SavePolicy", ClassRestrictedIO) {
+		t.Fatalf("checker bug: ecosystem-shaped SavePolicy() was not flagged; violations=%+v", violations)
+	}
+}
+
+func TestRestrictedIOEcosystemShapeProviderDriverListContendsWithHealthCheck(t *testing.T) {
+	// A cloud provider driver holds its deployment mutex across a slow list
+	// API call while a health check contends for the same mutex on every
+	// tick.
+	fset, f := parseFixture(t, `
+func (d *Driver) refreshDeployments() error {
+	d.deploymentMu.Lock()
+	defer d.deploymentMu.Unlock()
+	return d.rawWrite()
+}
+`)
+	violations := FindViolations(fset, []*ast.File{f}, testConfig())
+	if !hasViolation(violations, "refreshDeployments", ClassRestrictedIO) {
+		t.Fatalf("checker bug: ecosystem-shaped refreshDeployments() was not flagged; violations=%+v", violations)
+	}
+}
+
 func TestAcquireReturnPathMissingReleaseIsFlagged(t *testing.T) {
 	fset, f := parseFixture(t, `
 func (a *App) badAcquireReturnPath() error {

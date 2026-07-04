@@ -32,6 +32,19 @@
 //     inside an unawaited `go func(){ ... }()` does not count: it returns
 //     with no guarantee of running before (or ever, relative to) the
 //     enclosing function's return.
+//
+// Scope note: Class ClassUncoveredReturnPath checks release-path
+// completeness for the acquire idiom above — it does not itself detect I/O
+// happening between a Lock() call and a deferred Unlock(), since a
+// `defer mu.Unlock()` trivially covers every return path by construction. A
+// plain sync.Mutex Lock()/defer Unlock() wrapping a restricted I/O call is
+// still caught, but by Class ClassRestrictedIO (list the I/O method in
+// Config.RestrictedIOMethods), not by ClassUncoveredReturnPath. A cross-repo
+// sweep of Workflow ecosystem code found this exact shape — a lock held
+// across a slow I/O call via Lock()/defer Unlock(), contending with a
+// hot-path caller of the same lock — in at least nine instances beyond the
+// workflow-compute incident that motivated this package; see
+// lockio_test.go's "ecosystem shape" fixtures.
 package lockio
 
 import (
