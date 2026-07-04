@@ -4,20 +4,41 @@
 
 ## Installation
 
-### GitHub Releases (recommended)
+For full install, update, checksum, browser-download, Windows, Homebrew, and
+plugin lifecycle instructions, see
+[wfctl Installation And Plugin Lifecycle](WFCTL_INSTALLATION.md).
+
+### Homebrew
 
 ```bash
-# macOS (Apple Silicon)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-darwin-arm64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+brew tap gocodealone/tap
+brew install wfctl
+```
 
-# macOS (Intel)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-darwin-amd64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+### GitHub Releases
 
-# Linux (x86_64)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-linux-amd64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+Download raw binaries and `checksums.txt` from
+<https://github.com/GoCodeAlone/workflow/releases/latest>. Verify the checksum
+before moving `wfctl` into `PATH`.
 
-# Linux (ARM64)
-curl -sL https://github.com/GoCodeAlone/workflow/releases/latest/download/wfctl-linux-arm64 -o wfctl && chmod +x wfctl && sudo mv wfctl /usr/local/bin/
+```bash
+asset=wfctl-darwin-arm64 # replace with the asset you downloaded
+checksum_line="$(awk -v asset="$asset" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == asset) { print $1 "  " asset; found = 1; exit } } END { if (!found) exit 1 }' checksums.txt || true)"
+if [ -z "$checksum_line" ]; then
+  echo "missing checksum entry for $asset" >&2
+  exit 1
+fi
+if command -v shasum >/dev/null 2>&1; then
+  printf '%s\n' "$checksum_line" | shasum -a 256 -c -
+elif command -v sha256sum >/dev/null 2>&1; then
+  printf '%s\n' "$checksum_line" | sha256sum -c -
+else
+  echo "missing checksum tool: install shasum or sha256sum" >&2
+  exit 1
+fi
+chmod +x "./$asset"
+sudo install -d -m 0755 /usr/local/bin
+sudo install -m 0755 "./$asset" /usr/local/bin/wfctl
 ```
 
 ### From Source
@@ -32,6 +53,8 @@ go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
 wfctl update          # install latest release
 wfctl update --check  # check for updates without installing
 ```
+
+Prefer `brew upgrade wfctl` for Homebrew-managed installs.
 
 ---
 
