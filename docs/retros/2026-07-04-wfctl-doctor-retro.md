@@ -1,4 +1,4 @@
-# Retro: wfctl Doctor Lifecycle Diagnostics
+# Retro: wfctl doctor Lifecycle Diagnostics
 
 **PR:** #992 - Add wfctl doctor lifecycle diagnostics
 **Merged:** 2026-07-04
@@ -29,7 +29,7 @@ No CI failures slipped past local verification. Both PR CI runs and the main-bra
 
 ## Missed skill activations
 
-Activation log note: `.claude/autodev-state/in-progress.jsonl` exists but is stale for this Codex run, so this table uses transcript and committed artifact evidence.
+Activation log note: `in-progress.jsonl` exists but is stale for this Codex run, so this table uses transcript and committed artifact evidence.
 
 | Gate | Fired? | Notes |
 |---|---|---|
