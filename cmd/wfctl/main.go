@@ -137,6 +137,7 @@ var commands = map[string]func([]string) error{
 	"registry":        runRegistry,
 	"plugin-registry": runPluginRegistry,
 	"update":          runUpdate,
+	"repair":          runRepair,
 	"mcp":             runMCP,
 	"modernize":       runModernize,
 	"expr-migrate":    runExprMigrate,

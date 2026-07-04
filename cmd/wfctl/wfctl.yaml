@@ -61,6 +61,8 @@ workflows:
         description: Plugin catalog registry management
       - name: update
         description: Update wfctl
+      - name: repair
+        description: Plan or apply safe wfctl lifecycle repairs
       - name: mcp
         description: Start the MCP server over stdio
       - name: modernize
@@ -225,6 +227,10 @@ pipelines:
     trigger: {type: cli, config: {command: update}}
     steps:
       - {name: run, type: step.cli_invoke, config: {command: update}}
+  cmd-repair:
+    trigger: {type: cli, config: {command: repair}}
+    steps:
+      - {name: run, type: step.cli_invoke, config: {command: repair}}
   cmd-mcp:
     trigger: {type: cli, config: {command: mcp}}
     steps:
