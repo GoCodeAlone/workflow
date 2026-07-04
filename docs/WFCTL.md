@@ -37,6 +37,7 @@ else
   exit 1
 fi
 chmod +x "./$asset"
+sudo install -d -m 0755 /usr/local/bin
 sudo install -m 0755 "./$asset" /usr/local/bin/wfctl
 ```
 

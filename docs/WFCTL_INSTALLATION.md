@@ -74,6 +74,7 @@ fi
 
 (cd "$tmpdir" && printf '%s\n' "$checksum_line" | "${checksum_cmd[@]}")
 chmod +x "$tmpdir/$asset"
+sudo install -d -m 0755 /usr/local/bin
 sudo install -m 0755 "$tmpdir/$asset" /usr/local/bin/wfctl
 
 wfctl --version
@@ -118,6 +119,7 @@ else
   exit 1
 fi
 chmod +x "./$asset"
+sudo install -d -m 0755 /usr/local/bin
 sudo install -m 0755 "./$asset" /usr/local/bin/wfctl
 ```
 
