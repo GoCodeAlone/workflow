@@ -42,6 +42,14 @@ func runDoctor(args []string) error {
 }
 
 func runDoctorWithOutput(args []string, out io.Writer) error {
+	// "wfctl doctor app <url>" is an explicitly-online subcommand (see
+	// doctor_app.go); every other invocation is the checkout-only diagnostic
+	// below, per ADR 0052. Dispatching on a literal "app" is unambiguous
+	// because the checkout diagnostic takes no positional arguments.
+	if len(args) > 0 && args[0] == "app" {
+		return runDoctorAppWithOutput(args[1:], out)
+	}
+
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(out)
 	workflowPath := fs.String("workflow", "workflow.yaml", "Workflow config path")
@@ -54,8 +62,12 @@ func runDoctorWithOutput(args []string, out io.Writer) error {
 	strict := fs.Bool("strict", false, "Exit non-zero when warnings or errors are found")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl doctor [options]
+       wfctl doctor app <url> [options]
 
 Check wfctl binary, project config, plugin manifest, lockfile, and installed plugin state.
+
+Use "wfctl doctor app <url>" to probe a deployed app's health endpoint instead
+(explicitly online; run "wfctl doctor app -h" for its options).
 
 Options:
 `)
