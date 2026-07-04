@@ -23,7 +23,7 @@ before moving `wfctl` into `PATH`.
 
 ```bash
 asset=wfctl-darwin-arm64 # replace with the asset you downloaded
-checksum_line="$(awk -v asset="$asset" '$2 == asset { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt || true)"
+checksum_line="$(awk -v asset="$asset" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == asset) { print $1 "  " asset; found = 1; exit } } END { if (!found) exit 1 }' checksums.txt || true)"
 if [ -z "$checksum_line" ]; then
   echo "missing checksum entry for $asset" >&2
   exit 1

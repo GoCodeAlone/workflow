@@ -57,7 +57,7 @@ base="https://github.com/GoCodeAlone/workflow/releases/latest/download"
 curl -fL "$base/$asset" -o "$tmpdir/$asset"
 curl -fL "$base/checksums.txt" -o "$tmpdir/checksums.txt"
 
-checksum_line="$(awk -v asset="$asset" '$2 == asset { print; found = 1; exit } END { if (!found) exit 1 }' "$tmpdir/checksums.txt" || true)"
+checksum_line="$(awk -v asset="$asset" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == asset) { print $1 "  " asset; found = 1; exit } } END { if (!found) exit 1 }' "$tmpdir/checksums.txt" || true)"
 if [ -z "$checksum_line" ]; then
   echo "missing checksum entry for $asset" >&2
   exit 1
@@ -105,7 +105,7 @@ macOS or Linux:
 
 ```bash
 asset=wfctl-darwin-arm64 # replace with the asset you downloaded
-checksum_line="$(awk -v asset="$asset" '$2 == asset { print; found = 1; exit } END { if (!found) exit 1 }' checksums.txt || true)"
+checksum_line="$(awk -v asset="$asset" '{ file = $2; sub(/^\*/, "", file); sub(/^\.\//, "", file); if (file == asset) { print $1 "  " asset; found = 1; exit } } END { if (!found) exit 1 }' checksums.txt || true)"
 if [ -z "$checksum_line" ]; then
   echo "missing checksum entry for $asset" >&2
   exit 1
