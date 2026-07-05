@@ -4,8 +4,8 @@ github.com/DataDog/datadog-go/v5 v5.8.3 h1:s58CUJ9s8lezjhTNJO/SxkPBv2qZjS3ktpRSq
 github.com/DataDog/datadog-go/v5 v5.8.3/go.mod h1:K9kcYBlxkcPP8tvvjZZKs/m1edNAUFzBbdpTUKfCsuw=
 github.com/GoCodeAlone/go-plugin v1.7.0 h1:EwnhqPlXiNmp85S+MXnKKvm3YlfA6O4NzBb4+GSlEVY=
 github.com/GoCodeAlone/go-plugin v1.7.0/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=
-github.com/GoCodeAlone/modular v1.13.4 h1:De4p2qyJSVmstRGno/PM+fPdUCMu/7a9WgU5FUVGDa8=
-github.com/GoCodeAlone/modular v1.13.4/go.mod h1:+JEPUYOxGaD332EMZ5PbJCz5rxwvFu4Tm6MrnZT0vxM=
+github.com/GoCodeAlone/modular v1.13.5 h1:Q+AR3MMAQJctvPJzlRSmTywArbrsXiMM3gzyJN8reBs=
+github.com/GoCodeAlone/modular v1.13.5/go.mod h1:+JEPUYOxGaD332EMZ5PbJCz5rxwvFu4Tm6MrnZT0vxM=
 github.com/GoCodeAlone/modular/modules/auth v1.17.0 h1:GbKG6s/2qe6N9YZ8vtvYsNon56MLWECncPxWvAsazSc=
 github.com/GoCodeAlone/modular/modules/auth v1.17.0/go.mod h1:E9dDIxiAxIrXK8gn/rEhaqI5OYe6Aw/uGpRyI7iyxj8=
 github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 h1:2ljVafd/1LYchF47WrnA1+ji8mcmVXMJ4F5qDrhZZi4=
@@ -153,8 +153,8 @@ github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsI
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=
-github.com/jackc/pgx/v5 v5.9.2 h1:3ZhOzMWnR4yJ+RW1XImIPsD1aNSz4T4fyP7zlQb56hw=
-github.com/jackc/pgx/v5 v5.9.2/go.mod h1:mal1tBGAFfLHvZzaYh77YS/eC6IX9OWbRV1QIIM0Jn4=
+github.com/jackc/pgx/v5 v5.10.0 h1:VhSvgU2jSli8o3AqIEOTJr7rZwAEUVo4E4XhR94Zfr0=
+github.com/jackc/pgx/v5 v5.10.0/go.mod h1:mal1tBGAFfLHvZzaYh77YS/eC6IX9OWbRV1QIIM0Jn4=
 github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/jcmturner/aescts/v2 v2.0.0 h1:9YKLH6ey7H4eDBXW8khjYslgyqG2xZikXP0EQFKrle8=
