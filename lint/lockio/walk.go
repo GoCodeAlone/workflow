@@ -192,11 +192,24 @@ func (w *returnPathWalker) walkBlock(stmts []ast.Stmt, sawAcquire, releaseSeen b
 		case *ast.BlockStmt:
 			w.walkBlock(s.List, sawAcquire, releaseSeen)
 		case *ast.ForStmt:
-			// Init/Cond/Post execute unconditionally on reaching this
-			// statement (Init and Cond at least once; Post only after a
-			// completed iteration, but a call there is still reachable
-			// before any return inside Body), so — like IfStmt's Init/Cond —
-			// they extend the running state for the loop body.
+			// Init and Cond execute unconditionally before the body's first
+			// iteration, so — like IfStmt's Init/Cond — they extend the
+			// running state for the loop body soundly in both directions
+			// (sawAcquire and releaseSeen).
+			//
+			// Post is different and needs asymmetric treatment: it runs
+			// only after a completed, non-returning iteration — never
+			// before the body's first entry. Folding sawAcquire from Post
+			// is still safe (it can only make the checker more suspicious
+			// of an unqualified return, matching this checker's
+			// over-flag-over-under-flag design), but folding releaseSeen
+			// from Post is unsound: a release call written in Post would
+			// make the checker believe the body's first-iteration return
+			// path is already covered when it never actually is on that
+			// iteration, masking a genuine leak (a real gap found in
+			// quality review of a downstream backport of this exact case —
+			// see TestForLoopPostReleaseDoesNotMaskFirstIterationLeak). So
+			// Post contributes to sawAcquire only.
 			if s.Init != nil {
 				sawAcquire = sawAcquire || nodeContainsCall(s.Init, w.cfg.isAcquire)
 				releaseSeen = releaseSeen || nodeContainsSyncCall(s.Init, w.cfg.isRelease)
@@ -205,7 +218,6 @@ func (w *returnPathWalker) walkBlock(stmts []ast.Stmt, sawAcquire, releaseSeen b
 			releaseSeen = releaseSeen || nodeContainsSyncCall(s.Cond, w.cfg.isRelease)
 			if s.Post != nil {
 				sawAcquire = sawAcquire || nodeContainsCall(s.Post, w.cfg.isAcquire)
-				releaseSeen = releaseSeen || nodeContainsSyncCall(s.Post, w.cfg.isRelease)
 			}
 			if s.Body != nil {
 				w.walkBlock(s.Body.List, sawAcquire, releaseSeen)

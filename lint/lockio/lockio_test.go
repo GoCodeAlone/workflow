@@ -164,6 +164,37 @@ func (a *App) badForInitAcquireLeaksInBody() error {
 	}
 }
 
+// TestForLoopPostReleaseDoesNotMaskFirstIterationLeak is a regression guard
+// for a real gap found in quality review of a downstream backport of this
+// exact ForStmt case (workflow-compute's local mutation-lifecycle guard
+// test): unlike Init/Cond (and RangeStmt's X, SwitchStmt's Tag,
+// TypeSwitchStmt's Assign — all of which execute unconditionally before any
+// entry into their body), a for-loop's Post clause only runs after a
+// completed, non-returning iteration — never before the body's first entry.
+// Folding a release call found in Post into releaseSeen before recursing
+// into Body made the checker believe the body's first-iteration return path
+// was already covered when it never is on that iteration — a demonstrated
+// false negative in the one direction this checker's design explicitly
+// favors avoiding (over-flagging is acceptable, under-flagging is not).
+func TestForLoopPostReleaseDoesNotMaskFirstIterationLeak(t *testing.T) {
+	fset, f := parseFixture(t, `
+func (a *App) badForPostReleaseMasksFirstIterationLeak() error {
+	for i := 0; i < 3; a.Commit(0) {
+		a.AcquireLease()
+		if somethingWrong() {
+			return errors.New("nope")
+		}
+		i++
+	}
+	return nil
+}
+`)
+	violations := FindViolations(fset, []*ast.File{f}, testConfig())
+	if !hasViolation(violations, "badForPostReleaseMasksFirstIterationLeak", ClassUncoveredReturnPath) {
+		t.Fatalf("checker bug: a release call in a for-loop's Post clause masked a genuine leak on the body's first-iteration return path; violations=%+v", violations)
+	}
+}
+
 func TestSwitchHeaderAcquireIsDetectedInBody(t *testing.T) {
 	fset, f := parseFixture(t, `
 func (a *App) badSwitchInitAcquireLeaksInBody() error {
