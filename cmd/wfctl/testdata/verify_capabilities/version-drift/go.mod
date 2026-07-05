@@ -7,7 +7,7 @@ require github.com/GoCodeAlone/workflow v0.62.0
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/GoCodeAlone/go-plugin v1.7.0 // indirect
-	github.com/GoCodeAlone/modular v1.13.4 // indirect
+	github.com/GoCodeAlone/modular v1.13.5 // indirect
 	github.com/GoCodeAlone/yaegi v0.17.2 // indirect
 	github.com/cloudevents/sdk-go/v2 v2.16.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

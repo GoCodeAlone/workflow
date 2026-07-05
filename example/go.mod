@@ -5,7 +5,7 @@ go 1.26.4
 replace github.com/GoCodeAlone/workflow => ../
 
 require (
-	github.com/GoCodeAlone/modular v1.13.4
+	github.com/GoCodeAlone/modular v1.13.5
 	github.com/GoCodeAlone/workflow v0.0.0-00010101000000-000000000000
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 )
