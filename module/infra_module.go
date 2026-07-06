@@ -115,8 +115,8 @@ func (m *InfraModule) Init(app modular.Application) error {
 	return nil
 }
 
-// registerDeployDrivers registers deploy-capable drivers at "<name>" (and
-// "<name>.bluegreen" / "<name>.canary" if available).
+// registerDeployDrivers registers the highest-priority deploy-capable driver at
+// "<name>" for pipeline deploy steps.
 func (m *InfraModule) registerDeployDrivers(app modular.Application) {
 	// PrevalidatedRollingDriverProvider → register at "<name>" through the
 	// legacy step.deploy_blue_green service contract.
