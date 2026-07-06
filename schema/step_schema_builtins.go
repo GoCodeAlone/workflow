@@ -2684,7 +2684,7 @@ func (r *StepSchemaRegistry) registerBuiltins() {
 		Plugin:      "cicd",
 		Description: "Deploys an image using blue/green strategy: creates a green environment, verifies it, switches traffic, and destroys the old blue environment.",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "service", Type: FieldTypeString, Description: "BlueGreenDriver service name", Required: true},
+			{Key: "service", Type: FieldTypeString, Description: "PrevalidatedRollingDriver or legacy BlueGreenDriver service name", Required: true},
 			{Key: "image", Type: FieldTypeString, Description: "Docker image to deploy (template expressions supported)", Required: true},
 			{Key: "health_check", Type: FieldTypeMap, Description: "Health check config (path string, timeout duration)"},
 			{Key: "traffic_switch", Type: FieldTypeSelect, Description: "Traffic switch mechanism", Options: []string{"dns", "lb"}, DefaultValue: "lb"},

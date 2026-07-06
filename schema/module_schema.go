@@ -3010,7 +3010,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Category:    "deployment",
 		Description: "Deploys using blue/green strategy: creates green environment, verifies it, switches traffic, destroys blue",
 		ConfigFields: []ConfigFieldDef{
-			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "BlueGreenDriver service name"},
+			{Key: "service", Label: "Service", Type: FieldTypeString, Required: true, Description: "PrevalidatedRollingDriver or legacy BlueGreenDriver service name"},
 			{Key: "image", Label: "Image", Type: FieldTypeString, Required: true, Description: "Docker image to deploy"},
 			{Key: "health_check", Label: "Health Check", Type: FieldTypeMap, Description: "Health check config: {path, timeout}"},
 			{Key: "traffic_switch", Label: "Traffic Switch", Type: FieldTypeSelect, Options: []string{"dns", "lb"}, Description: "Traffic switch mechanism", DefaultValue: "lb"},

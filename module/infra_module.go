@@ -102,10 +102,12 @@ func (m *InfraModule) Init(app modular.Application) error {
 	// step.deploy_rolling (and friends) can resolve this module by its plain name.
 	//
 	// Priority (highest first):
-	//   1. Provider implements BlueGreenDriverProvider → also exposes BlueGreenDriver.
-	//   2. Provider implements CanaryDriverProvider    → also exposes CanaryDriver.
-	//   3. Provider implements DeployDriverProvider    → uses a provider-supplied driver.
-	//   4. Fallback: wrap the ResourceDriver in an infraDeployAdapter.
+	//   1. Provider implements PrevalidatedRollingDriverProvider → exposes the
+	//      prevalidated rolling driver through the legacy blue/green step contract.
+	//   2. Provider implements BlueGreenDriverProvider → also exposes BlueGreenDriver.
+	//   3. Provider implements CanaryDriverProvider    → also exposes CanaryDriver.
+	//   4. Provider implements DeployDriverProvider    → uses a provider-supplied driver.
+	//   5. Fallback: wrap the ResourceDriver in an infraDeployAdapter.
 	//
 	// Registrations are best-effort; if a service already exists at "<name>" we
 	// skip silently rather than fail the whole module.
@@ -113,9 +115,18 @@ func (m *InfraModule) Init(app modular.Application) error {
 	return nil
 }
 
-// registerDeployDrivers registers deploy-capable drivers at "<name>" (and
-// "<name>.bluegreen" / "<name>.canary" if available).
+// registerDeployDrivers registers the highest-priority deploy-capable driver at
+// "<name>" for pipeline deploy steps.
 func (m *InfraModule) registerDeployDrivers(app modular.Application) {
+	// PrevalidatedRollingDriverProvider → register at "<name>" through the
+	// legacy step.deploy_blue_green service contract.
+	if prp, ok := m.provider.(PrevalidatedRollingDriverProvider); ok {
+		if prd := prp.ProvidePrevalidatedRollingDriver(m.name); prd != nil {
+			_ = app.RegisterService(m.name, prd)
+			return
+		}
+	}
+
 	// BlueGreenDriverProvider → register at "<name>" as BlueGreenDriver.
 	if bgp, ok := m.provider.(BlueGreenDriverProvider); ok {
 		if bgd := bgp.ProvideBlueGreenDriver(m.name); bgd != nil {
