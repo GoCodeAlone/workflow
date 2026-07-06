@@ -5023,7 +5023,7 @@
           "key": "service",
           "label": "Service",
           "type": "string",
-          "description": "BlueGreenDriver service name",
+          "description": "PrevalidatedRollingDriver or legacy BlueGreenDriver service name",
           "required": true
         },
         {

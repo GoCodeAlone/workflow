@@ -93,9 +93,10 @@ func (d *deployCapableDriver) DestroyCanary(_ context.Context) error {
 
 type deployProviderMock struct {
 	*infraMockProvider
-	deployDriver *deployCapableDriver
-	bgDriver     *deployCapableDriver
-	canaryDriver *deployCapableDriver
+	deployDriver       *deployCapableDriver
+	bgDriver           *deployCapableDriver
+	prevalidatedDriver *deployCapableDriver
+	canaryDriver       *deployCapableDriver
 }
 
 func (p *deployProviderMock) ProvideDeployDriver(_ string) DeployDriver {
@@ -108,6 +109,13 @@ func (p *deployProviderMock) ProvideDeployDriver(_ string) DeployDriver {
 func (p *deployProviderMock) ProvideBlueGreenDriver(_ string) BlueGreenDriver {
 	if p.bgDriver != nil {
 		return p.bgDriver
+	}
+	return nil
+}
+
+func (p *deployProviderMock) ProvidePrevalidatedRollingDriver(_ string) PrevalidatedRollingDriver {
+	if p.prevalidatedDriver != nil {
+		return p.prevalidatedDriver
 	}
 	return nil
 }
@@ -272,6 +280,52 @@ func TestBridge_BlueGreenDriverProvider_FullLifecycle(t *testing.T) {
 	}
 	if !bgd.greenCreated || !bgd.trafficSwitched || !bgd.blueDestroyed {
 		t.Error("expected full blue/green lifecycle to be executed")
+	}
+}
+
+// ─── Tests: PrevalidatedRollingDriverProvider optional interface ─────────────
+
+func TestBridge_PrevalidatedRollingDriverProvider_RegisteredAtPlainName(t *testing.T) {
+	baseProvider, _ := newTestProvider("aws", "infra.container_service")
+	driver := newDeployCapableDriver("nginx:1.24", 1)
+	provider := &deployProviderMock{
+		infraMockProvider:  baseProvider,
+		prevalidatedDriver: driver,
+	}
+	m := NewInfraModule("my-svc", "infra.container_service", map[string]any{"provider": "aws"})
+	app := initWithProvider(t, m, "aws", provider)
+
+	svc, ok := app.services["my-svc"]
+	if !ok {
+		t.Fatal("expected 'my-svc' to be registered")
+	}
+	if _, ok := svc.(PrevalidatedRollingDriver); !ok {
+		t.Errorf("expected PrevalidatedRollingDriver, got %T", svc)
+	}
+
+	legacy, err := resolveBlueGreenDriver(app, "my-svc", "test-step")
+	if err != nil {
+		t.Fatalf("resolveBlueGreenDriver: %v", err)
+	}
+	if legacy != BlueGreenDriver(driver) {
+		t.Fatalf("resolved legacy driver = %T, want provider-supplied prevalidated driver", legacy)
+	}
+}
+
+func TestBridge_PrevalidatedRollingDriverProvider_PreferredOverLegacyBlueGreenProvider(t *testing.T) {
+	baseProvider, _ := newTestProvider("aws", "infra.container_service")
+	legacy := newDeployCapableDriver("nginx:1.24", 1)
+	prevalidated := newDeployCapableDriver("nginx:1.25", 2)
+	provider := &deployProviderMock{
+		infraMockProvider:  baseProvider,
+		bgDriver:           legacy,
+		prevalidatedDriver: prevalidated,
+	}
+	m := NewInfraModule("my-svc", "infra.container_service", map[string]any{"provider": "aws"})
+	app := initWithProvider(t, m, "aws", provider)
+
+	if app.services["my-svc"] != PrevalidatedRollingDriver(prevalidated) {
+		t.Fatalf("expected PrevalidatedRollingDriverProvider to take precedence over BlueGreenDriverProvider")
 	}
 }
 

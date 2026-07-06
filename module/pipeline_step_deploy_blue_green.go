@@ -8,18 +8,32 @@ import (
 	"github.com/GoCodeAlone/modular"
 )
 
+// PrevalidatedRollingDriver extends DeployDriver with the ability to validate a
+// new environment before rolling the validated image onto the stable service.
+//
+// The method names match the historical BlueGreenDriver contract so existing
+// deploy_blue_green steps keep working while provider implementations migrate to
+// the more accurate name.
+type PrevalidatedRollingDriver interface {
+	DeployDriver
+	// CreateGreen creates a new validation environment with the given image.
+	CreateGreen(ctx context.Context, image string) error
+	// SwitchTraffic promotes the validated image according to the provider's
+	// deployment strategy.
+	SwitchTraffic(ctx context.Context) error
+	// DestroyBlue tears down the temporary validation environment.
+	DestroyBlue(ctx context.Context) error
+	// GreenEndpoint returns the URL/address of the validation environment.
+	GreenEndpoint(ctx context.Context) (string, error)
+}
+
 // BlueGreenDriver extends DeployDriver with the ability to manage two environments
 // (blue/green) and switch traffic between them.
+//
+// Deprecated: use PrevalidatedRollingDriver for providers whose implementation
+// validates a candidate deployment before rolling the stable service.
 type BlueGreenDriver interface {
-	DeployDriver
-	// CreateGreen creates a new "green" environment with the given image.
-	CreateGreen(ctx context.Context, image string) error
-	// SwitchTraffic routes all traffic to the green environment.
-	SwitchTraffic(ctx context.Context) error
-	// DestroyBlue tears down the old "blue" environment.
-	DestroyBlue(ctx context.Context) error
-	// GreenEndpoint returns the URL/address of the green environment.
-	GreenEndpoint(ctx context.Context) (string, error)
+	PrevalidatedRollingDriver
 }
 
 // resolveBlueGreenDriver looks up a BlueGreenDriver from the service registry.

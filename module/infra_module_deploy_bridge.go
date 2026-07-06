@@ -19,9 +19,21 @@ type DeployDriverProvider interface {
 
 // BlueGreenDriverProvider is an optional extension of interfaces.IaCProvider
 // for providers that support blue/green deployments.
+//
+// Deprecated: use PrevalidatedRollingDriverProvider for providers whose
+// strategy validates a candidate deployment before rolling the stable service.
 type BlueGreenDriverProvider interface {
 	// ProvideBlueGreenDriver returns a BlueGreenDriver for the named resource, or nil.
 	ProvideBlueGreenDriver(resourceName string) BlueGreenDriver
+}
+
+// PrevalidatedRollingDriverProvider is an optional extension of
+// interfaces.IaCProvider for providers that support prevalidated rolling
+// deployments.
+type PrevalidatedRollingDriverProvider interface {
+	// ProvidePrevalidatedRollingDriver returns a PrevalidatedRollingDriver for
+	// the named resource, or nil.
+	ProvidePrevalidatedRollingDriver(resourceName string) PrevalidatedRollingDriver
 }
 
 // CanaryDriverProvider is an optional extension of interfaces.IaCProvider

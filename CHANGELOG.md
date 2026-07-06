@@ -23,6 +23,14 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ## [Unreleased]
 
+### Added
+
+- `module.PrevalidatedRollingDriver` and
+  `module.PrevalidatedRollingDriverProvider` as compatibility aliases for
+  providers whose deployment strategy validates a candidate image before rolling
+  the stable service. The legacy `BlueGreenDriver` names remain available for
+  existing providers and `step.deploy_blue_green` configs.
+
 ### Fixed
 
 - Plugin-owned top-level wfctl commands now resolve project-local installs from
