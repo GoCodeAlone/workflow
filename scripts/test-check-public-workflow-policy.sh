@@ -120,16 +120,39 @@ grep_files_fail_closed() {
   fi
   return "${status}"
 }
-grep_workflow_files() {
+workflow_files=()
+collect_workflow_files() {
+  local include_yaml="$1"
+  local dotglob_was_set=0
+  local nullglob_was_set=0
   local workflow_file
-  local workflow_files=()
-  for workflow_file in \
-    "${repo_root}/.github/workflows"/*.yml \
-    "${repo_root}/.github/workflows"/*.yaml; do
+  local workflow_candidates=()
+  workflow_files=()
+  if shopt -q dotglob; then
+    dotglob_was_set=1
+  fi
+  if shopt -q nullglob; then
+    nullglob_was_set=1
+  fi
+  shopt -s dotglob nullglob
+  workflow_candidates=("${repo_root}/.github/workflows"/*.yml)
+  if [[ "${include_yaml}" -eq 1 ]]; then
+    workflow_candidates+=("${repo_root}/.github/workflows"/*.yaml)
+  fi
+  if [[ "${dotglob_was_set}" -eq 0 ]]; then
+    shopt -u dotglob
+  fi
+  if [[ "${nullglob_was_set}" -eq 0 ]]; then
+    shopt -u nullglob
+  fi
+  for workflow_file in "${workflow_candidates[@]}"; do
     if [[ -f "${workflow_file}" && ! -L "${workflow_file}" ]]; then
       workflow_files+=("${workflow_file}")
     fi
   done
+}
+grep_workflow_files() {
+  collect_workflow_files 1
   if [[ "${#workflow_files[@]}" -eq 0 ]]; then
     return 1
   fi
@@ -140,7 +163,12 @@ workflow_match_count() {
   local pattern="$1"
   local matches
   local status=0
-  matches="$(grep -Eoh -- "${pattern}" "${repo_root}/.github/workflows"/*.yml)" || status=$?
+  collect_workflow_files 0
+  if [[ "${#workflow_files[@]}" -eq 0 ]]; then
+    printf '0\n'
+    return
+  fi
+  matches="$(grep -Eoh -- "${pattern}" "${workflow_files[@]}")" || status=$?
   if [[ "${status}" -gt 1 ]]; then
     return "${status}"
   fi
@@ -650,29 +678,53 @@ fi
 
 legacy_go_patch='1.26.'
 legacy_go_patch+='4'
+scan_active_go_pin_batch() {
+  local status=0
+  grep -anHF -- "${legacy_go_patch}" "$@" || status=$?
+  if [[ "${status}" -gt 1 ]]; then
+    echo "failed to scan active/current Go pins" >&2
+  fi
+  return "${status}"
+}
 scan_active_go_pins() (
+  local archive_file_list="${tmp_dir}/active-go-pin-files"
+  local archive_files=()
   local archive_path
   local found=1
   local status
-  cd "${repo_root}"
+  if ! cd "${repo_root}"; then
+    echo "failed to enter active/current Go pin scan root" >&2
+    exit 2
+  fi
+  if ! find . \
+    \( -name .git -o \( -type d -path './docs/plans' \) \) -prune -o \
+    -type f -print0 >"${archive_file_list}"; then
+    echo "failed to enumerate active/current Go pin files" >&2
+    exit 2
+  fi
   while IFS= read -r -d '' archive_path; do
-    case "${archive_path}" in
-      docs/plans/*) continue ;;
-    esac
-    if [[ ! -f "./${archive_path}" || -L "./${archive_path}" ]]; then
+    archive_files+=("${archive_path}")
+    if [[ "${#archive_files[@]}" -lt 64 ]]; then
       continue
     fi
     status=0
-    grep -nHF -- "${legacy_go_patch}" "./${archive_path}" || status=$?
+    scan_active_go_pin_batch "${archive_files[@]}" || status=$?
     case "${status}" in
       0) found=0 ;;
       1) ;;
-      *)
-        echo "failed to scan active/current Go pins" >&2
-        exit "${status}"
-        ;;
+      *) exit "${status}" ;;
     esac
-  done <"${archive_paths}"
+    archive_files=()
+  done <"${archive_file_list}"
+  if [[ "${#archive_files[@]}" -gt 0 ]]; then
+    status=0
+    scan_active_go_pin_batch "${archive_files[@]}" || status=$?
+    case "${status}" in
+      0) found=0 ;;
+      1) ;;
+      *) exit "${status}" ;;
+    esac
+  fi
   exit "${found}"
 )
 if active_go_1264="$(scan_active_go_pins 2>&1)"; then
