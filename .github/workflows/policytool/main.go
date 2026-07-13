@@ -140,7 +140,7 @@ func validateAuthorityManifest(manifest authorityManifest) []string {
 			if previous != "" && file.Path <= previous {
 				findings = append(findings, "authority bundle files must be strictly sorted by path")
 			}
-			if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(file.SHA256) {
+			if !validSHA256Hex(file.SHA256) {
 				findings = append(findings, fmt.Sprintf("authority bundle contains invalid hash for %s", file.Path))
 			}
 			seen[file.Path] = true
@@ -413,7 +413,7 @@ func stagedAuthorityMatches(group trustGroup, policy trustPolicy) bool {
 		if entry.State != "staged" || entry.WorkflowPath != group.Path || entry.ContextSHA256 != group.ContextSHA256 ||
 			rawPath != cleanPath || filepath.IsAbs(rawPath) || path.IsAbs(slashPath) || filepath.VolumeName(rawPath) != "" ||
 			cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, "../") ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.SHA256) || strings.TrimSpace(entry.Rationale) == "" || seenExecutables[key] {
+			!validSHA256Hex(entry.SHA256) || strings.TrimSpace(entry.Rationale) == "" || seenExecutables[key] {
 			return false
 		}
 		seenExecutables[key] = true
@@ -424,7 +424,7 @@ func stagedAuthorityMatches(group trustGroup, policy trustPolicy) bool {
 		key := commandKey(entry.Path, command, entry.StatementSHA256, entry.ContextSHA256)
 		if entry.State != "staged" || entry.Path != group.Path || entry.ContextSHA256 != group.ContextSHA256 ||
 			command == "" || command != path.Base(command) || categoricallyUnallowlistableCommandName(command) ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.StatementSHA256) || strings.TrimSpace(entry.Rationale) == "" || seenCommands[key] {
+			!validSHA256Hex(entry.StatementSHA256) || strings.TrimSpace(entry.Rationale) == "" || seenCommands[key] {
 			return false
 		}
 		seenCommands[key] = true
@@ -436,7 +436,7 @@ func stagedAuthorityMatches(group trustGroup, policy trustPolicy) bool {
 		validReference := immutableActionReference(uses)
 		if entry.State != "staged" || entry.Path != group.Path || entry.ContextSHA256 != group.ContextSHA256 ||
 			!validReference || strings.Contains(uses, "${{") || providerMarker(uses) || strings.Contains(strings.ToLower(uses), "digitalocean/") ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.NodeSHA256) || strings.TrimSpace(entry.Rationale) == "" || seenActions[key] {
+			!validSHA256Hex(entry.NodeSHA256) || strings.TrimSpace(entry.Rationale) == "" || seenActions[key] {
 			return false
 		}
 		seenActions[key] = true
@@ -452,7 +452,7 @@ func validTrustGroupShape(group trustGroup) bool {
 		validPath = validPath && strings.HasPrefix(cleanPath, ".github/workflows/") &&
 			(path.Ext(cleanPath) == ".yml" || path.Ext(cleanPath) == ".yaml")
 	}
-	validContext := group.Presence == "present" && regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(group.ContextSHA256)
+	validContext := group.Presence == "present" && validSHA256Hex(group.ContextSHA256)
 	validAbsent := group.Presence == "absent" && group.ContextSHA256 == ""
 	return validPath && (group.State == "active" || group.State == "staged") && (validContext || validAbsent)
 }
@@ -972,6 +972,7 @@ var (
 	literalVarsIndexRE   = regexp.MustCompile(`(?i)^vars\[[[:space:]]*['"][A-Za-z_][A-Za-z0-9_]*['"][[:space:]]*\]$`)
 	envAssignmentRE      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 	exactGoVersionRE     = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
+	sha256HexRE          = regexp.MustCompile(`^[a-f0-9]{64}$`)
 )
 
 var providerSDKMarkers = [...]string{
@@ -980,6 +981,10 @@ var providerSDKMarkers = [...]string{
 	"azure-sdk",
 	"cloud.google.com/go",
 	"google-cloud-",
+}
+
+func validSHA256Hex(value string) bool {
+	return sha256HexRE.MatchString(value)
 }
 
 func githubExpressions(value string) ([]string, bool) {
@@ -2249,8 +2254,8 @@ func main() {
 		}
 		entry.Path = path.Clean(slashPath)
 		entry.WorkflowPath = path.Clean(strings.ReplaceAll(strings.TrimSpace(entry.WorkflowPath), "\\", "/"))
-		if strings.TrimSpace(entry.Rationale) == "" || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.SHA256) ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.ContextSHA256) || (entry.State != "active" && entry.State != "staged") {
+		if strings.TrimSpace(entry.Rationale) == "" || !validSHA256Hex(entry.SHA256) ||
+			!validSHA256Hex(entry.ContextSHA256) || (entry.State != "active" && entry.State != "staged") {
 			findings.add("invalid executable allowlist entry %s", entry.Path)
 			continue
 		}
@@ -2308,8 +2313,8 @@ func main() {
 		if entry.Path == "." || !strings.HasPrefix(entry.Path, ".github/workflows/") ||
 			(entry.State != "active" && entry.State != "staged") ||
 			entry.Command == "" || entry.Command != path.Base(entry.Command) ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.StatementSHA256) ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.ContextSHA256) ||
+			!validSHA256Hex(entry.StatementSHA256) ||
+			!validSHA256Hex(entry.ContextSHA256) ||
 			strings.TrimSpace(entry.Rationale) == "" {
 			findings.add("invalid command allowlist entry for %s: exact workflow path, command, statementSHA256, contextSHA256, and rationale are required", entry.Path)
 			continue
@@ -2351,8 +2356,8 @@ func main() {
 		if entry.Path == "." || !strings.HasPrefix(entry.Path, ".github/workflows/") ||
 			(entry.State != "active" && entry.State != "staged") ||
 			!validReference || strings.Contains(entry.Uses, "${{") ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.NodeSHA256) ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.ContextSHA256) || strings.TrimSpace(entry.Rationale) == "" {
+			!validSHA256Hex(entry.NodeSHA256) ||
+			!validSHA256Hex(entry.ContextSHA256) || strings.TrimSpace(entry.Rationale) == "" {
 			findings.add("invalid action allowlist entry for %s: exact workflow path, immutable uses reference, nodeSHA256, contextSHA256, and rationale are required", entry.Path)
 			continue
 		}
@@ -2391,7 +2396,7 @@ func main() {
 		key := entry.Path + "\x00" + entry.Secret
 		seenKey := key + "\x00" + entry.ContextSHA256
 		if entry.Path == "." || strings.TrimSpace(entry.Secret) == "" ||
-			!regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(entry.ContextSHA256) ||
+			!validSHA256Hex(entry.ContextSHA256) ||
 			(entry.State != "active" && entry.State != "staged") || strings.TrimSpace(entry.Rationale) == "" {
 			findings.add("invalid allowlist entry for %s: exact path, secret, and rationale are required", entry.Path)
 		}

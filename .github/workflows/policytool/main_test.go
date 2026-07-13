@@ -2,14 +2,76 @@ package main
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/syntax"
 )
+
+func TestSHA256HexPatternIsCompiledOnce(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+	const pattern = `^[a-f0-9]{64}$`
+	compileCount := 0
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "MustCompile" {
+			return true
+		}
+		packageName, ok := selector.X.(*ast.Ident)
+		if !ok || packageName.Name != "regexp" {
+			return true
+		}
+		literal, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			t.Fatalf("unquote regexp pattern: %v", err)
+		}
+		if value == pattern {
+			compileCount++
+		}
+		return true
+	})
+	if compileCount != 1 {
+		t.Fatalf("SHA-256 validation pattern compiled %d times, want exactly once", compileCount)
+	}
+}
+
+func TestValidSHA256Hex(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"lowercase hex", strings.Repeat("0123456789abcdef", 4), true},
+		{"uppercase", strings.Repeat("A", 64), false},
+		{"short", strings.Repeat("a", 63), false},
+		{"nonhex", strings.Repeat("a", 63) + "g", false},
+		{"long", strings.Repeat("a", 65), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := validSHA256Hex(test.value); got != test.want {
+				t.Fatalf("validSHA256Hex(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
+	}
+}
 
 func parseShell(t *testing.T, source string) *syntax.File {
 	t.Helper()

@@ -74,8 +74,8 @@ verify_policytool_file() {
 
 verify_policytool() {
   verify_policytool_layout
-  verify_policytool_file main.go 1345667a472f7666790c8e0d6aebbc80aec7070b7495e899bbad2fa1d4355fef
-  verify_policytool_file main_test.go 44333987bd05debcf6aee6b91ef2c7d12a17ca3581b8dfa92b82b6505e96b0b3
+  verify_policytool_file main.go 8dba6ad341fa07644868fd43717aff162c4feae1694ee9a122ef4cd401214a00
+  verify_policytool_file main_test.go a88f4ec70a2736e54bf887594da855fb6d25d2cecb35321cd5fa8a2455304212
   verify_policytool_file go.mod b29b886c829ddf6f83b795df62b92093a6c06d1c5a0ff6842dc36ae352094790
   verify_policytool_file go.sum 790ef858e5aeed12269a69e764ac69c02c3877678b0e7d9384ad3728b6e09f6c
 }

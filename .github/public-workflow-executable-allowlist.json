@@ -12,7 +12,7 @@
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "432b3e60e72e58f92988c036db4d74b02cb6dbd39b67a7cd856c081b87c045e0",
     "state": "active",
-    "sha256": "74dd138f511355b778bbf11a122c17b821d7b683a8c07729d0204d8708afe30f",
+    "sha256": "92b04562e6a41aa31bd33750b0d527cec2c619f56f630e4b1c53a12bc95192ee",
     "rationale": "Enforces the credential-free public workflow boundary in CI."
   },
   {
@@ -28,7 +28,7 @@
     "workflowPath": ".github/workflows/public-workflow-policy.yml",
     "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
-    "sha256": "74dd138f511355b778bbf11a122c17b821d7b683a8c07729d0204d8708afe30f",
+    "sha256": "92b04562e6a41aa31bd33750b0d527cec2c619f56f630e4b1c53a12bc95192ee",
     "rationale": "Runs the trusted policy wrapper against inert candidate workflow data."
   }
 ]
