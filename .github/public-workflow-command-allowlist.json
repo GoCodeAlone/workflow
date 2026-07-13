@@ -915,31 +915,31 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "$assignment",
     "statementSHA256": "17130f0e2508de3af58c07c7035c18f65ed543090aa3a4ba91d966a3997fd947",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "$assignment",
-    "statementSHA256": "330d8f8e7f7c6ef64629bc89792606675147dc11da82026cf74de94a4ec18740",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
-    "state": "active",
-    "rationale": "Exact reviewed fail-closed snapshot release listing for pre-release cleanup."
-  },
-  {
-    "path": ".github/workflows/pre-release.yml",
-    "command": "$assignment",
     "statementSHA256": "40992f3fe8ae21ed7161e2bb2df5699a217c529ecf2e3d67430b9250cfad6c4c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed fail-closed GitHub DELETE helper for pre-release snapshot cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "$assignment",
+    "statementSHA256": "b0ef2141de077e8b9a726d6098ed77c483f73e2a5e84e4fefbd1d710b10ddffe",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
+    "state": "active",
+    "rationale": "Exact reviewed URI-encoding snapshot release listing for pre-release cleanup."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "$assignment",
     "statementSHA256": "bee7f91ad7fd08ae67f0f9af901e8afacd6da25045007cc145266ca72f9d7cd0",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
   },
@@ -947,7 +947,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "$assignment",
     "statementSHA256": "d949518edc4df9d96ee9c32c28d9c8dec608757b540c726b58ea7af9a71f75d8",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
   },
@@ -955,23 +955,23 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "$assignment",
     "statementSHA256": "f1aa3b07b8aadb3a72296066e1d2b4b9786855903f31b71a35009b558cccc71b",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": ":",
-    "statementSHA256": "330d8f8e7f7c6ef64629bc89792606675147dc11da82026cf74de94a4ec18740",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "b0ef2141de077e8b9a726d6098ed77c483f73e2a5e84e4fefbd1d710b10ddffe",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed fail-closed snapshot release listing for pre-release cleanup."
+    "rationale": "Exact reviewed URI-encoding snapshot release listing for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "cd",
     "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed cd statement for pre-release.yml automation."
   },
@@ -979,7 +979,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "cd",
     "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed cd statement for pre-release.yml automation."
   },
@@ -987,47 +987,55 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "cd",
     "statementSHA256": "bf97c2b1c84c2252a469aab4dce99637a3408fe5f891af7ad7f0ab209b0f2f7d",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed cd statement for pre-release.yml automation."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "continue",
-    "statementSHA256": "9651d76a9d472aa9d0c33a54fda931ff7498302c523a4089d0b49ee2c5fd6cdc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "2fd8776961639fe68ab284365ff136a4515a35d6bd6def97b500ad6b3d5f7985",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed release-and-tag deletion loop for pre-release snapshot cleanup."
+    "rationale": "Exact reviewed whole-list validation pass for pre-release cleanup."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "continue",
+    "statementSHA256": "e4882f75f2755c94163a114c913cc795ff765c9705405b2ee958dab57c0f80f4",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
+    "state": "active",
+    "rationale": "Exact reviewed post-validation deletion pass for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "cp",
     "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed cp statement for pre-release.yml automation."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "delete_github_resource",
-    "statementSHA256": "9651d76a9d472aa9d0c33a54fda931ff7498302c523a4089d0b49ee2c5fd6cdc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "e4882f75f2755c94163a114c913cc795ff765c9705405b2ee958dab57c0f80f4",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed release-and-tag deletion loop for pre-release snapshot cleanup."
+    "rationale": "Exact reviewed post-validation deletion pass for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "echo",
-    "statementSHA256": "330d8f8e7f7c6ef64629bc89792606675147dc11da82026cf74de94a4ec18740",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "2fd8776961639fe68ab284365ff136a4515a35d6bd6def97b500ad6b3d5f7985",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed fail-closed snapshot release listing for pre-release cleanup."
+    "rationale": "Exact reviewed whole-list validation pass for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "echo",
     "statementSHA256": "33262c9f58255699a2419fc78e1802c1cbeb1589608fe06a55dbf7456bc8437c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed echo statement for pre-release.yml automation."
   },
@@ -1035,7 +1043,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "echo",
     "statementSHA256": "40992f3fe8ae21ed7161e2bb2df5699a217c529ecf2e3d67430b9250cfad6c4c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed fail-closed GitHub DELETE helper for pre-release snapshot cleanup."
   },
@@ -1043,47 +1051,39 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "echo",
     "statementSHA256": "79b103b8187128596c08f49b6e6d457e4e2194313b29e2bc42dc9e6484d9d210",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed echo statement for pre-release.yml automation."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "echo",
-    "statementSHA256": "9651d76a9d472aa9d0c33a54fda931ff7498302c523a4089d0b49ee2c5fd6cdc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "b0ef2141de077e8b9a726d6098ed77c483f73e2a5e84e4fefbd1d710b10ddffe",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed release-and-tag deletion loop for pre-release snapshot cleanup."
+    "rationale": "Exact reviewed URI-encoding snapshot release listing for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "exit",
-    "statementSHA256": "330d8f8e7f7c6ef64629bc89792606675147dc11da82026cf74de94a4ec18740",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "2fd8776961639fe68ab284365ff136a4515a35d6bd6def97b500ad6b3d5f7985",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed fail-closed snapshot release listing for pre-release cleanup."
+    "rationale": "Exact reviewed whole-list validation pass for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "exit",
-    "statementSHA256": "9651d76a9d472aa9d0c33a54fda931ff7498302c523a4089d0b49ee2c5fd6cdc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "b0ef2141de077e8b9a726d6098ed77c483f73e2a5e84e4fefbd1d710b10ddffe",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed release-and-tag deletion loop for pre-release snapshot cleanup."
-  },
-  {
-    "path": ".github/workflows/pre-release.yml",
-    "command": "gh",
-    "statementSHA256": "330d8f8e7f7c6ef64629bc89792606675147dc11da82026cf74de94a4ec18740",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
-    "state": "active",
-    "rationale": "Exact reviewed fail-closed snapshot release listing for pre-release cleanup."
+    "rationale": "Exact reviewed URI-encoding snapshot release listing for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "gh",
     "statementSHA256": "40992f3fe8ae21ed7161e2bb2df5699a217c529ecf2e3d67430b9250cfad6c4c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed fail-closed GitHub DELETE helper for pre-release snapshot cleanup."
   },
@@ -1091,15 +1091,23 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "gh",
     "statementSHA256": "504ef6312f839e2e5cea084c75ceaa8ad075f8c39ea9b958acc31756dab21bcc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed gh statement for pre-release.yml automation."
   },
   {
     "path": ".github/workflows/pre-release.yml",
+    "command": "gh",
+    "statementSHA256": "b0ef2141de077e8b9a726d6098ed77c483f73e2a5e84e4fefbd1d710b10ddffe",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
+    "state": "active",
+    "rationale": "Exact reviewed URI-encoding snapshot release listing for pre-release cleanup."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
     "command": "git",
     "statementSHA256": "17130f0e2508de3af58c07c7035c18f65ed543090aa3a4ba91d966a3997fd947",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed git statement for pre-release.yml automation."
   },
@@ -1107,7 +1115,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "git",
     "statementSHA256": "f1aa3b07b8aadb3a72296066e1d2b4b9786855903f31b71a35009b558cccc71b",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed git statement for pre-release.yml automation."
   },
@@ -1115,7 +1123,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "0a35542d7dae6ed6ef183178768c9c2698530b93d66f4db574d09a0a7eba68ed",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1123,7 +1131,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "40b7c79f0a0bab2d1781d59aba9d5a7ecab0daff76049ac14f0d90351b6ad909",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1131,7 +1139,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "5bcb9e1163c56899af4f7e03bf8306273129ce35736d6b1a3f9da50df9907b88",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1139,7 +1147,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "67937fa1d645693a707c385521c305c3719d3e75c405d2f8c00a56b7e8cf4382",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1147,7 +1155,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "7916340ef3a7fdd34023e4bf6c4559bd2fb8216d7513e532e619e1831eca6df3",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1155,7 +1163,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "7c60c515105c431fa332bc3d23711376e29ff65513e68ce5d595d81d504e684d",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1163,7 +1171,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "be92f2f5cb9c06b2eb838608df1209d60d51ff5fc91b3b5650147b709313e295",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1171,7 +1179,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "c4eb511062538e4d8dadc4ec87b8afa9885493e232d27d61e065314301f22cdc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1179,7 +1187,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "ce4c11049a331dde75f86f427931d352bc26806e00845c9ddb09b37ab5e6a296",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1187,7 +1195,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "e0b29b872409fc83f7d942b1cf86f1657b2bf349cc4f2412ce08dd48039c8d91",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1195,7 +1203,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "go",
     "statementSHA256": "f838e2989ad0c0e55fcc15089ebd3421ae2722ed2f39591119be5541b8b578e4",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed go statement for pre-release.yml automation."
   },
@@ -1203,7 +1211,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "ko",
     "statementSHA256": "33262c9f58255699a2419fc78e1802c1cbeb1589608fe06a55dbf7456bc8437c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed ko statement for pre-release.yml automation."
   },
@@ -1211,7 +1219,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "ko",
     "statementSHA256": "fc6c9b8445d56d49656d57a6ce55ed8510f31b6a6d929afef51b0d51405b371a",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed ko statement for pre-release.yml automation."
   },
@@ -1219,7 +1227,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "mkdir",
     "statementSHA256": "4836713ba787e4300751fff29bba230abdbcfb5ffc09f9048e4280fce2776d34",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed mkdir statement for pre-release.yml automation."
   },
@@ -1227,7 +1235,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "mkdir",
     "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed mkdir statement for pre-release.yml automation."
   },
@@ -1235,7 +1243,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "npm",
     "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed npm statement for pre-release.yml automation."
   },
@@ -1243,23 +1251,31 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "printf",
     "statementSHA256": "40992f3fe8ae21ed7161e2bb2df5699a217c529ecf2e3d67430b9250cfad6c4c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed fail-closed GitHub DELETE helper for pre-release snapshot cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "read",
-    "statementSHA256": "9651d76a9d472aa9d0c33a54fda931ff7498302c523a4089d0b49ee2c5fd6cdc",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "statementSHA256": "2fd8776961639fe68ab284365ff136a4515a35d6bd6def97b500ad6b3d5f7985",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
-    "rationale": "Exact reviewed release-and-tag deletion loop for pre-release snapshot cleanup."
+    "rationale": "Exact reviewed whole-list validation pass for pre-release cleanup."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "read",
+    "statementSHA256": "e4882f75f2755c94163a114c913cc795ff765c9705405b2ee958dab57c0f80f4",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
+    "state": "active",
+    "rationale": "Exact reviewed post-validation deletion pass for pre-release cleanup."
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "command": "return",
     "statementSHA256": "40992f3fe8ae21ed7161e2bb2df5699a217c529ecf2e3d67430b9250cfad6c4c",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed fail-closed GitHub DELETE helper for pre-release snapshot cleanup."
   },
@@ -1267,7 +1283,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "sha256sum",
     "statementSHA256": "7856813037b521f0d4827cec9cde7932854817b79e837da88e2c0d9ed8ea3e0a",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed sha256sum statement for pre-release.yml automation."
   },
@@ -1275,7 +1291,7 @@
     "path": ".github/workflows/pre-release.yml",
     "command": "tar",
     "statementSHA256": "e2946a02aad54fa01bebd92c94d8416e39f8fa40a40f02eb37bd22724ea8be13",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Exact reviewed tar statement for pre-release.yml automation."
   },

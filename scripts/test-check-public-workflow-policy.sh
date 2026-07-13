@@ -360,7 +360,7 @@ if [[ "$1" == "release" && "$2" == "list" ]]; then
   printf '%s\n' snapshot-test
   exit 0
 fi
-snapshot_list_jq='.[] | select(.tag_name | startswith("snapshot-")) | [.id, .tag_name] | @tsv'
+snapshot_list_jq='.[] | select(.tag_name | startswith("snapshot-")) | [.id, .tag_name, (.tag_name | @uri)] | @tsv'
 # The exact five-argument shape also asserts gh's default GET method: a
 # method override would add arguments and must not enter the list fake.
 if [[ "$#" -eq 5 && "$1" == "api" && "$2" == "--paginate" &&
@@ -370,18 +370,49 @@ if [[ "$#" -eq 5 && "$1" == "api" && "$2" == "--paginate" &&
     echo "release list failed" >&2
     exit 31
   fi
-  printf '123\tsnapshot-test\n'
+  case "${scenario}" in
+    special-hash) printf '123\tsnapshot-foo#bar\tsnapshot-foo%%23bar\n' ;;
+    special-percent) printf '123\tsnapshot-foo%%bar\tsnapshot-foo%%25bar\n' ;;
+    special-slash) printf '123\tsnapshot-foo/bar\tsnapshot-foo%%2Fbar\n' ;;
+    multiple) printf '123\tsnapshot-one\tsnapshot-one\n456\tsnapshot-two\tsnapshot-two\n' ;;
+    malformed-nondigit-id) printf 'abc\tsnapshot-test\tsnapshot-test\n' ;;
+    malformed-empty-id) printf '\tsnapshot-test\tsnapshot-test\n' ;;
+    malformed-empty-tag) printf '123\t\t\n' ;;
+    malformed-extra-column) printf '123\tsnapshot-test\tsnapshot-test\textra\n' ;;
+    malformed-after-valid) printf '123\tsnapshot-test\tsnapshot-test\nabc\tsnapshot-bad\tsnapshot-bad\n' ;;
+    *) printf '123\tsnapshot-test\tsnapshot-test\n' ;;
+  esac
   exit 0
 fi
 
 resource=""
 if [[ "$1" == "release" && "$2" == "delete" ]]; then
   resource="release"
-elif [[ "$1" == "api" && " $* " == *" --method DELETE "* ]]; then
-  endpoint="${*: -1}"
+elif [[ "$#" -eq 5 && "$1" == "api" && "$2" == "--include" &&
+  "$3" == "--method" && "$4" == "DELETE" ]]; then
+  endpoint="$5"
   case "${endpoint}" in
-    repos/example/workflow/releases/123) resource="release" ;;
-    repos/example/workflow/git/refs/tags/snapshot-test) resource="tag" ;;
+    repos/example/workflow/releases/123 | repos/example/workflow/releases/456)
+      resource="release"
+      ;;
+    repos/example/workflow/git/refs/tags/snapshot-test)
+      resource="tag"
+      ;;
+    repos/example/workflow/git/refs/tags/snapshot-one)
+      resource="tag"
+      ;;
+    repos/example/workflow/git/refs/tags/snapshot-two)
+      resource="tag"
+      ;;
+    repos/example/workflow/git/refs/tags/snapshot-foo%23bar)
+      resource="tag"
+      ;;
+    repos/example/workflow/git/refs/tags/snapshot-foo%25bar)
+      resource="tag"
+      ;;
+    repos/example/workflow/git/refs/tags/snapshot-foo%2Fbar)
+      resource="tag"
+      ;;
     *) echo "unexpected snapshot DELETE endpoint: ${endpoint}" >&2; exit 32 ;;
   esac
 else
@@ -468,22 +499,53 @@ assert_snapshot_cleanup_status() {
   fi
 }
 
+snapshot_delete_log_line() {
+  local endpoint="$1"
+  printf '5\tapi --include --method DELETE %s ' "${endpoint}"
+}
+
+assert_snapshot_delete_call() {
+  local endpoint="$1"
+  local expected_count="${2:-1}"
+  local expected
+  local actual_count
+  expected="$(snapshot_delete_log_line "${endpoint}")"
+  actual_count="$(grep -Fxc -- "${expected}" "${snapshot_gh_log}" || true)"
+  if [[ "${actual_count}" -ne "${expected_count}" ]]; then
+    echo "snapshot cleanup DELETE call mismatch for ${endpoint}: got ${actual_count}, want ${expected_count}" >&2
+    cat "${snapshot_gh_log}" >&2
+    exit 1
+  fi
+}
+
+assert_no_snapshot_delete_calls() {
+  if grep -Fq -- ' DELETE ' "${snapshot_gh_log}" ||
+    grep -Fq -- $'\trelease delete ' "${snapshot_gh_log}"; then
+    echo "malformed snapshot release row reached DELETE" >&2
+    cat "${snapshot_gh_log}" >&2
+    exit 1
+  fi
+}
+
 assert_snapshot_cleanup_status success pass
-if ! grep -Fq -- 'repos/example/workflow/releases/123' "${snapshot_gh_log}" ||
-  ! grep -Fq -- 'repos/example/workflow/git/refs/tags/snapshot-test' "${snapshot_gh_log}"; then
-  echo "snapshot cleanup success did not delete both the release and tag ref" >&2
-  cat "${snapshot_gh_log}" >&2
-  exit 1
-fi
+assert_snapshot_delete_call 'repos/example/workflow/releases/123'
+assert_snapshot_delete_call 'repos/example/workflow/git/refs/tags/snapshot-test'
 assert_snapshot_cleanup_status release-404 pass
-if ! grep -Fq -- 'repos/example/workflow/git/refs/tags/snapshot-test' "${snapshot_gh_log}"; then
-  echo "snapshot cleanup did not continue to tag deletion after release 404" >&2
-  exit 1
-fi
+assert_snapshot_delete_call 'repos/example/workflow/releases/123'
+assert_snapshot_delete_call 'repos/example/workflow/git/refs/tags/snapshot-test'
 for fatal_release_case in \
   release-401 release-403 release-429 release-500 \
   release-missing-status release-malformed-status; do
   assert_snapshot_cleanup_status "${fatal_release_case}" fail
+done
+for fatal_release_status in 401 403 429 500; do
+  if ! grep -Fqx -- \
+    "snapshot release snapshot-test deletion failed with HTTP ${fatal_release_status}" \
+    "${tmp_dir}/snapshot-cleanup-release-${fatal_release_status}.out"; then
+    echo "snapshot release ${fatal_release_status} diagnostic mismatch" >&2
+    cat "${tmp_dir}/snapshot-cleanup-release-${fatal_release_status}.out" >&2
+    exit 1
+  fi
 done
 assert_snapshot_cleanup_status list-failure fail
 assert_snapshot_cleanup_status tag-404 pass
@@ -491,6 +553,56 @@ for fatal_tag_case in \
   tag-401 tag-403 tag-429 tag-500 tag-missing-status tag-malformed-status; do
   assert_snapshot_cleanup_status "${fatal_tag_case}" fail
 done
+for fatal_tag_status in 401 403 429 500; do
+  if ! grep -Fqx -- \
+    "snapshot tag snapshot-test deletion failed with HTTP ${fatal_tag_status}" \
+    "${tmp_dir}/snapshot-cleanup-tag-${fatal_tag_status}.out"; then
+    echo "snapshot tag ${fatal_tag_status} diagnostic mismatch" >&2
+    cat "${tmp_dir}/snapshot-cleanup-tag-${fatal_tag_status}.out" >&2
+    exit 1
+  fi
+done
+
+for malformed_list_case in \
+  malformed-nondigit-id malformed-empty-id malformed-empty-tag \
+  malformed-extra-column malformed-after-valid; do
+  assert_snapshot_cleanup_status "${malformed_list_case}" fail
+  if ! grep -Fqx -- 'snapshot release listing returned malformed data' \
+    "${tmp_dir}/snapshot-cleanup-${malformed_list_case}.out"; then
+    echo "${malformed_list_case} diagnostic mismatch" >&2
+    cat "${tmp_dir}/snapshot-cleanup-${malformed_list_case}.out" >&2
+    exit 1
+  fi
+  assert_no_snapshot_delete_calls
+done
+
+assert_snapshot_cleanup_status multiple pass
+assert_snapshot_delete_call 'repos/example/workflow/releases/123'
+assert_snapshot_delete_call 'repos/example/workflow/git/refs/tags/snapshot-one'
+assert_snapshot_delete_call 'repos/example/workflow/releases/456'
+assert_snapshot_delete_call 'repos/example/workflow/git/refs/tags/snapshot-two'
+
+special_tag_failures=0
+for special_tag_case in special-hash special-percent special-slash; do
+  run_snapshot_cleanup "${special_tag_case}"
+  if [[ "${snapshot_cleanup_status}" -ne 0 ]]; then
+    echo "snapshot cleanup scenario ${special_tag_case} failed, want pass" >&2
+    cat "${tmp_dir}/snapshot-cleanup-${special_tag_case}.out" >&2
+    special_tag_failures=1
+    continue
+  fi
+  case "${special_tag_case}" in
+    special-hash) encoded_special_tag='snapshot-foo%23bar' ;;
+    special-percent) encoded_special_tag='snapshot-foo%25bar' ;;
+    special-slash) encoded_special_tag='snapshot-foo%2Fbar' ;;
+  esac
+  assert_snapshot_delete_call 'repos/example/workflow/releases/123'
+  assert_snapshot_delete_call \
+    "repos/example/workflow/git/refs/tags/${encoded_special_tag}"
+done
+if [[ "${special_tag_failures}" -ne 0 ]]; then
+  exit 1
+fi
 
 legacy_go_patch='1.26.'
 legacy_go_patch+='4'

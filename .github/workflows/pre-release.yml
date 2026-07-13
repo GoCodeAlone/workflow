@@ -165,24 +165,28 @@ jobs:
         }
 
         if snapshot_releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-          --jq '.[] | select(.tag_name | startswith("snapshot-")) | [.id, .tag_name] | @tsv')"; then
+          --jq '.[] | select(.tag_name | startswith("snapshot-")) | [.id, .tag_name, (.tag_name | @uri)] | @tsv')"; then
           :
         else
           list_status=$?
           echo "snapshot release listing failed" >&2
           exit "$list_status"
         fi
-        while read -r release_id tag extra; do
+        while read -r release_id tag encoded_tag extra; do
           [[ -z "$release_id" && -z "$tag" ]] && continue
-          if [[ ! "$release_id" =~ ^[0-9]+$ || -z "$tag" || -n "$extra" ]]; then
+          if [[ ! "$release_id" =~ ^[0-9]+$ || -z "$tag" ||
+            -z "$encoded_tag" || -n "$extra" ]]; then
             echo "snapshot release listing returned malformed data" >&2
             exit 1
           fi
+        done <<< "$snapshot_releases"
+        while read -r release_id tag encoded_tag extra; do
+          [[ -z "$release_id" && -z "$tag" ]] && continue
           delete_github_resource \
             "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             "snapshot release ${tag}"
           delete_github_resource \
-            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${encoded_tag}" \
             "snapshot tag ${tag}"
         done <<< "$snapshot_releases"
       env:

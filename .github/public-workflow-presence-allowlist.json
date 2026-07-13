@@ -49,7 +49,7 @@
   },
   {
     "path": ".github/workflows/pre-release.yml",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "presence": "present"
   },

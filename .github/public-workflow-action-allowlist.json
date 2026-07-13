@@ -395,7 +395,7 @@
     "path": ".github/workflows/pre-release.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed pre-release.yml automation."
   },
@@ -403,7 +403,7 @@
     "path": ".github/workflows/pre-release.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "d6b03ef1597a69e1978ead4e5925aed16626c4c8f668cc18cdb4697dc71b85f3",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed pre-release.yml automation."
   },
@@ -411,7 +411,7 @@
     "path": ".github/workflows/pre-release.yml",
     "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
     "nodeSHA256": "c0d85fe8f94bd2187fb4d2a57310b75cf4561a018bc15a11b5fbea0baa13f07a",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Pinned actions/setup-go for the reviewed Go 1.26.5 pre-release toolchain."
   },
@@ -419,7 +419,7 @@
     "path": ".github/workflows/pre-release.yml",
     "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
     "nodeSHA256": "d6511486d7f0d7044978b8c71828add2508e72a9897718b7a91fdf151ffb3c49",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Pinned actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e for reviewed pre-release.yml automation."
   },
@@ -427,7 +427,7 @@
     "path": ".github/workflows/pre-release.yml",
     "uses": "ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d",
     "nodeSHA256": "901d681634d0e4e7b011708926aa6e0fea756b20e1138ca280c3689a16d6ebde",
-    "contextSHA256": "7e9ff6c0bfb3caa42f65e2e6af8735fe8b8287fc1d6a1cce282061593f9a08d3",
+    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
     "state": "active",
     "rationale": "Pinned ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d for reviewed pre-release.yml automation."
   },
