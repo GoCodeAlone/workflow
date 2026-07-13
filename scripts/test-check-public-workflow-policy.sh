@@ -83,6 +83,7 @@ fi
 (cd "${policytool}" && GOWORK=off GOFLAGS=-mod=readonly go test ./...)
 
 governance_workflow="${repo_root}/.github/workflows/public-workflow-policy.yml"
+ci_workflow="${repo_root}/.github/workflows/ci.yml"
 protection_verifier="${repo_root}/.github/workflows/scripts/verify-public-workflow-branch-protection.sh"
 osv_workflow="${repo_root}/.github/workflows/osv-scanner.yml"
 dependency_workflow="${repo_root}/.github/workflows/dependency-update.yml"
@@ -134,6 +135,13 @@ require_text() {
 grep -Fq -- "branches: [main]" "${governance_workflow}"
 require_text "pull_request_target edited trigger" \
   "types: [opened, synchronize, reopened, ready_for_review, edited]" "${governance_workflow}"
+require_text "semantic godo provider gate" \
+  "go test -mod=readonly ./module -run '^TestNoDigitalOceanGodoReferences$' -count=1" \
+  "${ci_workflow}"
+if grep -Fq -- 'digitalocean/godo' "${ci_workflow}"; then
+  echo "godo provider gate still uses text matching instead of the semantic test" >&2
+  exit 1
+fi
 require_text "immutable benchstat install" \
   "go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d" "${benchmark_workflow}"
 require_text "snapshot release JSON query" \

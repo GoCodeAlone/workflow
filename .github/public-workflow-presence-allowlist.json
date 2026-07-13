@@ -7,7 +7,7 @@
   },
   {
     "path": ".github/workflows/ci.yml",
-    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "contextSHA256": "432b3e60e72e58f92988c036db4d74b02cb6dbd39b67a7cd856c081b87c045e0",
     "state": "active",
     "presence": "present"
   },
