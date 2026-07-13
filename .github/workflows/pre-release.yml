@@ -34,7 +34,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26.4'
+        go-version: '1.26.5'
         cache: false
 
     - name: Set up Node.js
@@ -72,7 +72,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26.4'
+        go-version: '1.26.5'
         cache: false
 
     - name: Set up Node.js
@@ -127,12 +127,64 @@ jobs:
 
     - name: Clean up old snapshot releases
       run: |
-        # Delete all previous snapshot-* releases (keep only latest)
-        snapshot_tags="$(gh release list --limit 50 --json tagName --jq '.[] | select(.tagName | startswith("snapshot-")) | .tagName')"
-        while read -r tag; do
-          [[ -z "$tag" ]] && continue
-          gh release delete "$tag" --yes --cleanup-tag
-        done <<< "$snapshot_tags"
+        delete_github_resource() {
+          local endpoint="$1"
+          local label="$2"
+          local response
+          local command_status
+          local status_line
+          local http_status
+
+          if response="$(gh api --include --method DELETE "$endpoint" 2>&1)"; then
+            command_status=0
+          else
+            command_status=$?
+          fi
+          status_line="${response%%$'\n'*}"
+          status_line="${status_line%$'\r'}"
+          if [[ ! "$status_line" =~ ^HTTP/[0-9]+(\.[0-9]+)?[[:space:]]+([0-9]{3})([[:space:]].*)?$ ]]; then
+            echo "${label} deletion returned a missing or malformed HTTP status" >&2
+            printf '%s\n' "$response" >&2
+            return 1
+          fi
+          http_status="${BASH_REMATCH[2]}"
+          if [[ "$http_status" == 404 ]]; then
+            return 0
+          fi
+          if [[ "$command_status" -ne 0 ]]; then
+            echo "${label} deletion failed with HTTP ${http_status}" >&2
+            printf '%s\n' "$response" >&2
+            return "$command_status"
+          fi
+          if [[ "$http_status" =~ ^2[0-9]{2}$ ]]; then
+            return 0
+          fi
+          echo "${label} deletion returned unexpected HTTP ${http_status}" >&2
+          printf '%s\n' "$response" >&2
+          return 1
+        }
+
+        if snapshot_releases="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+          --jq '.[] | select(.tag_name | startswith("snapshot-")) | [.id, .tag_name] | @tsv')"; then
+          :
+        else
+          list_status=$?
+          echo "snapshot release listing failed" >&2
+          exit "$list_status"
+        fi
+        while read -r release_id tag extra; do
+          [[ -z "$release_id" && -z "$tag" ]] && continue
+          if [[ ! "$release_id" =~ ^[0-9]+$ || -z "$tag" || -n "$extra" ]]; then
+            echo "snapshot release listing returned malformed data" >&2
+            exit 1
+          fi
+          delete_github_resource \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            "snapshot release ${tag}"
+          delete_github_resource \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+            "snapshot tag ${tag}"
+        done <<< "$snapshot_releases"
       env:
         GH_TOKEN: ${{ github.token }}
 
@@ -168,7 +220,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
-        go-version: '1.26.4'
+        go-version: '1.26.5'
         cache: false
 
     - name: Set up ko

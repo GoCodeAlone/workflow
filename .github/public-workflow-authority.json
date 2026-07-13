@@ -6,7 +6,7 @@
       "files": [
         {
           "path": ".github/workflows/policytool/go.mod",
-          "sha256": "b29b886c829ddf6f83b795df62b92093a6c06d1c5a0ff6842dc36ae352094790"
+          "sha256": "0a2d135980310757f36e733161b94498b4e0a1b6ac8c6de8a799f542d6c9ddb8"
         },
         {
           "path": ".github/workflows/policytool/go.sum",
@@ -26,7 +26,7 @@
         },
         {
           "path": "scripts/check-public-workflow-policy.sh",
-          "sha256": "92b04562e6a41aa31bd33750b0d527cec2c619f56f630e4b1c53a12bc95192ee"
+          "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c"
         },
         {
           "path": "scripts/fixtures/public-workflow-policy/lifecycle-future.yml",
@@ -142,7 +142,7 @@
         },
         {
           "path": "scripts/test-check-public-workflow-policy.sh",
-          "sha256": "0fdfce348563fdfe0c817bcf1ed81ceb0ab27a07e898733b74829b0645899ac7"
+          "sha256": "5ede93fa942f3d420c93f1c63152db6c117f196367cbb72ea2cf24d0765125c2"
         }
       ]
     }

@@ -2,7 +2,7 @@
   {
     "path": "scripts/audit-cloud-symbols.sh",
     "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "432b3e60e72e58f92988c036db4d74b02cb6dbd39b67a7cd856c081b87c045e0",
+    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
     "state": "active",
     "sha256": "9dcdd09230bd42059cd65daf4acf0d4974d648b13ad126cfacfff2ebbf20816e",
     "rationale": "Runs the credential-free core cloud-SDK boundary audit."
@@ -10,25 +10,25 @@
   {
     "path": "scripts/check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "432b3e60e72e58f92988c036db4d74b02cb6dbd39b67a7cd856c081b87c045e0",
+    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
     "state": "active",
-    "sha256": "92b04562e6a41aa31bd33750b0d527cec2c619f56f630e4b1c53a12bc95192ee",
+    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
     "rationale": "Enforces the credential-free public workflow boundary in CI."
-  },
-  {
-    "path": "scripts/test-check-public-workflow-policy.sh",
-    "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "432b3e60e72e58f92988c036db4d74b02cb6dbd39b67a7cd856c081b87c045e0",
-    "state": "active",
-    "sha256": "0fdfce348563fdfe0c817bcf1ed81ceb0ab27a07e898733b74829b0645899ac7",
-    "rationale": "Exercises fail-closed public workflow policy mutations in CI."
   },
   {
     "path": "scripts/check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/public-workflow-policy.yml",
     "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
-    "sha256": "92b04562e6a41aa31bd33750b0d527cec2c619f56f630e4b1c53a12bc95192ee",
+    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
     "rationale": "Runs the trusted policy wrapper against inert candidate workflow data."
+  },
+  {
+    "path": "scripts/test-check-public-workflow-policy.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
+    "state": "active",
+    "sha256": "5ede93fa942f3d420c93f1c63152db6c117f196367cbb72ea2cf24d0765125c2",
+    "rationale": "Exercises fail-closed public workflow policy mutations in CI."
   }
 ]

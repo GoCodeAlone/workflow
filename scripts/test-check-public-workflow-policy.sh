@@ -181,12 +181,7 @@ if grep -Fq -- 'digitalocean/godo' "${ci_workflow}"; then
 fi
 require_text "immutable benchstat install" \
   "go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d" "${benchmark_workflow}"
-require_text "snapshot release JSON query" \
-  'snapshot_tags="$(gh release list --limit 50 --json tagName --jq' "${prerelease_workflow}"
-require_text "snapshot release tag filter" \
-  'select(.tagName | startswith("snapshot-"))' "${prerelease_workflow}"
-require_text "empty snapshot list handling" '[[ -z "$tag" ]] && continue' "${prerelease_workflow}"
-require_text "propagating snapshot deletion" 'gh release delete "$tag" --yes --cleanup-tag' "${prerelease_workflow}"
+require_text "snapshot cleanup step" 'name: Clean up old snapshot releases' "${prerelease_workflow}"
 if grep -Fq -- 'gh release delete "$tag" --yes --cleanup-tag || true' "${prerelease_workflow}"; then
   echo "snapshot cleanup still swallows release deletion failures" >&2
   exit 1
@@ -333,6 +328,179 @@ printf '[]\n' >"${fixture_actions}"
 empty_allowlist="${tmp_dir}/empty-allowlist.json"
 printf '[]\n' >"${empty_allowlist}"
 archive_checker="${archive_repo}/scripts/check-public-workflow-policy.sh"
+
+snapshot_cleanup_script="${tmp_dir}/snapshot-cleanup.sh"
+awk '
+  $0 == "    - name: Clean up old snapshot releases" { in_step=1; next }
+  in_step && $0 == "      run: |" { in_run=1; next }
+  in_run && /^      [[:alnum:]_-]+:/ { exit }
+  in_run { sub(/^        /, ""); print }
+' "${prerelease_workflow}" >"${snapshot_cleanup_script}"
+if [[ ! -s "${snapshot_cleanup_script}" ]]; then
+  echo "failed to extract snapshot cleanup workflow run script" >&2
+  exit 1
+fi
+
+snapshot_gh_bin="${tmp_dir}/snapshot-gh-bin"
+snapshot_gh_log="${tmp_dir}/snapshot-gh.log"
+mkdir -p "${snapshot_gh_bin}"
+cat >"${snapshot_gh_bin}/gh" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\t' "$#" >>"${SNAPSHOT_GH_LOG}"
+printf '%q ' "$@" >>"${SNAPSHOT_GH_LOG}"
+printf '\n' >>"${SNAPSHOT_GH_LOG}"
+
+scenario="${SNAPSHOT_CLEANUP_SCENARIO}"
+if [[ "$1" == "release" && "$2" == "list" ]]; then
+  if [[ "${scenario}" == "list-failure" ]]; then
+    echo "release list failed" >&2
+    exit 31
+  fi
+  printf '%s\n' snapshot-test
+  exit 0
+fi
+if [[ "$1" == "api" && " $* " == *" --paginate "* ]]; then
+  if [[ "${scenario}" == "list-failure" ]]; then
+    echo "release list failed" >&2
+    exit 31
+  fi
+  printf '123\tsnapshot-test\n'
+  exit 0
+fi
+
+resource=""
+if [[ "$1" == "release" && "$2" == "delete" ]]; then
+  resource="release"
+elif [[ "$1" == "api" && " $* " == *" --method DELETE "* ]]; then
+  endpoint="${*: -1}"
+  case "${endpoint}" in
+    repos/example/workflow/releases/123) resource="release" ;;
+    repos/example/workflow/git/refs/tags/snapshot-test) resource="tag" ;;
+    *) echo "unexpected snapshot DELETE endpoint: ${endpoint}" >&2; exit 32 ;;
+  esac
+else
+  echo "unexpected snapshot gh invocation: $*" >&2
+  exit 33
+fi
+
+mode="success"
+case "${scenario}" in
+  "${resource}-401") mode="401" ;;
+  "${resource}-404") mode="404" ;;
+  "${resource}-403") mode="403" ;;
+  "${resource}-429") mode="429" ;;
+  "${resource}-500") mode="500" ;;
+  "${resource}-missing-status") mode="missing-status" ;;
+  "${resource}-malformed-status") mode="malformed-status" ;;
+esac
+case "${mode}" in
+  success)
+    printf 'HTTP/2.0 204 No Content\r\nX-Test: spaces and\ttabs\r\n\r\n'
+    exit 0
+    ;;
+  404)
+    printf 'HTTP/2.0 404 Not Found\r\nX-Test: spaces and\ttabs\r\n\r\n'
+    exit 22
+    ;;
+  401)
+    printf 'HTTP/2.0 401 Unauthorized\r\nX-Test: spaces and\ttabs\r\n\r\n'
+    exit 22
+    ;;
+  403)
+    printf 'HTTP/2.0 403 Forbidden\r\nX-Test: spaces and\ttabs\r\n\r\n'
+    exit 22
+    ;;
+  429)
+    printf 'HTTP/2.0 429 Too Many Requests\r\nX-Test: spaces and\ttabs\r\n\r\n'
+    exit 22
+    ;;
+  500)
+    printf 'HTTP/2.0 500 Server Error\r\nX-Test: spaces and\ttabs\r\n\r\n'
+    exit 22
+    ;;
+  missing-status)
+    printf 'response without an HTTP status\n'
+    exit 22
+    ;;
+  malformed-status)
+    printf 'HTTP/2.0 nope Not Found\r\n'
+    exit 22
+    ;;
+esac
+BASH
+chmod +x "${snapshot_gh_bin}/gh"
+
+run_snapshot_cleanup() {
+  local scenario="$1"
+  local output="${tmp_dir}/snapshot-cleanup-${scenario}.out"
+  : >"${snapshot_gh_log}"
+  set +e
+  env \
+    PATH="${snapshot_gh_bin}:$PATH" \
+    GITHUB_REPOSITORY=example/workflow \
+    LANG=C \
+    LC_ALL=C \
+    SNAPSHOT_CLEANUP_SCENARIO="${scenario}" \
+    SNAPSHOT_GH_LOG="${snapshot_gh_log}" \
+    bash -euo pipefail "${snapshot_cleanup_script}" >"${output}" 2>&1
+  snapshot_cleanup_status=$?
+  set -e
+}
+
+assert_snapshot_cleanup_status() {
+  local scenario="$1"
+  local expectation="$2"
+  run_snapshot_cleanup "${scenario}"
+  if [[ "${expectation}" == "pass" && "${snapshot_cleanup_status}" -ne 0 ]]; then
+    echo "snapshot cleanup scenario ${scenario} failed, want pass" >&2
+    cat "${tmp_dir}/snapshot-cleanup-${scenario}.out" >&2
+    exit 1
+  fi
+  if [[ "${expectation}" == "fail" && "${snapshot_cleanup_status}" -eq 0 ]]; then
+    echo "snapshot cleanup scenario ${scenario} passed, want fail" >&2
+    exit 1
+  fi
+}
+
+assert_snapshot_cleanup_status success pass
+if ! grep -Fq -- 'repos/example/workflow/releases/123' "${snapshot_gh_log}" ||
+  ! grep -Fq -- 'repos/example/workflow/git/refs/tags/snapshot-test' "${snapshot_gh_log}"; then
+  echo "snapshot cleanup success did not delete both the release and tag ref" >&2
+  cat "${snapshot_gh_log}" >&2
+  exit 1
+fi
+assert_snapshot_cleanup_status release-404 pass
+if ! grep -Fq -- 'repos/example/workflow/git/refs/tags/snapshot-test' "${snapshot_gh_log}"; then
+  echo "snapshot cleanup did not continue to tag deletion after release 404" >&2
+  exit 1
+fi
+for fatal_release_case in \
+  release-401 release-403 release-429 release-500 \
+  release-missing-status release-malformed-status; do
+  assert_snapshot_cleanup_status "${fatal_release_case}" fail
+done
+assert_snapshot_cleanup_status list-failure fail
+assert_snapshot_cleanup_status tag-404 pass
+for fatal_tag_case in \
+  tag-401 tag-403 tag-429 tag-500 tag-missing-status tag-malformed-status; do
+  assert_snapshot_cleanup_status "${fatal_tag_case}" fail
+done
+
+legacy_go_patch='1.26.'
+legacy_go_patch+='4'
+if active_go_1264="$(cd "${repo_root}" && \
+  rg -n -F --hidden --glob '!**/.git/**' --glob '!docs/plans/**' \
+    "${legacy_go_patch}" . 2>&1)"; then
+  echo "active/current Go pins still reference vulnerable Go ${legacy_go_patch}" >&2
+  printf '%s\n' "${active_go_1264}" >&2
+  exit 1
+elif [[ "$?" -ne 1 ]]; then
+  echo "failed to audit active/current Go pins" >&2
+  printf '%s\n' "${active_go_1264}" >&2
+  exit 1
+fi
+
 (cd "${archive_repo}" && ./scripts/check-public-workflow-policy.sh --scan-root "${archive_repo}") >/dev/null
 
 archive_repo_alias="${archive_copy_root}/repo-alias"
