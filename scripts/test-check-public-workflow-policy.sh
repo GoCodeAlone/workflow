@@ -106,10 +106,27 @@ for required_candidate_fetch in \
   'core.askPass=/bin/false' \
   'credential.interactive=never' \
   'http.https://github.com/.extraheader=' \
-  'git -C candidate-source archive --worktree-attributes --format=tar FETCH_HEAD' \
+  "git -C candidate-source ls-tree -r --format='%(objectmode)' FETCH_HEAD > candidate-tree-modes" \
+  'git -C candidate-source archive --worktree-attributes --format=tar FETCH_HEAD > candidate.tar' \
+  'LC_ALL=C tar -tvf candidate.tar > candidate.tar.list' \
+  'candidate archive contains a forbidden entry type' \
+  'tar --extract --file=candidate.tar --directory=candidate --no-same-owner --no-same-permissions' \
   'find candidate -type l -print -quit'; do
   grep -Fq -- "${required_candidate_fetch}" "${governance_workflow}"
 done
+tree_mode_line="$(grep -nF -- "git -C candidate-source ls-tree -r --format='%(objectmode)' FETCH_HEAD > candidate-tree-modes" "${governance_workflow}" | cut -d: -f1)"
+archive_line="$(grep -nF -- 'git -C candidate-source archive --worktree-attributes --format=tar FETCH_HEAD > candidate.tar' "${governance_workflow}" | cut -d: -f1)"
+archive_list_line="$(grep -nF -- 'LC_ALL=C tar -tvf candidate.tar > candidate.tar.list' "${governance_workflow}" | cut -d: -f1)"
+archive_extract_line="$(grep -nF -- 'tar --extract --file=candidate.tar --directory=candidate --no-same-owner --no-same-permissions' "${governance_workflow}" | cut -d: -f1)"
+post_extract_scan_line="$(grep -nF -- 'find candidate -type l -print -quit' "${governance_workflow}" | cut -d: -f1)"
+if [[ ! "${tree_mode_line}" -lt "${archive_line}" ||
+  ! "${archive_line}" -lt "${archive_list_line}" ||
+  ! "${archive_list_line}" -lt "${archive_extract_line}" ||
+  ! "${archive_extract_line}" -lt "${post_extract_scan_line}" ]] ||
+  grep -Fq -- 'archive --worktree-attributes --format=tar FETCH_HEAD |' "${governance_workflow}"; then
+  echo "candidate archive validation must precede extraction of the same bytes" >&2
+  exit 1
+fi
 if rg -n -- 'Check out candidate|path: candidate|persist-credentials: true|git (checkout|switch|worktree)' "${governance_workflow}"; then
   echo "candidate policy input can enter an executable checkout" >&2
   exit 1
@@ -282,6 +299,9 @@ policytool="${repo_root}/.github/workflows/policytool"
 integrity_extra="${policytool}/extra_linux.go"
 integrity_vendor="${policytool}/vendor"
 integrity_symlink="${policytool}/extra-link.go"
+policytool_root_backup="${tmp_dir}/policytool-root-backup"
+policytool_root_target="${tmp_dir}/policytool-root-target"
+policytool_root_go_probe="${tmp_dir}/policytool-root-go-invoked"
 mutation_backup="${tmp_dir}/workflow-backup.yml"
 export TMPDIR="${tmp_dir}"
 fixture_executables="${tmp_dir}/fixture-executables.json"
@@ -371,6 +391,13 @@ case " $* " in
     [[ "$*" == *"https://github.com/example/repo.git ${CANDIDATE_SHA}"* ]]
     ;;
   *" rev-parse "*) printf '%s\n' "${FAKE_FETCHED_SHA:-${CANDIDATE_SHA}}" ;;
+  *" ls-tree "*)
+    if [[ -n "${FAKE_REAL_ARCHIVE_REPO:-}" ]]; then
+      /usr/bin/git -C "${FAKE_REAL_ARCHIVE_REPO}" ls-tree -r --format='%(objectmode)' HEAD
+    else
+      printf '%s\n' "${FAKE_LS_TREE_MODES:-100644}"
+    fi
+    ;;
   *" archive "*)
     if [[ -n "${FAKE_REAL_ARCHIVE_REPO:-}" ]]; then
       archive_attributes=()
@@ -386,6 +413,13 @@ case " $* " in
 esac
 BASH
 chmod +x "${fake_bin}/git"
+cat >"${fake_bin}/tar" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${FAKE_TAR_LOG}"
+exec /usr/bin/tar "$@"
+BASH
+chmod +x "${fake_bin}/tar"
 
 run_candidate_fetch() {
   local workdir="$1"
@@ -403,7 +437,9 @@ run_candidate_fetch() {
       GIT_CONFIG_NOSYSTEM=1 \
       GIT_TERMINAL_PROMPT=0 \
       FAKE_GIT_LOG="${workdir}/git.log" \
+      FAKE_TAR_LOG="${workdir}/tar.log" \
       FAKE_ARCHIVE_ROOT="${archive_root}" \
+      FAKE_LS_TREE_MODES="${FAKE_LS_TREE_MODES:-100644}" \
       bash -euo pipefail "${candidate_fetch_script}"
   )
 }
@@ -412,11 +448,20 @@ candidate_sha=0123456789012345678901234567890123456789
 candidate_fetch_good="${tmp_dir}/candidate-fetch-good"
 run_candidate_fetch "${candidate_fetch_good}" example/repo "${candidate_sha}" "${fake_archive}"
 test -f "${candidate_fetch_good}/candidate/.github/workflows/inert.yml"
+test -f "${candidate_fetch_good}/candidate.tar"
+test -f "${candidate_fetch_good}/candidate.tar.list"
 grep -Fq -- "credential.helper=" "${candidate_fetch_good}/git.log"
 grep -Fq -- "core.askPass=/bin/false" "${candidate_fetch_good}/git.log"
 grep -Fq -- "credential.interactive=never" "${candidate_fetch_good}/git.log"
 grep -Fq -- "http.https://github.com/.extraheader=" "${candidate_fetch_good}/git.log"
 grep -Fq -- "https://github.com/example/repo.git ${candidate_sha}" "${candidate_fetch_good}/git.log"
+grep -Fq -- "ls-tree -r --format=%(objectmode) FETCH_HEAD" "${candidate_fetch_good}/git.log"
+if [[ "$(grep -Fc -- ' archive ' "${candidate_fetch_good}/git.log")" -ne 1 ]]; then
+  echo "candidate fetch did not create exactly one candidate archive" >&2
+  exit 1
+fi
+grep -Fq -- "-tvf candidate.tar" "${candidate_fetch_good}/tar.log"
+grep -Fq -- "--extract --file=candidate.tar --directory=candidate --no-same-owner --no-same-permissions" "${candidate_fetch_good}/tar.log"
 
 for invalid_candidate in \
   'bad-repository|example/repo?token=leak|0123456789012345678901234567890123456789' \
@@ -443,8 +488,32 @@ fi
 fake_symlink_archive="${tmp_dir}/fake-symlink-archive"
 mkdir -p "${fake_symlink_archive}/.github/workflows"
 ln -s ../../outside "${fake_symlink_archive}/.github/workflows/escape.yml"
-if run_candidate_fetch "${tmp_dir}/candidate-symlink" example/repo "${candidate_sha}" "${fake_symlink_archive}" >/dev/null 2>&1; then
-  echo "candidate fetch accepted a symlink path escape" >&2
+candidate_symlink_tree="${tmp_dir}/candidate-symlink-tree"
+if FAKE_LS_TREE_MODES=120000 \
+  run_candidate_fetch "${candidate_symlink_tree}" example/repo "${candidate_sha}" "${fake_symlink_archive}" >/dev/null 2>&1; then
+  echo "candidate fetch accepted a symlink tree entry" >&2
+  exit 1
+fi
+if grep -Fq -- " archive " "${candidate_symlink_tree}/git.log"; then
+  echo "candidate fetch archived data before rejecting a symlink tree entry" >&2
+  exit 1
+fi
+if [[ -s "${candidate_symlink_tree}/tar.log" ]]; then
+  echo "candidate fetch invoked tar before rejecting a symlink tree entry" >&2
+  exit 1
+fi
+
+candidate_symlink_tar="${tmp_dir}/candidate-symlink-tar"
+if run_candidate_fetch "${candidate_symlink_tar}" example/repo "${candidate_sha}" "${fake_symlink_archive}" >/dev/null 2>&1; then
+  echo "candidate fetch accepted a symlink archive entry" >&2
+  exit 1
+fi
+if ! grep -Fq -- "-tvf candidate.tar" "${candidate_symlink_tar}/tar.log"; then
+  echo "candidate fetch did not inspect a symlink archive before rejection" >&2
+  exit 1
+fi
+if grep -Eq -- '(^| )(-[^ ]*x[^ ]*|--extract)( |$)' "${candidate_symlink_tar}/tar.log"; then
+  echo "candidate fetch extracted a symlink archive before rejection" >&2
   exit 1
 fi
 
@@ -812,6 +881,35 @@ if [[ "${symlink_status}" -eq 0 ]] || ! grep -Fq -- \
   "policytool path must be a regular non-symlink file: extra-link.go" <<<"${symlink_output}"; then
   echo "policytool symlink bypassed integrity" >&2
   printf '%s\n' "${symlink_output}" >&2
+  exit 1
+fi
+
+cp -R "${policytool}" "${policytool_root_target}"
+printf 'package main\nvar policytoolRootSymlinkBypass = true\n' >"${policytool_root_target}/extra_linux.go"
+mv "${policytool}" "${policytool_root_backup}"
+ln -s "${policytool_root_target}" "${policytool}"
+policytool_root_fake_bin="${tmp_dir}/policytool-root-fake-bin"
+mkdir -p "${policytool_root_fake_bin}"
+cat >"${policytool_root_fake_bin}/go" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+: >"${POLICYTOOL_ROOT_GO_PROBE}"
+exit 97
+BASH
+chmod +x "${policytool_root_fake_bin}/go"
+set +e
+policytool_root_output="$(PATH="${policytool_root_fake_bin}:$PATH" \
+  POLICYTOOL_ROOT_GO_PROBE="${policytool_root_go_probe}" \
+  "${checker_binary}" 2>&1)"
+policytool_root_status=$?
+set -e
+rm -f "${policytool}"
+mv "${policytool_root_backup}" "${policytool}"
+if [[ "${policytool_root_status}" -eq 0 ]] || ! grep -Fq -- \
+  "policytool root must be a real non-symlink directory" <<<"${policytool_root_output}" ||
+  [[ -e "${policytool_root_go_probe}" ]]; then
+  echo "policytool root symlink reached descendant validation or execution" >&2
+  printf '%s\n' "${policytool_root_output}" >&2
   exit 1
 fi
 

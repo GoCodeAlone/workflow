@@ -32,6 +32,10 @@ for required_dir in \
   fi
 done
 policytool="${repo_root}/.github/workflows/policytool"
+if [[ ! -d "${policytool}" || -L "${policytool}" ]]; then
+  echo "policytool root must be a real non-symlink directory" >&2
+  exit 1
+fi
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -70,8 +74,8 @@ verify_policytool_file() {
 
 verify_policytool() {
   verify_policytool_layout
-  verify_policytool_file main.go 14dfbc962052c523912b248ee3acfdf32d4fa4bdf882a465b482e07cac0e3ad7
-  verify_policytool_file main_test.go 811390919697081fc474b28bc899967ef7520b9c617aee4ebe38ba8ba092096f
+  verify_policytool_file main.go 1345667a472f7666790c8e0d6aebbc80aec7070b7495e899bbad2fa1d4355fef
+  verify_policytool_file main_test.go 44333987bd05debcf6aee6b91ef2c7d12a17ca3581b8dfa92b82b6505e96b0b3
   verify_policytool_file go.mod b29b886c829ddf6f83b795df62b92093a6c06d1c5a0ff6842dc36ae352094790
   verify_policytool_file go.sum 790ef858e5aeed12269a69e764ac69c02c3877678b0e7d9384ad3728b6e09f6c
 }

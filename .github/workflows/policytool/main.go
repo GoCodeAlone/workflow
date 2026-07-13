@@ -961,7 +961,6 @@ var (
 	providerCLIRE        = regexp.MustCompile(`(^|[^A-Za-z0-9_.-])(doctl|gcloud|az|aws)([^A-Za-z0-9_.-]|$)`)
 	integrationRE        = regexp.MustCompile(`(^|[[:space:]])-tags(?:=|[[:space:]])[^[:space:]]*integration`)
 	namedLiveRE          = regexp.MustCompile(`(?i)(-run[=[:space:]]+[^[:space:]]*live|test[A-Za-z0-9_]*live|conformance_live_cloud)`)
-	providerSDKRE        = regexp.MustCompile(`(?i)(digitalocean/godo|aws-sdk|azure-sdk|cloud\.google\.com/go|google-cloud-)`)
 	providerAPIRE        = regexp.MustCompile(`(?i)(api\.digitalocean\.com|management\.azure\.com|[A-Za-z0-9.-]+\.amazonaws\.com|[A-Za-z0-9.-]+\.googleapis\.com|api\.cloudflare\.com)`)
 	githubRunnerRE       = regexp.MustCompile(`^(ubuntu-(latest|[0-9]{2}\.[0-9]{2})(-arm)?|windows-(latest|[0-9]{4})|macos-(latest|[0-9]{2})(-(large|xlarge))?)$`)
 	secretIndexRE        = regexp.MustCompile(`(?i)secrets\[[^]\r\n]+\]`)
@@ -974,6 +973,14 @@ var (
 	envAssignmentRE      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 	exactGoVersionRE     = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 )
+
+var providerSDKMarkers = [...]string{
+	"digitalocean/godo",
+	"aws-sdk",
+	"azure-sdk",
+	"cloud.google.com/go",
+	"google-cloud-",
+}
 
 func githubExpressions(value string) ([]string, bool) {
 	expressions := []string{}
@@ -1056,9 +1063,18 @@ func expressionIdentifiers(value string) string {
 	return string(masked)
 }
 
-func providerMarker(value string) bool {
-	return providerCLIRE.MatchString(value) || providerAPIRE.MatchString(value) || providerSDKRE.MatchString(value)
+func containsProviderSDKMarker(value string) bool {
+	value = strings.ToLower(value)
+	for _, marker := range providerSDKMarkers {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
 
+func providerMarker(value string) bool {
+	return providerCLIRE.MatchString(value) || providerAPIRE.MatchString(value) || containsProviderSDKMarker(value)
 }
 
 func envValues(prefix string, env *yaml.Node, allowDenyPattern bool, findings *findingSet) map[string]string {
@@ -1096,7 +1112,7 @@ func envValues(prefix string, env *yaml.Node, allowDenyPattern bool, findings *f
 		if match := providerAPIRE.FindStringSubmatch(value); match != nil {
 			findings.add("%s environment value contains provider API %s", prefix, match[1])
 		}
-		if providerSDKRE.MatchString(value) {
+		if containsProviderSDKMarker(value) {
 			findings.add("%s environment value contains provider SDK marker", prefix)
 		}
 	}
@@ -1859,7 +1875,7 @@ func leadingLiteralWord(word *syntax.Word) string {
 func inspectShell(prefix, workflowPath, contextSHA256, source string, file *syntax.File, pureGuard bool, repoRoot string, executables map[string]executableEntry, executableReferenced map[string]bool, commands map[string]commandEntry, commandReferenced map[string]bool, findings *findingSet) shellAnalysis {
 	analysis := shellAnalysis{
 		hasIntegrationTag: integrationRE.MatchString(source),
-		hasProviderSDK:    providerSDKRE.MatchString(source),
+		hasProviderSDK:    containsProviderSDKMarker(source),
 		namedLive:         namedLiveRE.MatchString(source),
 	}
 	if analysis.namedLive {

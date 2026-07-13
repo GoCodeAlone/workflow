@@ -778,6 +778,31 @@ func TestKnownProviderCommandLimitsReviewedPackageBuildSubcommands(t *testing.T)
 	}
 }
 
+func TestContainsProviderSDKMarkerPreservesFixedSubstrings(t *testing.T) {
+	for name, test := range map[string]struct {
+		value string
+		want  bool
+	}{
+		"digitalocean":        {"prefix DIGITALOCEAN/GODO suffix", true},
+		"aws":                 {"github.com/aws/AWS-SDK-go-v2", true},
+		"azure":               {"Azure-SDK-for-go", true},
+		"google go":           {"CLOUD.GOOGLE.COM/GO/storage", true},
+		"google other":        {"google-cloud-storage", true},
+		"digitalocean dash":   {"digitalocean-godo", false},
+		"aws underscore":      {"aws_sdk", false},
+		"azure slash":         {"azure/sdk", false},
+		"google wildcard dot": {"cloudXgoogle.com/go", false},
+		"google no dash":      {"google-cloud", false},
+		"empty":               {"", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := containsProviderSDKMarker(test.value); got != test.want {
+				t.Fatalf("containsProviderSDKMarker(%q) = %v, want %v", test.value, got, test.want)
+			}
+		})
+	}
+}
+
 func TestKnownProviderCommandAllowsLocalHelmValidation(t *testing.T) {
 	if !knownProviderCommand("helm", nil) {
 		t.Error("bare helm invocation must remain categorically forbidden")

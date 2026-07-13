@@ -1203,7 +1203,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "$assignment",
     "statementSHA256": "0e17e768c1484e9def2346c58a2c32d337d4c33d780f0ffc79504af0c40ecba7",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
   },
@@ -1211,7 +1211,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "$assignment",
     "statementSHA256": "66d1ee88edc672ead2282e1e159bc382cc6fad2c13a86c6ce585e0082a006b8d",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
   },
@@ -1219,7 +1219,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "$assignment",
     "statementSHA256": "6af7f417e806699121e4d583e17b42321a812a4b8237364a263b970d48dc6132",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
   },
@@ -1227,7 +1227,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "$assignment",
     "statementSHA256": "6e78bfd0781f308df8a82c819888f28647df16892ba5a7cef1571b725e102383",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
   },
@@ -1235,7 +1235,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "$assignment",
     "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
   },
@@ -1243,7 +1243,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "[",
     "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed [ statement for public-workflow-policy.yml automation."
   },
@@ -1251,7 +1251,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "[",
     "statementSHA256": "5f8e07c6f716cb7da7802dc483fb1d72aed7f4a46b0fe6e2b79633123f4c775e",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Selects the exact reviewed bootstrap or trusted policy path."
   },
@@ -1259,7 +1259,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "cd",
     "statementSHA256": "5f8e07c6f716cb7da7802dc483fb1d72aed7f4a46b0fe6e2b79633123f4c775e",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed cd statement for public-workflow-policy.yml automation."
   },
@@ -1267,15 +1267,23 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "check-public-workflow-policy.sh",
     "statementSHA256": "5f8e07c6f716cb7da7802dc483fb1d72aed7f4a46b0fe6e2b79633123f4c775e",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Run the trusted hash-bound policy wrapper against inert candidate data."
   },
   {
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "echo",
+    "statementSHA256": "3f1d57f7be1844759d7c250d516b66e11aa6e6da06ce6d2f0ad4182e4b9faf4b",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
     "statementSHA256": "4ade2e44c08380b704763da57c411f70fc54eebcabf0abd0277746786def0bf8",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
   },
@@ -1283,7 +1291,15 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "echo",
     "statementSHA256": "7c133076e6ce17d413f1327ea6d975f452d350aba142430d9ad85847205e36b8",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "9e40419faa9458450eddc809e65c865dbf076b4dbd75f7e7cd3776aabdb7e1e0",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
   },
@@ -1291,7 +1307,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "echo",
     "statementSHA256": "c7f1a421fa15eeab86ac50981d3a6b99248925a1dc7d62f2847e9a82efe2a4a1",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
   },
@@ -1299,7 +1315,15 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "echo",
     "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "e9f5edd1eb6f1cf0981dee8cb41c339f3b29870174e740942a56d4076bd36887",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
   },
@@ -1307,7 +1331,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "echo",
     "statementSHA256": "fe9e84eb32be5ac99349d7e60340785a6e5b3750dcecf795514c53ec76253516",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
   },
@@ -1315,15 +1339,31 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "echo",
     "statementSHA256": "ff503c4cc7be7d35246d5c16eca55f3af89544a6ad9ffc6bf0bb0cbe4a199d19",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "3f1d57f7be1844759d7c250d516b66e11aa6e6da06ce6d2f0ad4182e4b9faf4b",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
   },
   {
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "exit",
     "statementSHA256": "4ade2e44c08380b704763da57c411f70fc54eebcabf0abd0277746786def0bf8",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "9e40419faa9458450eddc809e65c865dbf076b4dbd75f7e7cd3776aabdb7e1e0",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
   },
@@ -1331,7 +1371,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "exit",
     "statementSHA256": "c7f1a421fa15eeab86ac50981d3a6b99248925a1dc7d62f2847e9a82efe2a4a1",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
   },
@@ -1339,7 +1379,15 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "exit",
     "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "e9f5edd1eb6f1cf0981dee8cb41c339f3b29870174e740942a56d4076bd36887",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
   },
@@ -1347,7 +1395,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "exit",
     "statementSHA256": "fe9e84eb32be5ac99349d7e60340785a6e5b3750dcecf795514c53ec76253516",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
   },
@@ -1355,7 +1403,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "exit",
     "statementSHA256": "ff503c4cc7be7d35246d5c16eca55f3af89544a6ad9ffc6bf0bb0cbe4a199d19",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
   },
@@ -1363,7 +1411,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "find",
     "statementSHA256": "6af7f417e806699121e4d583e17b42321a812a4b8237364a263b970d48dc6132",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed find statement for public-workflow-policy.yml automation."
   },
@@ -1371,15 +1419,23 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "git",
     "statementSHA256": "0cf020cfd2b573841c37a0529d43d5b53f9b318028b28b3536b2f6aff30f02bc",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
   },
   {
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "git",
-    "statementSHA256": "2dc46d037c2bf0885d2c864a2d1f4b7c6b204acccc1f374ae455291145e20150",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "statementSHA256": "3a50f487e92cd73a96ba4ae31eaa56980c1452ddb24bb37fce32cc2cf0f933e0",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "git",
+    "statementSHA256": "465704dc91fedf6386416daaecdf25aceff4bb50fa5defae0958b0a30bdeb6d1",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
   },
@@ -1387,7 +1443,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "git",
     "statementSHA256": "66d1ee88edc672ead2282e1e159bc382cc6fad2c13a86c6ce585e0082a006b8d",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
   },
@@ -1395,7 +1451,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "git",
     "statementSHA256": "9919b241412c88da2b0a86cbeaab201cc2323a2fd0c957e2f726ebc62b7282a6",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
   },
@@ -1403,15 +1459,39 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "command": "mkdir",
     "statementSHA256": "42f84c05333b2c7011f332ebca981a05c457d59e7595b13dac5dee7f58429d60",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed mkdir statement for public-workflow-policy.yml automation."
   },
   {
     "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "read",
+    "statementSHA256": "3f1d57f7be1844759d7c250d516b66e11aa6e6da06ce6d2f0ad4182e4b9faf4b",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed read statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "read",
+    "statementSHA256": "e9f5edd1eb6f1cf0981dee8cb41c339f3b29870174e740942a56d4076bd36887",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed read statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
     "command": "tar",
-    "statementSHA256": "2dc46d037c2bf0885d2c864a2d1f4b7c6b204acccc1f374ae455291145e20150",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "statementSHA256": "2c7cd49dcf58abe45dabab11177f0c555401c94df4a264edd50b7a272e6304be",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
+    "state": "active",
+    "rationale": "Exact reviewed tar statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "tar",
+    "statementSHA256": "9e40419faa9458450eddc809e65c865dbf076b4dbd75f7e7cd3776aabdb7e1e0",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Exact reviewed tar statement for public-workflow-policy.yml automation."
   },

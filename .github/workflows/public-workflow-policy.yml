@@ -60,7 +60,31 @@ jobs:
             echo "fetched candidate does not match the requested SHA" >&2
             exit 1
           fi
-          git -C candidate-source archive --worktree-attributes --format=tar FETCH_HEAD | tar -xf - -C candidate
+          git -C candidate-source ls-tree -r --format='%(objectmode)' FETCH_HEAD > candidate-tree-modes
+          while read -r object_mode; do
+            case "$object_mode" in
+              100644|100755) ;;
+              *)
+                echo "candidate tree contains forbidden object mode: $object_mode" >&2
+                exit 1
+                ;;
+            esac
+          done < candidate-tree-modes
+          git -C candidate-source archive --worktree-attributes --format=tar FETCH_HEAD > candidate.tar
+          if ! LC_ALL=C tar -tvf candidate.tar > candidate.tar.list; then
+            echo "candidate archive listing failed" >&2
+            exit 1
+          fi
+          while read -r archive_entry; do
+            case "${archive_entry:0:1}" in
+              -|d) ;;
+              *)
+                echo "candidate archive contains a forbidden entry type" >&2
+                exit 1
+                ;;
+            esac
+          done < candidate.tar.list
+          tar --extract --file=candidate.tar --directory=candidate --no-same-owner --no-same-permissions
           symlink_path="$(find candidate -type l -print -quit)"
           if [[ -n "$symlink_path" ]]; then
             echo "candidate archive contains a forbidden symlink" >&2

@@ -55,7 +55,7 @@
   },
   {
     "path": ".github/workflows/public-workflow-policy.yml",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "presence": "present"
   },

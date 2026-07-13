@@ -435,7 +435,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
     "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Pinned actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 for reviewed public-workflow-policy.yml automation."
   },
@@ -443,7 +443,7 @@
     "path": ".github/workflows/public-workflow-policy.yml",
     "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
     "nodeSHA256": "3c2f0c49ba03bc87e0aeebcd40257f3285d9b3e4a0b79982f795d6bfd5117bf9",
-    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
     "state": "active",
     "rationale": "Pinned actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff for reviewed public-workflow-policy.yml automation."
   },
