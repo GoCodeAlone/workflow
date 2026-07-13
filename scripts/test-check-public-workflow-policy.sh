@@ -109,6 +109,47 @@ osv_workflow="${repo_root}/.github/workflows/osv-scanner.yml"
 dependency_workflow="${repo_root}/.github/workflows/dependency-update.yml"
 benchmark_workflow="${repo_root}/.github/workflows/benchmark.yml"
 prerelease_workflow="${repo_root}/.github/workflows/pre-release.yml"
+grep_files_fail_closed() {
+  local label="$1"
+  local status=0
+  shift
+  grep "$@" || status=$?
+  if [[ "${status}" -gt 1 ]]; then
+    echo "failed to scan ${label}" >&2
+    exit "${status}"
+  fi
+  return "${status}"
+}
+grep_workflow_files() {
+  local workflow_file
+  local workflow_files=()
+  for workflow_file in \
+    "${repo_root}/.github/workflows"/*.yml \
+    "${repo_root}/.github/workflows"/*.yaml; do
+    if [[ -f "${workflow_file}" && ! -L "${workflow_file}" ]]; then
+      workflow_files+=("${workflow_file}")
+    fi
+  done
+  if [[ "${#workflow_files[@]}" -eq 0 ]]; then
+    return 1
+  fi
+  grep_files_fail_closed "top-level public workflow files" \
+    "$@" "${workflow_files[@]}"
+}
+workflow_match_count() {
+  local pattern="$1"
+  local matches
+  local status=0
+  matches="$(grep -Eoh -- "${pattern}" "${repo_root}/.github/workflows"/*.yml)" || status=$?
+  if [[ "${status}" -gt 1 ]]; then
+    return "${status}"
+  fi
+  if [[ -z "${matches}" ]]; then
+    printf '0\n'
+  else
+    printf '%s\n' "${matches}" | wc -l | tr -d ' '
+  fi
+}
 if [[ "$(grep -Fc -- 'uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5' "${governance_workflow}")" -ne 1 ]]; then
   echo "public policy must check out only the trusted base" >&2
   exit 1
@@ -147,7 +188,9 @@ if [[ ! "${tree_mode_line}" -lt "${archive_line}" ||
   echo "candidate archive validation must precede extraction of the same bytes" >&2
   exit 1
 fi
-if rg -n -- 'Check out candidate|path: candidate|persist-credentials: true|git (checkout|switch|worktree)' "${governance_workflow}"; then
+if grep_files_fail_closed "candidate governance workflow" -En -- \
+  'Check out candidate|path: candidate|persist-credentials: true|git (checkout|switch|worktree)' \
+  "${governance_workflow}"; then
   echo "candidate policy input can enter an executable checkout" >&2
   exit 1
 fi
@@ -200,17 +243,16 @@ grep -Fq -- '.type == "deletion"' "${protection_verifier}"
 grep -Fq -- '.actor_type == "OrganizationAdmin"' "${protection_verifier}"
 grep -Fq -- 'git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main' "${repo_root}/.github/workflows/release.yml"
 grep -Fq -- 'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main' "${repo_root}/.github/workflows/release.yml"
-if rg -n --max-depth 1 --glob '*.yml' --glob '*.yaml' \
+if grep_workflow_files -EnH -- \
   'repo_dispatch_token|notify-workflow-registry|peter-evans/repository-dispatch|secrets\.|secrets\[' \
-  "${repo_root}/.github/workflows" || \
-  rg -n -- 'repo_dispatch_token|notify-workflow-registry|peter-evans/repository-dispatch' \
+  || grep_files_fail_closed "public workflow allowlists" -EnH -- \
+    'repo_dispatch_token|notify-workflow-registry|peter-evans/repository-dispatch' \
     "${repo_root}/.github/public-workflow-secret-allowlist.json" \
     "${repo_root}/.github/public-workflow-action-allowlist.json"; then
   echo "public workflows retain named-secret or publisher-side registry authority" >&2
   exit 1
 fi
-if rg -n --max-depth 1 --glob '*.yml' --glob '*.yaml' \
-  '^[ ]{4}uses:[[:space:]]' "${repo_root}/.github/workflows"; then
+if grep_workflow_files -EnH -- '^[ ]{4}uses:[[:space:]]'; then
   echo "public workflows retain a forbidden reusable-workflow job" >&2
   exit 1
 fi
@@ -222,12 +264,14 @@ jq -e '
   ([.bundles[] | select(.state == "staged")] | length) <= 1 and
   all(.bundles[]; (.files | length) > 0)
 ' "${authority_manifest}" >/dev/null
-if [[ "$(rg -o -- 'npm ci' "${repo_root}/.github/workflows"/*.yml | wc -l | tr -d ' ')" != \
-  "$(rg -o -- 'NODE_AUTH_TOKEN: \$\{\{ github.token \}\}' "${repo_root}/.github/workflows"/*.yml | wc -l | tr -d ' ')" ]]; then
+npm_ci_count="$(workflow_match_count 'npm ci')"
+npm_token_count="$(workflow_match_count 'NODE_AUTH_TOKEN: \$\{\{ github.token \}\}')"
+if [[ "${npm_ci_count}" != "${npm_token_count}" ]]; then
   echo "every npm ci step must receive the automatic GitHub Packages token" >&2
   exit 1
 fi
-if rg -F -- 'verify-public-workflow-branch-protection.sh' "${governance_workflow}"; then
+if grep_files_fail_closed "candidate governance workflow" -F -- \
+  'verify-public-workflow-branch-protection.sh' "${governance_workflow}"; then
   echo "public policy workflow cannot inspect privileged repository governance" >&2
   exit 1
 fi
@@ -606,9 +650,32 @@ fi
 
 legacy_go_patch='1.26.'
 legacy_go_patch+='4'
-if active_go_1264="$(cd "${repo_root}" && \
-  rg -n -F --hidden --glob '!**/.git/**' --glob '!docs/plans/**' \
-    "${legacy_go_patch}" . 2>&1)"; then
+scan_active_go_pins() (
+  local archive_path
+  local found=1
+  local status
+  cd "${repo_root}"
+  while IFS= read -r -d '' archive_path; do
+    case "${archive_path}" in
+      docs/plans/*) continue ;;
+    esac
+    if [[ ! -f "./${archive_path}" || -L "./${archive_path}" ]]; then
+      continue
+    fi
+    status=0
+    grep -nHF -- "${legacy_go_patch}" "./${archive_path}" || status=$?
+    case "${status}" in
+      0) found=0 ;;
+      1) ;;
+      *)
+        echo "failed to scan active/current Go pins" >&2
+        exit "${status}"
+        ;;
+    esac
+  done <"${archive_paths}"
+  exit "${found}"
+)
+if active_go_1264="$(scan_active_go_pins 2>&1)"; then
   echo "active/current Go pins still reference vulnerable Go ${legacy_go_patch}" >&2
   printf '%s\n' "${active_go_1264}" >&2
   exit 1
@@ -1723,9 +1790,8 @@ assert_exact_mutation_rejected() {
   fi
 }
 
-if rg -n --glob '*.yml' --glob '*.yaml' \
-  'secrets\.|RELEASES_TOKEN|GOPRIVATE|x-access-token|repo_dispatch_token|repository-dispatch' \
-  "${repo_root}/.github/workflows"; then
+if grep_workflow_files -EnH -- \
+  'secrets\.|RELEASES_TOKEN|GOPRIVATE|x-access-token|repo_dispatch_token|repository-dispatch'; then
   echo "pull_request-capable workflow retains repository-secret authority" >&2
   exit 1
 fi
