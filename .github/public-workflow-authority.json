@@ -142,7 +142,7 @@
         },
         {
           "path": "scripts/test-check-public-workflow-policy.sh",
-          "sha256": "55bafd6c7fa93776132b44eb8a4722c951a5dee6bc057e61c89b3f18343b4236"
+          "sha256": "0fdfce348563fdfe0c817bcf1ed81ceb0ab27a07e898733b74829b0645899ac7"
         }
       ]
     }

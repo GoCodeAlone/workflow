@@ -28,6 +28,26 @@ sha256_file() {
   fi
 }
 
+file_mode() {
+  if stat -f '%Lp' "$1" >/dev/null 2>&1; then
+    stat -f '%Lp' "$1"
+  else
+    stat -c '%a' "$1"
+  fi
+}
+
+assert_file_unchanged() {
+  local label="$1"
+  local expected="$2"
+  local actual="$3"
+  if ! cmp -s "${expected}" "${actual}" ||
+    [[ "$(sha256_file "${actual}")" != "$(sha256_file "${expected}")" ]] ||
+    [[ "$(file_mode "${actual}")" != "$(file_mode "${expected}")" ]]; then
+    echo "${label} changed outside the candidate extraction root" >&2
+    exit 1
+  fi
+}
+
 production_repo_root="$(cd "${repo_root}" && pwd -P)"
 production_status_before="$(git -C "${production_repo_root}" status --porcelain=v1 --untracked-files=all)"
 production_snapshot() {
@@ -399,7 +419,9 @@ case " $* " in
     fi
     ;;
   *" archive "*)
-    if [[ -n "${FAKE_REAL_ARCHIVE_REPO:-}" ]]; then
+    if [[ -n "${FAKE_ARCHIVE_TAR:-}" ]]; then
+      /bin/cat "${FAKE_ARCHIVE_TAR}"
+    elif [[ -n "${FAKE_REAL_ARCHIVE_REPO:-}" ]]; then
       archive_attributes=()
       if [[ " $* " == *" --worktree-attributes "* ]]; then
         archive_attributes+=(--worktree-attributes)
@@ -439,6 +461,7 @@ run_candidate_fetch() {
       FAKE_GIT_LOG="${workdir}/git.log" \
       FAKE_TAR_LOG="${workdir}/tar.log" \
       FAKE_ARCHIVE_ROOT="${archive_root}" \
+      FAKE_ARCHIVE_TAR="${FAKE_ARCHIVE_TAR:-}" \
       FAKE_LS_TREE_MODES="${FAKE_LS_TREE_MODES:-100644}" \
       bash -euo pipefail "${candidate_fetch_script}"
   )
@@ -485,29 +508,65 @@ if grep -Fq -- " archive " "${candidate_fetch_mismatch}/git.log"; then
   exit 1
 fi
 
-fake_symlink_archive="${tmp_dir}/fake-symlink-archive"
-mkdir -p "${fake_symlink_archive}/.github/workflows"
-ln -s ../../outside "${fake_symlink_archive}/.github/workflows/escape.yml"
-candidate_symlink_tree="${tmp_dir}/candidate-symlink-tree"
-if FAKE_LS_TREE_MODES=120000 \
-  run_candidate_fetch "${candidate_symlink_tree}" example/repo "${candidate_sha}" "${fake_symlink_archive}" >/dev/null 2>&1; then
-  echo "candidate fetch accepted a symlink tree entry" >&2
-  exit 1
-fi
-if grep -Fq -- " archive " "${candidate_symlink_tree}/git.log"; then
-  echo "candidate fetch archived data before rejecting a symlink tree entry" >&2
-  exit 1
-fi
-if [[ -s "${candidate_symlink_tree}/tar.log" ]]; then
-  echo "candidate fetch invoked tar before rejecting a symlink tree entry" >&2
-  exit 1
-fi
+for denied_mode in 120000 160000; do
+  candidate_mode_workdir="${tmp_dir}/candidate-mode-${denied_mode}"
+  set +e
+  candidate_mode_output="$(FAKE_LS_TREE_MODES="${denied_mode}" \
+    run_candidate_fetch "${candidate_mode_workdir}" example/repo "${candidate_sha}" "${fake_archive}" 2>&1)"
+  candidate_mode_status=$?
+  set -e
+  if [[ "${candidate_mode_status}" -eq 0 ]] || ! grep -Fq -- \
+    "candidate tree contains forbidden object mode: ${denied_mode}" <<<"${candidate_mode_output}"; then
+    echo "candidate fetch accepted forbidden Git object mode ${denied_mode}" >&2
+    printf '%s\n' "${candidate_mode_output}" >&2
+    exit 1
+  fi
+  if grep -Fq -- " archive " "${candidate_mode_workdir}/git.log"; then
+    echo "candidate fetch archived data before rejecting Git object mode ${denied_mode}" >&2
+    exit 1
+  fi
+  if [[ -s "${candidate_mode_workdir}/tar.log" ]]; then
+    echo "candidate fetch invoked tar before rejecting Git object mode ${denied_mode}" >&2
+    exit 1
+  fi
+done
+
+symlink_archive_link_stage="${tmp_dir}/symlink-archive-link-stage"
+symlink_archive_payload_stage="${tmp_dir}/symlink-archive-payload-stage"
+malicious_symlink_tar="${tmp_dir}/malicious-symlink.tar"
+mkdir -p \
+  "${symlink_archive_link_stage}/.github/workflows" \
+  "${symlink_archive_payload_stage}/.github/workflows/escape"
+ln -s ../../../trusted/escape-target \
+  "${symlink_archive_link_stage}/.github/workflows/escape"
+printf 'attacker overwrite\n' >"${symlink_archive_payload_stage}/.github/workflows/escape/sentinel"
+/usr/bin/tar -cf "${malicious_symlink_tar}" \
+  -C "${symlink_archive_link_stage}" .github/workflows/escape
+/usr/bin/tar -rf "${malicious_symlink_tar}" \
+  -C "${symlink_archive_payload_stage}" .github/workflows/escape/sentinel
 
 candidate_symlink_tar="${tmp_dir}/candidate-symlink-tar"
-if run_candidate_fetch "${candidate_symlink_tar}" example/repo "${candidate_sha}" "${fake_symlink_archive}" >/dev/null 2>&1; then
-  echo "candidate fetch accepted a symlink archive entry" >&2
+symlink_expected_sentinel="${tmp_dir}/symlink-expected-sentinel"
+symlink_external_sentinel="${candidate_symlink_tar}/trusted/escape-target/sentinel"
+mkdir -p "$(dirname "${symlink_external_sentinel}")"
+printf 'trusted symlink sentinel\n' >"${symlink_expected_sentinel}"
+chmod 0640 "${symlink_expected_sentinel}"
+cp -p "${symlink_expected_sentinel}" "${symlink_external_sentinel}"
+set +e
+candidate_symlink_output="$(FAKE_ARCHIVE_TAR="${malicious_symlink_tar}" \
+  run_candidate_fetch "${candidate_symlink_tar}" example/repo "${candidate_sha}" "${fake_archive}" 2>&1)"
+candidate_symlink_status=$?
+set -e
+if [[ "${candidate_symlink_status}" -eq 0 ]] || ! grep -Fq -- \
+  "candidate archive contains a forbidden entry type" <<<"${candidate_symlink_output}"; then
+  echo "candidate fetch accepted a sibling-escaping symlink archive" >&2
+  printf '%s\n' "${candidate_symlink_output}" >&2
   exit 1
 fi
+grep -Fq -- ".github/workflows/escape -> ../../../trusted/escape-target" \
+  "${candidate_symlink_tar}/candidate.tar.list"
+grep -Fq -- ".github/workflows/escape/sentinel" \
+  "${candidate_symlink_tar}/candidate.tar.list"
 if ! grep -Fq -- "-tvf candidate.tar" "${candidate_symlink_tar}/tar.log"; then
   echo "candidate fetch did not inspect a symlink archive before rejection" >&2
   exit 1
@@ -516,6 +575,49 @@ if grep -Eq -- '(^| )(-[^ ]*x[^ ]*|--extract)( |$)' "${candidate_symlink_tar}/ta
   echo "candidate fetch extracted a symlink archive before rejection" >&2
   exit 1
 fi
+assert_file_unchanged \
+  "trusted symlink sentinel" "${symlink_expected_sentinel}" "${symlink_external_sentinel}"
+
+hardlink_archive_stage="${tmp_dir}/hardlink-archive-stage"
+malicious_hardlink_tar="${tmp_dir}/malicious-hardlink.tar"
+mkdir -p "${hardlink_archive_stage}"
+printf 'hardlink source\n' >"${hardlink_archive_stage}/source"
+ln "${hardlink_archive_stage}/source" "${hardlink_archive_stage}/special-hardlink"
+/usr/bin/tar -cf "${malicious_hardlink_tar}" \
+  -C "${hardlink_archive_stage}" source special-hardlink
+
+candidate_hardlink_tar="${tmp_dir}/candidate-hardlink-tar"
+hardlink_expected_sentinel="${tmp_dir}/hardlink-expected-sentinel"
+hardlink_external_sentinel="${candidate_hardlink_tar}/trusted/escape-target/sentinel"
+mkdir -p "$(dirname "${hardlink_external_sentinel}")"
+printf 'trusted hardlink sentinel\n' >"${hardlink_expected_sentinel}"
+chmod 0600 "${hardlink_expected_sentinel}"
+cp -p "${hardlink_expected_sentinel}" "${hardlink_external_sentinel}"
+set +e
+candidate_hardlink_output="$(FAKE_ARCHIVE_TAR="${malicious_hardlink_tar}" \
+  run_candidate_fetch "${candidate_hardlink_tar}" example/repo "${candidate_sha}" "${fake_archive}" 2>&1)"
+candidate_hardlink_status=$?
+set -e
+if [[ "${candidate_hardlink_status}" -eq 0 ]] || ! grep -Fq -- \
+  "candidate archive contains a forbidden entry type" <<<"${candidate_hardlink_output}"; then
+  echo "candidate fetch accepted a hardlink archive entry" >&2
+  printf '%s\n' "${candidate_hardlink_output}" >&2
+  exit 1
+fi
+if ! grep -Eq -- '^h.*special-hardlink' "${candidate_hardlink_tar}/candidate.tar.list"; then
+  echo "hardlink archive fixture did not contain a hardlink entry" >&2
+  exit 1
+fi
+if ! grep -Fq -- "-tvf candidate.tar" "${candidate_hardlink_tar}/tar.log"; then
+  echo "candidate fetch did not inspect a hardlink archive before rejection" >&2
+  exit 1
+fi
+if grep -Eq -- '(^| )(-[^ ]*x[^ ]*|--extract)( |$)' "${candidate_hardlink_tar}/tar.log"; then
+  echo "candidate fetch extracted a hardlink archive before rejection" >&2
+  exit 1
+fi
+assert_file_unchanged \
+  "trusted hardlink sentinel" "${hardlink_expected_sentinel}" "${hardlink_external_sentinel}"
 
 real_attribute_repo="${tmp_dir}/real-attribute-repo"
 mkdir -p "${real_attribute_repo}/.github/workflows"
