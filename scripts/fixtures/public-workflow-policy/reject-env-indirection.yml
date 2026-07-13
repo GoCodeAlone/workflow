@@ -1,0 +1,24 @@
+name: Forbidden environment indirection
+
+on:
+  pull_request:
+
+env:
+  TOOL: doctl
+  ENDPOINT: https://api.digitalocean.com/v2
+
+jobs:
+  indirect-provider-command:
+    runs-on: ubuntu-latest
+    env:
+      SDK_PACKAGE: github.com/digitalocean/godo
+    steps:
+      - run: '"$TOOL" compute droplet list; curl "$ENDPOINT"'
+
+  dynamic-shells:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          eval "$COMMAND"
+          bash -c "$COMMAND"
+          sh -c "$COMMAND"

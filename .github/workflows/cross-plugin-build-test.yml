@@ -34,11 +34,9 @@ concurrency:
 permissions:
   contents: read
 
-# R2 review: match the repo-standard Go module env used by ci.yml + codeql.yml so
-# downstream plugin builds resolve github.com/GoCodeAlone/* deps consistently.
-env:
-  GOPRIVATE: github.com/GoCodeAlone/*
-  GONOSUMCHECK: github.com/GoCodeAlone/*
+defaults:
+  run:
+    shell: bash
 
 jobs:
   cross-plugin-build:

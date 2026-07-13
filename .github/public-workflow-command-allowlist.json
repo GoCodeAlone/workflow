@@ -1,0 +1,1794 @@
+[
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "c0c433693a307a0c5c423fa126f7690084d93243b539c72221d5148dcaa24f09",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "21430cc4ac1193bbb95ec1575f04ae6b65d6ada2b4bca8c4195d288c9bc449bf",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed awk statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "benchstat",
+    "statementSHA256": "961fec081cdb44d1e3ef10393cce0840c1f3ec48cc068f492701cf03de6ffed7",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed benchstat statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "break",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed break statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cp",
+    "statementSHA256": "ecf28d9064234b3ad9daccf68db49f1f91c65c21c2ac8f1dae3c06b65132d9d8",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed cp statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "175ed3056dc0639f05e3a0de9d2616f294cfadefd6089f69cbac1dffbd6490dd",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "21430cc4ac1193bbb95ec1575f04ae6b65d6ada2b4bca8c4195d288c9bc449bf",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "6ea234c2788bcc4ba388da39084e63ae28c829e83006b91554859019723f2c07",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "7041a39bf0738820394b5fc1f03e6d760956bb63942be0a85157550c6987511c",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "eedcefe944dfb5c1a4d393497272271bfa8ea66bfb96435c7881d477a4df550d",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "1a21be8bb1dc4721d30cc1850ead617faa55ae9aebf416da4369668bdeaf0824",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "go",
+    "statementSHA256": "3c1b589932f67a655ff6bfb1741a31b1c9ab4668b3e6b408e4fcf96472c20edb",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "go",
+    "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "grep",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "read",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed read statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "tail",
+    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed tail statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "tee",
+    "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed tee statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "true",
+    "statementSHA256": "961fec081cdb44d1e3ef10393cce0840c1f3ec48cc068f492701cf03de6ffed7",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "rationale": "Exact reviewed true statement for benchmark.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "07316a6dee4fa421f202dd55c47def6146f4bfdac654bb879860cdfc1a35a9ea",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "382ca07cb95080b3c93d28d1d5ed08c7a243e6a172dcde7914225ab80f170452",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "3f2364983a794efb2e46b4801974c38b4bf6d5e1fc055ce31fc887a31fa3820c",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "9f65eed4afa41afc2b6d4191e175afd313960d00b44b8d8897b439c6d5a549c0",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "d02333163acb2a002b2f00961a5ffa46ef990eaacaaf930132129e4900e5ba37",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "[",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "[",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "[",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "audit-cloud-symbols.sh",
+    "statementSHA256": "32084b0bd50db35412979127f9b6e37eb3581e64c1ee7e8249458badaa35742b",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Run the exact hash-bound core cloud-SDK boundary audit."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "17e52953ed4faf4c86413738740a5673c00021f03375fcda35f2cd1a400749ff",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "81f8a8bb0252e7c0ab24019ede6124b516d8eb9a2e00f43927fb3065631949ae",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "92f0ca32bddd727ae2912374c0aec5686041a0966972274686cf8a013a89b1a3",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "d97a7e99821a0fdb80c5ddc4ebb5ac872572ff770b86cff9eedfeb85a67f4feb",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "check-public-workflow-policy.sh",
+    "statementSHA256": "2000f63928c4818a9653d149623438efcababa010d3b4b6f776e4b5cdec768b1",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Run the exact hash-bound public workflow policy check."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "c2f927ee34e00d06f3daa9cf4baf6048e53f0319e52a13df6c8e6cbb44a7bd84",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "d9226bd7f30f8e40be5a58694ca48084e36e69db4535df313c35c288e88b0da6",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "exit",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "exit",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "find",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed find statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "5b49e49b41e5006e0aaf449e50811687a97834b64c2a4273d8b2dc6f5b6e89c4",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "7b87c971c975fcaeb3a40a34f47ff8c3f2d698282a0b5d7400831b0dc13fd456",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "9acb5173a63ca7ad834e42ba202de48f945806765c110e4cb90e366980229a88",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "a5dc2ca2789cc2eb9e4ca1ca36a970deb7fc37fda61954d7bf1f41c7055327e1",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "d74f87aa2ba416c536083533d6f836d3a2991c94bdbf777f65bbf9583a7d6eae",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "07316a6dee4fa421f202dd55c47def6146f4bfdac654bb879860cdfc1a35a9ea",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "151a1642363d89e5acbb5e513a50290c47fbc96d24523440353dd16e73386645",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "26041f77388bcaa32465908b060d7476b5114371241c1c195ef74b70d2252995",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "2d41bcec9837f54956908dd2d0b0a8f2807d7f06604c5a11a0eb74bb9cfbba5c",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "42a8263a643ccbe692d70752ffdd8cea328fc2d3190677df1485ee06f55b350a",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "4e7f68cf26c2ff26989715c4bbf23f715c4e0923a4f7bf66ed82c4fa536456b4",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "5aebdf7446ebca99f13ca2b455880d5d55233a2d83498cf097922da02828b02f",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "8ae32f1ee523f29fdfeeef0f9c855a5c669aa3899989085af27d95a0640d8595",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "e0d3de6e43dc98e02cdf01a691a746c2d4558a598f92a3dda32d71e372927aa0",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "eeb0b460bb01315284c7e24a75dd833efca6415522c0343b15b880ef7220c5ba",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "f7061781d47f4bb513d9b9fb1ed3cd376f2c7d61f2946f106b559d006dbd8ba1",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "0b5fa343e243742f1115a207b9c1d7445ca6d8c9b323c1be8e92a2e000a90e62",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "7e5cf50406f390d8f6d072addd0a5fd37b0a4383f6171301dd7864e8b3a55517",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "9e7f4d6735de80c53f51fd2d178ff706d9a66c5ed3991577348693fd1da9ca0b",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "e708827d46940e663db927e2c4d82356e6f24a0401684c2f7aba1ac0b6ceb8b1",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "f829a4e81705d8ec453a2fd14f4bf538610cdcf327199556c2068e50b3ed4c88",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "head",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed head statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "17e52953ed4faf4c86413738740a5673c00021f03375fcda35f2cd1a400749ff",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "92f0ca32bddd727ae2912374c0aec5686041a0966972274686cf8a013a89b1a3",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "d97a7e99821a0fdb80c5ddc4ebb5ac872572ff770b86cff9eedfeb85a67f4feb",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "printf",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed printf statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "read",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed read statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "sed",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed sed statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "set",
+    "statementSHA256": "2e1a7639d1948bff0214cdd5718cd1f7b8e6dd5ff44fe84790357701f90c19fb",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed set statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "set",
+    "statementSHA256": "825769eed1c7cd6531f7d329eba635d64140a7ee9d8c6363ff00a953d7e071f9",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed set statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "sort",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed sort statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "test-check-public-workflow-policy.sh",
+    "statementSHA256": "fadc93497dfe2d7f2ceefe3e759006346002bc51a874f0591e43bcfaaf9ee391",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Run the exact hash-bound public workflow mutation harness."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "timeout",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed timeout statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "true",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "rationale": "Exact reviewed true statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/codeql.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "ffb74a9ad3e9f35becd334f851f8bc60bf0c0bfa146ec9e2befbc0511e6b3ffe",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for codeql.yml automation."
+  },
+  {
+    "path": ".github/workflows/codeql.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "ffb74a9ad3e9f35becd334f851f8bc60bf0c0bfa146ec9e2befbc0511e6b3ffe",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for codeql.yml automation."
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "command": "echo",
+    "statementSHA256": "029d90f82b2e768d7b6c85781af08aa9fc2f20ce52ba13047833f636d6a3170c",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for copilot-setup-steps.yml automation."
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "command": "echo",
+    "statementSHA256": "5040ee4f5cf51d4a1f7af242edd29822fe81365d6f2de84e5ec7b0d72fd26128",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for copilot-setup-steps.yml automation."
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "command": "go",
+    "statementSHA256": "26041f77388bcaa32465908b060d7476b5114371241c1c195ef74b70d2252995",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for copilot-setup-steps.yml automation."
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "command": "go",
+    "statementSHA256": "42a8263a643ccbe692d70752ffdd8cea328fc2d3190677df1485ee06f55b350a",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for copilot-setup-steps.yml automation."
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "command": "go",
+    "statementSHA256": "c723f65692c39b2622d781ca9baba3bdae3a28febc71b864e864abb41bdb879e",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for copilot-setup-steps.yml automation."
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "command": "golangci-lint",
+    "statementSHA256": "8480be014e89507a321d566e76f93c96dd3781212c961d95f4626eda20bfb6d7",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "rationale": "Exact reviewed golangci-lint statement for copilot-setup-steps.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "cd",
+    "statementSHA256": "18620c11782873c9875d5463e213aa7b1512e22d3312c1282d0aa64d594ff573",
+    "contextSHA256": "a27b51b12443ad48839aaee1f6175464ce7e774e86ced8071e6604a0e156c2b0",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for cross-plugin-build-test.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "go",
+    "statementSHA256": "5aebdf7446ebca99f13ca2b455880d5d55233a2d83498cf097922da02828b02f",
+    "contextSHA256": "a27b51b12443ad48839aaee1f6175464ce7e774e86ced8071e6604a0e156c2b0",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for cross-plugin-build-test.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "go",
+    "statementSHA256": "854004a0c269ca4993dad170dc3f7d6e996493547b7c6b5c5c83cf20d113b42a",
+    "contextSHA256": "a27b51b12443ad48839aaee1f6175464ce7e774e86ced8071e6604a0e156c2b0",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for cross-plugin-build-test.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "go",
+    "statementSHA256": "8d527f7bed54e4ac9fdb128ab47b188da24e51e7d5e019db6e208f1795b5deb4",
+    "contextSHA256": "a27b51b12443ad48839aaee1f6175464ce7e774e86ced8071e6604a0e156c2b0",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for cross-plugin-build-test.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "go",
+    "statementSHA256": "a65972d083c0ae1369f5d486f15a5229a7bd87f8575244efbc5616a75ef4ec72",
+    "contextSHA256": "a27b51b12443ad48839aaee1f6175464ce7e774e86ced8071e6604a0e156c2b0",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for cross-plugin-build-test.yml automation."
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "command": "cd",
+    "statementSHA256": "31fa6994f931a8387ed2de72884b88124b344830ce3e41e323a8a61c8bbd3cdd",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for dependency-update.yml automation."
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "command": "cd",
+    "statementSHA256": "81f8a8bb0252e7c0ab24019ede6124b516d8eb9a2e00f43927fb3065631949ae",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for dependency-update.yml automation."
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "command": "go",
+    "statementSHA256": "1bb497e3e13a1105cf24e3359fa3ef75de08b66ff8a2839cd7f9ea97824d9eb3",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for dependency-update.yml automation."
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "command": "go",
+    "statementSHA256": "31fa6994f931a8387ed2de72884b88124b344830ce3e41e323a8a61c8bbd3cdd",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for dependency-update.yml automation."
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "command": "go",
+    "statementSHA256": "5aebdf7446ebca99f13ca2b455880d5d55233a2d83498cf097922da02828b02f",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for dependency-update.yml automation."
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "command": "go",
+    "statementSHA256": "8961a3f12aa37d9a2f8dc5236cda96031d6a0dc9282023220ae0681b7a0d8265",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for dependency-update.yml automation."
+  },
+  {
+    "path": ".github/workflows/helm-lint.yml",
+    "command": "helm",
+    "statementSHA256": "3295bcc6da39e9d7171a4225fcb1e58c473a6312a74061c5a0d76b1fbc36d1f9",
+    "contextSHA256": "da77d154893ef019dc531722a42332d215ebed9f9cd758ec277cfc73f80d3ff1",
+    "state": "active",
+    "rationale": "Exact reviewed helm statement for helm-lint.yml automation."
+  },
+  {
+    "path": ".github/workflows/helm-lint.yml",
+    "command": "helm",
+    "statementSHA256": "591b079560fda70ba78fe068830b729be5c688ed2deada5a5b1839c1a4c3641c",
+    "contextSHA256": "da77d154893ef019dc531722a42332d215ebed9f9cd758ec277cfc73f80d3ff1",
+    "state": "active",
+    "rationale": "Exact reviewed helm statement for helm-lint.yml automation."
+  },
+  {
+    "path": ".github/workflows/helm-lint.yml",
+    "command": "helm",
+    "statementSHA256": "644e7f48153430de5f0889694dd0222f89942e207050b85ded6c04c4f530cabf",
+    "contextSHA256": "da77d154893ef019dc531722a42332d215ebed9f9cd758ec277cfc73f80d3ff1",
+    "state": "active",
+    "rationale": "Exact reviewed helm statement for helm-lint.yml automation."
+  },
+  {
+    "path": ".github/workflows/helm-lint.yml",
+    "command": "helm",
+    "statementSHA256": "8c8b7a869f13d9a8a0f3f49a3c5da237e4f35f997c1ae3777aa790c81ab7093f",
+    "contextSHA256": "da77d154893ef019dc531722a42332d215ebed9f9cd758ec277cfc73f80d3ff1",
+    "state": "active",
+    "rationale": "Exact reviewed helm statement for helm-lint.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "echo",
+    "statementSHA256": "313450d5338f44e4a529e031e99a0e3b42d07904f31d914ecc06c40f0ef85bf4",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "rationale": "Exact reviewed invalid-base diagnostic for pull-request OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "echo",
+    "statementSHA256": "a59997b22ead85f5bdb580c1f47b6203c2f97d16970f9a0e5be2018e188c8ea4",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "rationale": "Exact reviewed invalid-base diagnostic for merge-group OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "exit",
+    "statementSHA256": "313450d5338f44e4a529e031e99a0e3b42d07904f31d914ecc06c40f0ef85bf4",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "rationale": "Exact reviewed invalid-base rejection for pull-request OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "exit",
+    "statementSHA256": "a59997b22ead85f5bdb580c1f47b6203c2f97d16970f9a0e5be2018e188c8ea4",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "rationale": "Exact reviewed invalid-base rejection for merge-group OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "git",
+    "statementSHA256": "daebbb2c5b1b6a8fbe4ffcb6b12e0d356811af9119fae54c6733170dc7b40e74",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "rationale": "Exact reviewed candidate-commit restore for differential OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "git",
+    "statementSHA256": "db4b94eee2fcbb4f7e0c067ed70145753d7f6b8c479622cde0875d1026694029",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "rationale": "Exact reviewed event-specific base checkout for differential OSV scanning."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "$assignment",
+    "statementSHA256": "17130f0e2508de3af58c07c7035c18f65ed543090aa3a4ba91d966a3997fd947",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "$assignment",
+    "statementSHA256": "2934ee1d655adfa3a114c47856418b02ee0f4a3643b6958bd7b27615f1fa617c",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed snapshot release query assignment for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "$assignment",
+    "statementSHA256": "bee7f91ad7fd08ae67f0f9af901e8afacd6da25045007cc145266ca72f9d7cd0",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "$assignment",
+    "statementSHA256": "d949518edc4df9d96ee9c32c28d9c8dec608757b540c726b58ea7af9a71f75d8",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "$assignment",
+    "statementSHA256": "f1aa3b07b8aadb3a72296066e1d2b4b9786855903f31b71a35009b558cccc71b",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "cd",
+    "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "cd",
+    "statementSHA256": "bf97c2b1c84c2252a469aab4dce99637a3408fe5f891af7ad7f0ab209b0f2f7d",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "continue",
+    "statementSHA256": "f313c98ee0bf4a245c969227f5e880ea516fc6a32cf013838a886d7874466cb2",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed empty snapshot tag guard for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "cp",
+    "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed cp statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "echo",
+    "statementSHA256": "33262c9f58255699a2419fc78e1802c1cbeb1589608fe06a55dbf7456bc8437c",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "echo",
+    "statementSHA256": "79b103b8187128596c08f49b6e6d457e4e2194313b29e2bc42dc9e6484d9d210",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "gh",
+    "statementSHA256": "2934ee1d655adfa3a114c47856418b02ee0f4a3643b6958bd7b27615f1fa617c",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed snapshot release query for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "gh",
+    "statementSHA256": "504ef6312f839e2e5cea084c75ceaa8ad075f8c39ea9b958acc31756dab21bcc",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed gh statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "gh",
+    "statementSHA256": "f313c98ee0bf4a245c969227f5e880ea516fc6a32cf013838a886d7874466cb2",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed snapshot release deletion loop for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "git",
+    "statementSHA256": "17130f0e2508de3af58c07c7035c18f65ed543090aa3a4ba91d966a3997fd947",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "git",
+    "statementSHA256": "f1aa3b07b8aadb3a72296066e1d2b4b9786855903f31b71a35009b558cccc71b",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "0a35542d7dae6ed6ef183178768c9c2698530b93d66f4db574d09a0a7eba68ed",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "40b7c79f0a0bab2d1781d59aba9d5a7ecab0daff76049ac14f0d90351b6ad909",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "5bcb9e1163c56899af4f7e03bf8306273129ce35736d6b1a3f9da50df9907b88",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "67937fa1d645693a707c385521c305c3719d3e75c405d2f8c00a56b7e8cf4382",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "7916340ef3a7fdd34023e4bf6c4559bd2fb8216d7513e532e619e1831eca6df3",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "7c60c515105c431fa332bc3d23711376e29ff65513e68ce5d595d81d504e684d",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "be92f2f5cb9c06b2eb838608df1209d60d51ff5fc91b3b5650147b709313e295",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "c4eb511062538e4d8dadc4ec87b8afa9885493e232d27d61e065314301f22cdc",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "ce4c11049a331dde75f86f427931d352bc26806e00845c9ddb09b37ab5e6a296",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "e0b29b872409fc83f7d942b1cf86f1657b2bf349cc4f2412ce08dd48039c8d91",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "go",
+    "statementSHA256": "f838e2989ad0c0e55fcc15089ebd3421ae2722ed2f39591119be5541b8b578e4",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "ko",
+    "statementSHA256": "33262c9f58255699a2419fc78e1802c1cbeb1589608fe06a55dbf7456bc8437c",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed ko statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "ko",
+    "statementSHA256": "fc6c9b8445d56d49656d57a6ce55ed8510f31b6a6d929afef51b0d51405b371a",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed ko statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "mkdir",
+    "statementSHA256": "4836713ba787e4300751fff29bba230abdbcfb5ffc09f9048e4280fce2776d34",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed mkdir statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "mkdir",
+    "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed mkdir statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "read",
+    "statementSHA256": "f313c98ee0bf4a245c969227f5e880ea516fc6a32cf013838a886d7874466cb2",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed snapshot tag loop reader for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "sha256sum",
+    "statementSHA256": "7856813037b521f0d4827cec9cde7932854817b79e837da88e2c0d9ed8ea3e0a",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed sha256sum statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "command": "tar",
+    "statementSHA256": "e2946a02aad54fa01bebd92c94d8416e39f8fa40a40f02eb37bd22724ea8be13",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "rationale": "Exact reviewed tar statement for pre-release.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "$assignment",
+    "statementSHA256": "0e17e768c1484e9def2346c58a2c32d337d4c33d780f0ffc79504af0c40ecba7",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "$assignment",
+    "statementSHA256": "66d1ee88edc672ead2282e1e159bc382cc6fad2c13a86c6ce585e0082a006b8d",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "$assignment",
+    "statementSHA256": "6af7f417e806699121e4d583e17b42321a812a4b8237364a263b970d48dc6132",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "$assignment",
+    "statementSHA256": "6e78bfd0781f308df8a82c819888f28647df16892ba5a7cef1571b725e102383",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "$assignment",
+    "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "[",
+    "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "[",
+    "statementSHA256": "5f8e07c6f716cb7da7802dc483fb1d72aed7f4a46b0fe6e2b79633123f4c775e",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Selects the exact reviewed bootstrap or trusted policy path."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "cd",
+    "statementSHA256": "5f8e07c6f716cb7da7802dc483fb1d72aed7f4a46b0fe6e2b79633123f4c775e",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "check-public-workflow-policy.sh",
+    "statementSHA256": "5f8e07c6f716cb7da7802dc483fb1d72aed7f4a46b0fe6e2b79633123f4c775e",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Run the trusted hash-bound policy wrapper against inert candidate data."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "4ade2e44c08380b704763da57c411f70fc54eebcabf0abd0277746786def0bf8",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "7c133076e6ce17d413f1327ea6d975f452d350aba142430d9ad85847205e36b8",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "c7f1a421fa15eeab86ac50981d3a6b99248925a1dc7d62f2847e9a82efe2a4a1",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "fe9e84eb32be5ac99349d7e60340785a6e5b3750dcecf795514c53ec76253516",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "echo",
+    "statementSHA256": "ff503c4cc7be7d35246d5c16eca55f3af89544a6ad9ffc6bf0bb0cbe4a199d19",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "4ade2e44c08380b704763da57c411f70fc54eebcabf0abd0277746786def0bf8",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "c7f1a421fa15eeab86ac50981d3a6b99248925a1dc7d62f2847e9a82efe2a4a1",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "e5888a15646c95e95768c301658269ab4880ac40a2aed5200133899101db0a56",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "fe9e84eb32be5ac99349d7e60340785a6e5b3750dcecf795514c53ec76253516",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "exit",
+    "statementSHA256": "ff503c4cc7be7d35246d5c16eca55f3af89544a6ad9ffc6bf0bb0cbe4a199d19",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed exit statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "find",
+    "statementSHA256": "6af7f417e806699121e4d583e17b42321a812a4b8237364a263b970d48dc6132",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed find statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "git",
+    "statementSHA256": "0cf020cfd2b573841c37a0529d43d5b53f9b318028b28b3536b2f6aff30f02bc",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "git",
+    "statementSHA256": "2dc46d037c2bf0885d2c864a2d1f4b7c6b204acccc1f374ae455291145e20150",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "git",
+    "statementSHA256": "66d1ee88edc672ead2282e1e159bc382cc6fad2c13a86c6ce585e0082a006b8d",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "git",
+    "statementSHA256": "9919b241412c88da2b0a86cbeaab201cc2323a2fd0c957e2f726ebc62b7282a6",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "mkdir",
+    "statementSHA256": "42f84c05333b2c7011f332ebca981a05c457d59e7595b13dac5dee7f58429d60",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed mkdir statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "command": "tar",
+    "statementSHA256": "2dc46d037c2bf0885d2c864a2d1f4b7c6b204acccc1f374ae455291145e20150",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "rationale": "Exact reviewed tar statement for public-workflow-policy.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "0d3dd7fc51aac4485661b11f1f1d8caeab15dac23b29f106bd49937d067f94a1",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "0e244e29d5df9fd3f28e4a446f74145a20ef81f56815883d179da598932d86e7",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "17d4be78546c77315e004e96d8efc49e6925cfc925826720a16650a158861a3b",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "380af18fb98580a7895b6ed48a7bc788a113ccdf2d13e229a1a35686feaba480",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "6dcc8464a85a7d8fe9f2e93f724d3f1a41a26b48588bbd188387be43f6fc6fec",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "b859368337e6cc218a04f48861a1e1d439e0bb3d590849b7cfc2d50af021b652",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "c7bfd710ace4bd365c9a0c50b998697c0a530186c23a735c1924371fb65e1745",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "d949518edc4df9d96ee9c32c28d9c8dec608757b540c726b58ea7af9a71f75d8",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$assignment",
+    "statementSHA256": "fc93f9757c8164581fa8c15cdb307cd7e406a985ed1a294dd45d35f0ac78d97b",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed literal assignment for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "$statement",
+    "statementSHA256": "e7a79f3621c555ffe718dee785aa22019fd518fd87df94919723ee950e3525f3",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed Bash control statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "[",
+    "statementSHA256": "b859368337e6cc218a04f48861a1e1d439e0bb3d590849b7cfc2d50af021b652",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed [ statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cat",
+    "statementSHA256": "27d01f1284610163c4e7161a2980b8629e695148d418acc3faabdcb9af4bcd9b",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cat statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cat",
+    "statementSHA256": "f78d5ae7d2e5a00cda3073ccae91d842d555eb7c9e16203a6e8702b3254606e0",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cat statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cd",
+    "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cd",
+    "statementSHA256": "92f0ca32bddd727ae2912374c0aec5686041a0966972274686cf8a013a89b1a3",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cd",
+    "statementSHA256": "a5d465c4e2ee847c72636e28cc99a01aae9637d3db013955089c34dc169e4957",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cd",
+    "statementSHA256": "bf97c2b1c84c2252a469aab4dce99637a3408fe5f891af7ad7f0ab209b0f2f7d",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cd statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cp",
+    "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cp statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "cut",
+    "statementSHA256": "0e244e29d5df9fd3f28e4a446f74145a20ef81f56815883d179da598932d86e7",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed cut statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "echo",
+    "statementSHA256": "0e244e29d5df9fd3f28e4a446f74145a20ef81f56815883d179da598932d86e7",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "echo",
+    "statementSHA256": "33262c9f58255699a2419fc78e1802c1cbeb1589608fe06a55dbf7456bc8437c",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "echo",
+    "statementSHA256": "4c10142cede2562076c8be0e11e0294e47ada2a9f0f6cb7f591f231dbb4003a8",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "echo",
+    "statementSHA256": "b0f5fa4c98b54e86ea91fe315062cb2273baf3d96c84b0ca421cbcc70b535190",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "echo",
+    "statementSHA256": "b859368337e6cc218a04f48861a1e1d439e0bb3d590849b7cfc2d50af021b652",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "echo",
+    "statementSHA256": "c7bfd710ace4bd365c9a0c50b998697c0a530186c23a735c1924371fb65e1745",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed echo statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "gh",
+    "statementSHA256": "65debcf26a5ab6694e2361cecdfd4fd64233e247808ad2f4996818a674c45928",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed gh statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "gh",
+    "statementSHA256": "8bbb8822dafcc8a4a474181388e469a27b984cac98a83fb785edb5f7a9c114f6",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed gh statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "git",
+    "statementSHA256": "8a8dea32ba85ab1140409e072bba02f7ffe5e2499bd98785e9d9787a36a2c016",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "git",
+    "statementSHA256": "fa57beadffd02d8f90409c161a2d5efc056b0c9cff3e07809dbd8a5d306e1d1a",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed git statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "go",
+    "statementSHA256": "67937fa1d645693a707c385521c305c3719d3e75c405d2f8c00a56b7e8cf4382",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "go",
+    "statementSHA256": "b0f5fa4c98b54e86ea91fe315062cb2273baf3d96c84b0ca421cbcc70b535190",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "go",
+    "statementSHA256": "b859368337e6cc218a04f48861a1e1d439e0bb3d590849b7cfc2d50af021b652",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed go statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "jq",
+    "statementSHA256": "b0f5fa4c98b54e86ea91fe315062cb2273baf3d96c84b0ca421cbcc70b535190",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed jq statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "ko",
+    "statementSHA256": "33262c9f58255699a2419fc78e1802c1cbeb1589608fe06a55dbf7456bc8437c",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed ko statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "ko",
+    "statementSHA256": "5592792ba7e133e2a3cdca3f2787ba447d78b61259cd4cb2aeaf18becdf4fe5e",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed ko statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "mkdir",
+    "statementSHA256": "4836713ba787e4300751fff29bba230abdbcfb5ffc09f9048e4280fce2776d34",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed mkdir statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "mkdir",
+    "statementSHA256": "77bf368130272f2edad3a189e7afddcc44e1b018ab2b03650a5f6caac407d1fd",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed mkdir statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "npm",
+    "statementSHA256": "92f0ca32bddd727ae2912374c0aec5686041a0966972274686cf8a013a89b1a3",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "npm",
+    "statementSHA256": "a5d465c4e2ee847c72636e28cc99a01aae9637d3db013955089c34dc169e4957",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed npm statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "sed",
+    "statementSHA256": "4705b0268e9852bcf226eea3597ce7ffc81968a8ffffa3054d7ad34d619f9f15",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed sed statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "set",
+    "statementSHA256": "95a072144179105d838904c6e40336e6ae7f60851442039c0a7ac26ad9654cd2",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed set statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "sha256sum",
+    "statementSHA256": "4705b0268e9852bcf226eea3597ce7ffc81968a8ffffa3054d7ad34d619f9f15",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed sha256sum statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "tar",
+    "statementSHA256": "3d8d76c731d22b26f8ac9538b57e8cafc59008e587135b905d842a7330733191",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed tar statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "command": "tr",
+    "statementSHA256": "c7bfd710ace4bd365c9a0c50b998697c0a530186c23a735c1924371fb65e1745",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "rationale": "Exact reviewed tr statement for release.yml automation."
+  }
+]

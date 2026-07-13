@@ -10,9 +10,11 @@ permissions:
   contents: read
   packages: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
-  GOPRIVATE: github.com/GoCodeAlone/*
-  GONOSUMCHECK: github.com/GoCodeAlone/*
   # CI runners are ephemeral; the iac/diffcache filesystem cache would
   # cold-miss every job and waste a few ms on disk I/O. Force in-memory
   # mode per the T3.5 rev3 lifecycle constraint — no filesystem writes
@@ -21,6 +23,24 @@ env:
   WFCTL_DIFFCACHE: ":memory:"
 
 jobs:
+  public-workflow-policy:
+    name: Public Workflow Policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Check out code
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+    - name: Set up Go
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version: '1.26.4'
+        cache: false
+    - name: Enforce credential-free public workflow policy
+      run: ./scripts/check-public-workflow-policy.sh
+    - name: Exercise public workflow policy mutations
+      run: ./scripts/test-check-public-workflow-policy.sh
+
   test:
     name: Test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
@@ -51,10 +71,10 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Download dependencies
       run: |
@@ -65,23 +85,10 @@ jobs:
       run: |
         go test -v -race -coverprofile=coverage.out ./...
 
-    - name: Check Codecov token
-      id: codecov-token
-      if: always()
-      run: |
-        if [ -n "$CODECOV_TOKEN" ]; then
-          echo "available=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "available=false" >> "$GITHUB_OUTPUT"
-        fi
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
     - name: Upload coverage reports
       uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
-      if: always() && steps.codecov-token.outputs.available == 'true'
+      if: always()
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.out
         fail_ci_if_error: false
 
@@ -112,10 +119,10 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
@@ -150,10 +157,10 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build server binary
       run: go build -v -o /dev/null ./cmd/server
@@ -227,7 +234,7 @@ jobs:
     - name: Check out code
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ github.token }}
 
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
@@ -266,10 +273,6 @@ jobs:
     permissions:
       contents: read
       packages: read
-    defaults:
-      run:
-        working-directory: ui
-
     steps:
     - name: Check out code
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -283,15 +286,15 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Install dependencies
-      run: npm ci
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ github.token }}
+      run: cd ui && npm ci
 
     - name: Lint
-      run: npm run lint
+      run: cd ui && npm run lint
 
     - name: Unit tests
-      run: npm test -- --run
+      run: cd ui && npm test -- --run
 
   # Validate all example workflow configs at three levels:
   # 1. YAML parsing (can it be loaded?)
@@ -324,10 +327,10 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: YAML parsing — all configs loadable
       run: go test -v -run TestExampleConfigsLoad -timeout 60s .
@@ -413,7 +416,7 @@ jobs:
         #   - build graph: zero Azure/azure-sdk-for-go, zero google.golang.org/api,
         #     zero cloud.google.com/go except compute/metadata (OAuth2 ADC helper
         #     legitimately pulled by provider/gcp's service-account auth).
-        run: bash scripts/audit-cloud-symbols.sh --check
+        run: ./scripts/audit-cloud-symbols.sh --check
       - name: Standalone asymmetric gate — `go list -deps` (mirrors audit script)
         # Independent assertion of the same invariant for clarity in CI failure logs.
         # Any cloud.google.com/go path other than compute/metadata fails the build.
@@ -436,7 +439,7 @@ jobs:
             || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "FAIL: unexpected gcp/azure/api transitive deps in workflow-core build graph:"
-            while IFS= read -r dep; do
+            while read -r dep; do
               printf '  %s\n' "$dep"
             done <<< "$UNEXPECTED"
             echo

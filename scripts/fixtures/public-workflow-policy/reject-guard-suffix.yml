@@ -1,0 +1,15 @@
+name: Guard suffix bypass
+
+on:
+  pull_request:
+
+jobs:
+  executable-suffix:
+    runs-on: ubuntu-latest
+    steps:
+      - run: if rg 'forbidden' internal/; then doctl compute droplet list; fi
+
+  command-substitution:
+    runs-on: ubuntu-latest
+    steps:
+      - run: if rg "$(doctl compute droplet list)" internal/; then exit 1; fi

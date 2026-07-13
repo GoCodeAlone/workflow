@@ -1,0 +1,108 @@
+[
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "contextSHA256": "aa5c28c99b45bb67405f1447da97772c667b728756e8b55a126c469c2d7ac4f3",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/codeql.yml",
+    "contextSHA256": "ffb74a9ad3e9f35becd334f851f8bc60bf0c0bfa146ec9e2befbc0511e6b3ffe",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/copilot-setup-steps.yml",
+    "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "contextSHA256": "a27b51b12443ad48839aaee1f6175464ce7e774e86ced8071e6604a0e156c2b0",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/dependency-update.yml",
+    "contextSHA256": "8ef12ca87960b42dc03bb74dfc283035c22301c1a558e36929940877e1e7f124",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/helm-lint.yml",
+    "contextSHA256": "da77d154893ef019dc531722a42332d215ebed9f9cd758ec277cfc73f80d3ff1",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "contextSHA256": "7507daad7a4df51bad72558335c55b4560b73b9f2b0de9922f57f0c25eae68f5",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "contextSHA256": "a552c5fc1c133d966a25303099555b3d93412886b425719c1acb22373d92d843",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/conformance-smoke.yml",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": ".github/workflows/conformance-budget-check.yml",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": ".github/workflows/conformance-leak-scrubber.yml",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": ".github/conformance/cleanup.yaml",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": ".github/workflows/scripts/file-or-comment-leak-issue.sh",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": "docs/conformance-runbook.md",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": ".github/workflows/test-dispatch.yml",
+    "state": "active",
+    "presence": "absent"
+  },
+  {
+    "path": ".github/workflows/create-release.yml",
+    "state": "active",
+    "presence": "absent"
+  }
+]

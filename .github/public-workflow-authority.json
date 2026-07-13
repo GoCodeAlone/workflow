@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "bundles": [
+    {
+      "state": "active",
+      "files": [
+        {
+          "path": ".github/workflows/policytool/go.mod",
+          "sha256": "b29b886c829ddf6f83b795df62b92093a6c06d1c5a0ff6842dc36ae352094790"
+        },
+        {
+          "path": ".github/workflows/policytool/go.sum",
+          "sha256": "790ef858e5aeed12269a69e764ac69c02c3877678b0e7d9384ad3728b6e09f6c"
+        },
+        {
+          "path": ".github/workflows/policytool/main.go",
+          "sha256": "14dfbc962052c523912b248ee3acfdf32d4fa4bdf882a465b482e07cac0e3ad7"
+        },
+        {
+          "path": ".github/workflows/policytool/main_test.go",
+          "sha256": "811390919697081fc474b28bc899967ef7520b9c617aee4ebe38ba8ba092096f"
+        },
+        {
+          "path": ".github/workflows/scripts/verify-public-workflow-branch-protection.sh",
+          "sha256": "0d48038f7e641f0a58ae2a0f9150d40f284619c2254951fb31066fbb121df304"
+        },
+        {
+          "path": "scripts/check-public-workflow-policy.sh",
+          "sha256": "07307a0077c1766582fb759e02dab6b80ac06bf01640e70f3c59538b22ccafdf"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/lifecycle-future.yml",
+          "sha256": "de3bdf01a31d2a0d39a279a65258d47f0f504155065de720a1908a1b7a703103"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/lifecycle-old.yml",
+          "sha256": "6dc23984617b91711ff14a08e8d428d9dc47dc3c00f4efd703bf747fe7e6a122"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/pass-expression-and-deny-guard.yml",
+          "sha256": "6af7ce9692c0e3c3f4468927912db334bab659b36567703e27cd9d2c0957d908"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/pass-negative-guard.yml",
+          "sha256": "7af97a7da7d416064190ba39e6829148071714d39840dc7f354cab78fadc3665"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/pass.yml",
+          "sha256": "38ece391dcb2d2b84ba44121cd6bdcc2953a3822ab0e464224e0bb60199400e5"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-builtin-wrapper.yml",
+          "sha256": "56fcfd4f7752e6b462471a78b329bbf6e8d978fa047c4bdbf9d09b25cc350be0"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-command-analysis.yml",
+          "sha256": "589658280ae8623d932e691323b138c439a28fe27a79ea2859be7c00600b6820"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-deny-pattern-execution.yml",
+          "sha256": "c8475ed82b6fb7ac4ec227f48becc4a148d7d3665a5fdfdbac19096cca7c2165"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-dynamic-secrets.yml",
+          "sha256": "7900842a6adf772396eb4893925d26b71e1a4560053305031d7c4e15b3e2f5f8"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-env-indirection.yml",
+          "sha256": "6b524ac4c498f45d68896676f75c8171033558a9a270f5158870ae36604218d7"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-execution-context.yml",
+          "sha256": "50629e545d7fba12247f28a06e9632b52c3c8d63c01a2551fb8d9d7ac2a6e0b6"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-global.yml",
+          "sha256": "43620c1094cf6a8223f4b35c18bf54a621e09b5f5922b835bd7e22a48f1f205d"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-guard-suffix.yml",
+          "sha256": "4b5623b44d1dcef0198ce914a16a358180f65d733d5521863b4606178ea20823"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-implicit-permissions.yml",
+          "sha256": "5606653732f73c8c9af42c28a72f5d2a43336fd0edbb25524832e98713e798a8"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-legacy-github-token.yml",
+          "sha256": "595e24dcd363104586f7c973225cf6ba79606dfc1b9124ef383c668932e9fb5a"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-missing-shell.yml",
+          "sha256": "58757a1e09107185710dd3a2c401d6a3691d1c11f4db7f41b8a4f8dde57d0574"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-permissions.yml",
+          "sha256": "24ac3b5c02f97b7b3ec2e06f2d7c7c46035a17dda029ed8918c3e54d8e6933c4"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-provider-uses.yml",
+          "sha256": "3f6a028a527a04b1bcddd087174b56b85916fc347da23cb86b76948b2a006f45"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-runners.yml",
+          "sha256": "cbfec39b289dfcbee247f6fa5a415c01921ab02e03c63bd974df1322a6159050"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-script-execution.yml",
+          "sha256": "6e57329ba154ee32a37c2c8227f75db5422d9fdf3487180f4f8d388891c04f62"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-secret-syntax.yml",
+          "sha256": "3ef3fc0c94a53510069d63e58e7a7eef51de884d7446fe20476d60c4fa078648"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-shell-inheritance.yml",
+          "sha256": "330bc5a511a1c14d6adadd7e7f19a1baacdf47b513a2382e7cfa060babc460e0"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-shell.yml",
+          "sha256": "6dffd2756cf468c9bf4c268bfebfd1c4bfb96e81e30137a7dafbd0d39161df00"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-statement-authority.yml",
+          "sha256": "2ae4ecdde184f102004b81cca0de0e345278c7ebc2aa0993f5a8ef47acf50e91"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-unreviewed-uses.yml",
+          "sha256": "4e1a4f1d5c7b147af24dac04448617a77649e711366ab19701d6e878a1c0a274"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-unsafe-programs.yml",
+          "sha256": "5c464126d992dc5305ca68c6ebb0f7086650d0e86dc56aee35ee0de40e6b1f96"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject-yaml-structure.yml",
+          "sha256": "e564fe3b6655a68c242038c98f480fe432ed840aa3325caab88e052343352402"
+        },
+        {
+          "path": "scripts/fixtures/public-workflow-policy/reject.yml",
+          "sha256": "e98e5b29312f6541e6d71fc532943a055c9164923cd560710d47414ac80aecc1"
+        },
+        {
+          "path": "scripts/test-check-public-workflow-policy.sh",
+          "sha256": "f1289abaa3aa35f90f60463eed50ebc870f445e0d3fd1f76b05cd1aea4f6f846"
+        }
+      ]
+    }
+  ]
+}

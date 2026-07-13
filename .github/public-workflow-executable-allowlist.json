@@ -1,0 +1,34 @@
+[
+  {
+    "path": "scripts/audit-cloud-symbols.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "sha256": "9dcdd09230bd42059cd65daf4acf0d4974d648b13ad126cfacfff2ebbf20816e",
+    "rationale": "Runs the credential-free core cloud-SDK boundary audit."
+  },
+  {
+    "path": "scripts/check-public-workflow-policy.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "sha256": "07307a0077c1766582fb759e02dab6b80ac06bf01640e70f3c59538b22ccafdf",
+    "rationale": "Enforces the credential-free public workflow boundary in CI."
+  },
+  {
+    "path": "scripts/test-check-public-workflow-policy.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "554e758d832baa906c63be6758fc97bad882a8c1c28d925ed907918f9e0e6226",
+    "state": "active",
+    "sha256": "f1289abaa3aa35f90f60463eed50ebc870f445e0d3fd1f76b05cd1aea4f6f846",
+    "rationale": "Exercises fail-closed public workflow policy mutations in CI."
+  },
+  {
+    "path": "scripts/check-public-workflow-policy.sh",
+    "workflowPath": ".github/workflows/public-workflow-policy.yml",
+    "contextSHA256": "2825e8a12c281bdb380344bc6a6e58ef715339e37ceb70438dd35c835f3a2f0a",
+    "state": "active",
+    "sha256": "07307a0077c1766582fb759e02dab6b80ac06bf01640e70f3c59538b22ccafdf",
+    "rationale": "Runs the trusted policy wrapper against inert candidate workflow data."
+  }
+]

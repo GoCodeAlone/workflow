@@ -8,12 +8,13 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
   packages: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
-  GOPRIVATE: github.com/GoCodeAlone/*
-  GONOSUMCHECK: github.com/GoCodeAlone/*
   # See ci.yml for rationale. Force in-memory diffcache in CI per the
   # T3.5 rev3 lifecycle constraint.
   WFCTL_DIFFCACHE: ":memory:"
@@ -46,12 +47,12 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets
-      run: cd ui && npm ci && npm run build
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ github.token }}
+      run: cd ui && npm ci && npm run build
 
     - name: Install benchstat
-      run: go install golang.org/x/perf/cmd/benchstat@latest
+      run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d
 
     - name: Run benchmarks
       run: go test -bench=. -benchmem -count=6 -run=^$ -timeout=30m ./... | tee benchmark-results.txt
@@ -78,7 +79,7 @@ jobs:
         # We look for lines containing a benchmark name (starts with Benchmark)
         # followed by a percentage increase >= 20%.
         regression=false
-        while IFS= read -r line; do
+        while read -r line; do
           if echo "$line" | grep -qP '^\s*(│\s+)?Benchmark.*\+\d+\.\d+%'; then
             pct=$(echo "$line" | grep -oP '\+\K\d+\.\d+(?=%)' | tail -1)
             if [ -n "$pct" ] && echo "$pct" | awk '{ exit ($1 < 20.0) }'; then

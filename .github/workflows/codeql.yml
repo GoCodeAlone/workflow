@@ -11,11 +11,10 @@ on:
 permissions:
   contents: read
   actions: read
-  security-events: write
 
-env:
-  GOPRIVATE: github.com/GoCodeAlone/*
-  GONOSUMCHECK: github.com/GoCodeAlone/*
+defaults:
+  run:
+    shell: bash
 
 jobs:
   analyze:
@@ -24,6 +23,7 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      actions: read
       packages: read
 
     strategy:
@@ -59,9 +59,9 @@ jobs:
 
     - name: Build UI assets
       if: matrix.language == 'go'
-      run: cd ui && npm ci && npm run build
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ github.token }}
+      run: cd ui && npm ci && npm run build
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2

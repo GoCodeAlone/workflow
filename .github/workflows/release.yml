@@ -4,32 +4,43 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_call:
-    inputs:
-      tag_name:
-        description: 'Tag name to release (e.g. v1.2.3)'
-        required: true
-        type: string
-    secrets:
-      repo_dispatch_token:
-        required: true
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 env:
-  GOPRIVATE: github.com/GoCodeAlone/*
-  GONOSUMCHECK: github.com/GoCodeAlone/*
-  TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+  TAG_NAME: ${{ github.ref_name }}
   # See ci.yml for rationale. Force in-memory diffcache in CI per the
   # T3.5 rev3 lifecycle constraint.
   WFCTL_DIFFCACHE: ":memory:"
 
 jobs:
+  verify-release-tag:
+    name: Verify tag belongs to protected main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Check out tagged commit
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        fetch-depth: 0
+    - name: Require tagged commit on protected main
+      run: |
+        git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+        git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+
   test:
     name: Pre-release Tests
     runs-on: ubuntu-latest
+    needs: verify-release-tag
+    permissions:
+      contents: read
+      packages: read
     steps:
     - name: Check out code
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -49,11 +60,11 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets (required for Go embed)
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run tests
       run: go test -race ./...
@@ -61,6 +72,10 @@ jobs:
   build-ui:
     name: Build Admin UI
     runs-on: ubuntu-latest
+    needs: verify-release-tag
+    permissions:
+      contents: read
+      packages: read
 
     steps:
     - name: Check out code
@@ -75,9 +90,9 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Install dependencies
-      run: cd ui && npm ci
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NODE_AUTH_TOKEN: ${{ github.token }}
+      run: cd ui && npm ci
 
     - name: Build admin UI
       run: cd ui && npm run build
@@ -86,7 +101,6 @@ jobs:
       run: |
         VERSION=${TAG_NAME}
         tar -czf "workflow-admin-ui-${VERSION}.tar.gz" -C ui dist
-        echo "UI_TARBALL=workflow-admin-ui-${VERSION}.tar.gz" >> "$GITHUB_ENV"
 
     - name: Upload UI artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -124,23 +138,19 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Build UI assets (required for Go embed)
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Set up ko
       uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
 
     - name: Log in to GitHub Container Registry
-      run: echo "${{ secrets.GITHUB_TOKEN }}" | ko login ghcr.io --username ${{ github.actor }} --password-stdin
+      run: echo "${{ github.token }}" | ko login ghcr.io --username ${{ github.actor }} --password-stdin
 
     - name: Build and push
-      env:
-        GOPRIVATE: github.com/GoCodeAlone/*
-        GONOSUMCHECK: github.com/GoCodeAlone/*
-        GOFLAGS: -mod=mod
       run: |
         KO_DOCKER_REPO="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
         export KO_DOCKER_REPO
@@ -162,6 +172,10 @@ jobs:
   build-binaries:
     name: Build ${{ matrix.name }} binaries
     runs-on: ubuntu-latest
+    needs: verify-release-tag
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -206,18 +220,16 @@ jobs:
 
     - name: Build UI assets (required for Go embed)
       if: matrix.build_ui
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
       run: |
         cd ui && npm ci && npm run build
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Build binaries
       run: |
         mkdir -p dist
         VERSION=${TAG_NAME}
-        LDFLAGS="-s -w -X main.version=${VERSION}"
-
         for platform in ${{ matrix.platforms }}; do
           GOOS="${platform%/*}"
           GOARCH="${platform#*/}"
@@ -226,7 +238,7 @@ jobs:
             output="${output}.exe"
           fi
           echo "Building ${output}..."
-          GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags="${LDFLAGS}" -o "${output}" ${{ matrix.cmd }}
+          GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags="-s -w -X main.version=${VERSION}" -o "${output}" ${{ matrix.cmd }}
         done
 
     - name: Upload binaries
@@ -244,6 +256,8 @@ jobs:
     # completed. The Docker job still waits for tests because it pushes to GHCR
     # directly rather than uploading a temporary artifact.
     needs: [test, build-binaries, build-ui]
+    permissions:
+      contents: write
 
     steps:
     - name: Check out code
@@ -298,7 +312,7 @@ jobs:
 
     - name: Create Release (draft during asset upload)
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         prerelease_flag=()
@@ -314,64 +328,5 @@ jobs:
 
     - name: Publish release (was draft during asset upload)
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ github.token }}
       run: gh release edit ${{ env.TAG_NAME }} --draft=false --repo ${{ github.repository }}
-
-  update-homebrew:
-    name: Update Homebrew Tap
-    runs-on: ubuntu-latest
-    needs: release
-    if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
-    steps:
-    - name: Update wfctl formula in homebrew-tap
-      uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
-      with:
-        token: ${{ secrets.repo_dispatch_token }}
-        repository: GoCodeAlone/homebrew-tap
-        event-type: update-wfctl
-        client-payload: '{"version": "${{ env.TAG_NAME }}"}'
-
-  notify-ide-plugins:
-    name: Notify IDE Plugins
-    runs-on: ubuntu-latest
-    needs: release
-    if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
-    strategy:
-      matrix:
-        repo: ['GoCodeAlone/workflow-editor']
-    steps:
-    - name: Trigger IDE update for ${{ matrix.repo }}
-      uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
-      with:
-        token: ${{ secrets.repo_dispatch_token }}
-        repository: ${{ matrix.repo }}
-        event-type: workflow-release
-        client-payload: '{"version": "${{ env.TAG_NAME }}"}'
-
-  notify-workflow-registry:
-    name: Notify workflow-registry
-    runs-on: ubuntu-latest
-    needs: release
-    if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
-    steps:
-    - name: Trigger registry manifest sync
-      uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
-      with:
-        token: ${{ secrets.repo_dispatch_token }}
-        repository: GoCodeAlone/workflow-registry
-        event-type: workflow-release
-        client-payload: '{"workflow": "${{ github.repository }}", "version": "${{ env.TAG_NAME }}"}'
-
-  notify-workflow-scenarios:
-    name: Notify workflow-scenarios
-    runs-on: ubuntu-latest
-    needs: release
-    if: ${{ !contains(inputs.tag_name || github.ref_name, '-') }}
-    steps:
-    - name: Trigger workflow-scenarios bump
-      uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
-      with:
-        token: ${{ secrets.repo_dispatch_token }}
-        repository: GoCodeAlone/workflow-scenarios
-        event-type: workflow-release
-        client-payload: '{"workflow": "${{ github.repository }}", "tag": "${{ env.TAG_NAME }}"}'

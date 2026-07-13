@@ -1,0 +1,19 @@
+name: Forbidden provider actions
+
+on:
+  pull_request:
+
+jobs:
+  provider-action:
+    runs-on: ubuntu-latest
+    env:
+      CLOUD_AUTH: ${{ secrets.DEPLOY_AUTH }}
+    steps:
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DEPLOY_AUTH }}
+
+  provider-reusable-workflow:
+    uses: digitalocean/platform/.github/workflows/live-deploy.yml@main
+    secrets:
+      token: ${{ secrets.DEPLOY_AUTH }}

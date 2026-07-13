@@ -1,0 +1,34 @@
+name: Forbidden execution context
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./workflow-subdir
+
+env:
+  CC: provider-compiler
+  "BASH_FUNC_workflow%%": "() { :; }"
+
+jobs:
+  context:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./job-subdir
+    env:
+      GIT_CONFIG_GLOBAL: ./provider.gitconfig
+      "BASH_FUNC_job%%": "() { :; }"
+    steps:
+      - name: Redirect approved local script
+        working-directory: /tmp/provider
+        run: ./scripts/check-public-workflow-policy.sh
+      - name: Step environment overrides
+        env:
+          HOME: /tmp/provider-home
+          IFS: ':'
+          GOFLAGS: -mod=mod
+          "BASH_FUNC_step%%": "() { :; }"
+        run: echo blocked

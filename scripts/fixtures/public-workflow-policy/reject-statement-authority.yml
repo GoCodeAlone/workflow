@@ -1,0 +1,35 @@
+name: Forbidden statement authority
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  statements:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Changed redirect on otherwise approved command
+        run: go test ./... > results.txt
+      - name: Standalone PATH assignment
+        run: PATH=/tmp/provider-bin
+      - name: PATH command hijack
+        run: PATH=/tmp/provider-bin go test ./...
+      - name: env wrapper PATH hijack
+        run: env PATH=/tmp/provider-bin go test ./...
+      - run: BASH_ENV=./bootstrap
+      - run: ENV=./profile
+      - run: SHELLOPTS=xtrace
+      - run: LD_PRELOAD=./hook.so command
+      - run: DYLD_INSERT_LIBRARIES=./hook.dylib command
+      - run: env 'BASH_FUNC_wrapper%%=() { :; }' go test ./...
+      - name: Secret echo to environment command file
+        run: echo "${{ secrets.RELEASES_TOKEN }}" >> "$GITHUB_ENV"
+      - name: Secret printf to path command file
+        run: printf '%s\n' "${{ secrets.RELEASES_TOKEN }}" >> "$GITHUB_PATH"
+      - name: Secret echo with changed output
+        run: echo "${{ secrets.RELEASES_TOKEN }}" > secret-output.txt
+      - name: Zero-argument execution wrapper
+        run: command

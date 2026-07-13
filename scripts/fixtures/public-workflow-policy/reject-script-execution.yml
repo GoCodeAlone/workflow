@@ -1,0 +1,13 @@
+name: Forbidden committed script execution
+
+on:
+  pull_request:
+
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./scripts/unreviewed.sh
+      - run: bash ./scripts/unreviewed.sh
+      - run: source ../escape.sh
+      - run: go test ./...

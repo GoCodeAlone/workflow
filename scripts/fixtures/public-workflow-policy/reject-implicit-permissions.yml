@@ -1,0 +1,14 @@
+name: Implicit repository-default permissions
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  implicit-defaults:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go test ./...

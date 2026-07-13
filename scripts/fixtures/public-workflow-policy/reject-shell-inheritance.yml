@@ -1,0 +1,47 @@
+name: Forbidden effective shell inheritance
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: ${{ vars.DEFAULT_SHELL }}
+
+jobs:
+  root-dynamic:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go test ./...
+
+  job-python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: python
+    steps:
+      - run: print('not Bash')
+
+  job-pwsh:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - run: Invoke-RestMethod -Uri https://api.digitalocean.com/v2/droplets
+
+  job-custom:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: fish
+    steps:
+      - run: go test ./...
+
+  step-override:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - shell: powershell
+        run: Invoke-WebRequest -Uri ${{ vars.ENDPOINT }}
