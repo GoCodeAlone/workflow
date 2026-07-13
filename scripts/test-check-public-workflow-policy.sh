@@ -360,7 +360,12 @@ if [[ "$1" == "release" && "$2" == "list" ]]; then
   printf '%s\n' snapshot-test
   exit 0
 fi
-if [[ "$1" == "api" && " $* " == *" --paginate "* ]]; then
+snapshot_list_jq='.[] | select(.tag_name | startswith("snapshot-")) | [.id, .tag_name] | @tsv'
+# The exact five-argument shape also asserts gh's default GET method: a
+# method override would add arguments and must not enter the list fake.
+if [[ "$#" -eq 5 && "$1" == "api" && "$2" == "--paginate" &&
+  "$3" == "repos/example/workflow/releases?per_page=100" &&
+  "$4" == "--jq" && "$5" == "${snapshot_list_jq}" ]]; then
   if [[ "${scenario}" == "list-failure" ]]; then
     echo "release list failed" >&2
     exit 31
