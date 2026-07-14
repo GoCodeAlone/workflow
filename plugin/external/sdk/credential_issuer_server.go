@@ -24,6 +24,13 @@ const (
 
 var credentialErrorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
+type credentialErrorPolicy uint8
+
+const (
+	credentialReadOnlyError credentialErrorPolicy = iota
+	credentialMutationError
+)
+
 // CredentialIssuerProvider is the provider-owned implementation behind the
 // optional CredentialIssuer gRPC service. CredentialSources is authoritative:
 // the SDK validates every returned output against these runtime declarations.
@@ -160,7 +167,7 @@ func (s *credentialIssuerServer) Issue(ctx context.Context, request *pb.Credenti
 		response.Identifier = ""
 		response.IdentifierSensitive = false
 		identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
-		response.Error = redactCredentialOperationError("issue", response.GetError(), identifierSensitive, response.GetReconciliationState())
+		response.Error = redactCredentialOperationError("issue", response.GetError(), identifierSensitive, response.GetReconciliationState(), credentialMutationError)
 		response.ReconciliationState = response.Error.GetReconciliationState()
 		return response, nil
 	}
@@ -197,6 +204,9 @@ func (s *credentialIssuerServer) Issue(ctx context.Context, request *pb.Credenti
 		return credentialIssueFailure("invalid_identifier", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
 	}
 	identifier := string(identifierOutput)
+	if strings.TrimSpace(identifier) == "" {
+		return credentialIssueFailure("invalid_identifier", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
+	}
 	if response.GetIdentifier() == "" {
 		response.Identifier = identifier
 	} else if response.GetIdentifier() != identifier {
@@ -230,7 +240,7 @@ func (s *credentialIssuerServer) List(ctx context.Context, request *pb.Credentia
 		response.Credentials = nil
 		response.NextPageToken = ""
 		identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
-		response.Error = redactCredentialOperationError("list", response.GetError(), identifierSensitive, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED)
+		response.Error = redactCredentialOperationError("list", response.GetError(), identifierSensitive, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED, credentialReadOnlyError)
 		return response, nil
 	}
 	identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
@@ -265,7 +275,7 @@ func (s *credentialIssuerServer) Delete(ctx context.Context, request *pb.Credent
 	if response.GetError() != nil {
 		response.Identifier = ""
 		response.IdentifierSensitive = false
-		response.Error = redactCredentialOperationError("delete", response.GetError(), identifierSensitive, response.GetReconciliationState())
+		response.Error = redactCredentialOperationError("delete", response.GetError(), identifierSensitive, response.GetReconciliationState(), credentialMutationError)
 		response.ReconciliationState = response.Error.GetReconciliationState()
 		return response, nil
 	}
@@ -361,7 +371,7 @@ func credentialOperationFailure(operation, code string, retryable bool, state pb
 	}
 }
 
-func redactCredentialOperationError(operation string, providerError *pb.CredentialOperationError, identifierSensitive bool, fallbackState pb.CredentialReconciliationState) *pb.CredentialOperationError {
+func redactCredentialOperationError(operation string, providerError *pb.CredentialOperationError, identifierSensitive bool, topLevelState pb.CredentialReconciliationState, policy credentialErrorPolicy) *pb.CredentialOperationError {
 	if providerError == nil {
 		return nil
 	}
@@ -377,8 +387,12 @@ func redactCredentialOperationError(operation string, providerError *pb.Credenti
 			identifiers = append(identifiers, cloned)
 		}
 	}
-	state := normalizeCredentialReconciliationState(providerError.GetReconciliationState(), fallbackState)
-	retryable := providerError.GetRetryable() && credentialReconciliationAllowsRetry(state)
+	state := providerError.GetReconciliationState()
+	retryable := providerError.GetRetryable()
+	if policy == credentialMutationError {
+		state = reconcileCredentialMutationState(topLevelState, state)
+		retryable = false
+	}
 	return &pb.CredentialOperationError{
 		Code:                code,
 		Message:             fmt.Sprintf("credential issuer %s failed", operation),
@@ -403,6 +417,42 @@ func normalizeCredentialReconciliationState(state, fallback pb.CredentialReconci
 	}
 }
 
-func credentialReconciliationAllowsRetry(state pb.CredentialReconciliationState) bool {
-	return state == pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED
+func reconcileCredentialMutationState(topLevel, nested pb.CredentialReconciliationState) pb.CredentialReconciliationState {
+	topLevel = normalizeCredentialMutationState(topLevel)
+	nested = normalizeCredentialMutationState(nested)
+	if credentialMutationStateRank(topLevel) >= credentialMutationStateRank(nested) {
+		if topLevel == pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED {
+			return pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN
+		}
+		return topLevel
+	}
+	return nested
+}
+
+func normalizeCredentialMutationState(state pb.CredentialReconciliationState) pb.CredentialReconciliationState {
+	switch state {
+	case pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_AMBIGUOUS:
+		return state
+	default:
+		return pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN
+	}
+}
+
+func credentialMutationStateRank(state pb.CredentialReconciliationState) int {
+	switch state {
+	case pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_AMBIGUOUS:
+		return 4
+	case pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED:
+		return 3
+	case pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN:
+		return 2
+	case pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED:
+		return 1
+	default:
+		return 0
+	}
 }

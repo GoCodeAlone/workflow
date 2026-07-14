@@ -144,6 +144,113 @@ func assertUnsafeCredentialError(t *testing.T, operationError *pb.CredentialOper
 	}
 }
 
+func TestCredentialIssuerMutationErrorsUseLeastSafeState(t *testing.T) {
+	tests := []struct {
+		name     string
+		topLevel pb.CredentialReconciliationState
+		nested   pb.CredentialReconciliationState
+		want     pb.CredentialReconciliationState
+	}{
+		{
+			name:     "ambiguous top level overrides confirmed error",
+			topLevel: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_AMBIGUOUS,
+			nested:   pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+			want:     pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_AMBIGUOUS,
+		},
+		{
+			name:     "unknown-created top level overrides confirmed error",
+			topLevel: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED,
+			nested:   pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+			want:     pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED,
+		},
+		{
+			name:     "confirmed mutation error is still nonretryable",
+			topLevel: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+			nested:   pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+			want:     pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name+"/Issue", func(t *testing.T) {
+			server := newCredentialIssuerServer(&credentialIssuerTestProvider{
+				sources: []*pb.CredentialSourceDeclaration{credentialIssuerTestSource("fixture", false)},
+				issueResponse: &pb.CredentialIssueResponse{
+					Outputs:             []*pb.CredentialOutput{{Key: "secret", Value: []byte("must-not-leak")}},
+					Identifier:          "must-not-leak",
+					ReconciliationState: test.topLevel,
+					Error: &pb.CredentialOperationError{
+						Code:                "provider_error",
+						Message:             "must-not-leak",
+						Retryable:           true,
+						ReconciliationState: test.nested,
+					},
+				},
+			})
+			response, err := server.Issue(context.Background(), credentialIssuerIssueRequest("fixture"))
+			if err != nil {
+				t.Fatalf("Issue: %v", err)
+			}
+			assertUnsafeCredentialError(t, response.GetError(), response.GetReconciliationState(), test.want)
+			if len(response.GetOutputs()) != 0 || response.GetIdentifier() != "" || strings.Contains(response.String(), "must-not-leak") {
+				t.Fatalf("Issue mutation error leaked provider values: %v", response)
+			}
+		})
+
+		t.Run(test.name+"/Delete", func(t *testing.T) {
+			server := newCredentialIssuerServer(&credentialIssuerTestProvider{
+				sources: []*pb.CredentialSourceDeclaration{credentialIssuerTestSource("fixture", false)},
+				deleteResponse: &pb.CredentialDeleteResponse{
+					Identifier:          "must-not-leak",
+					ReconciliationState: test.topLevel,
+					Error: &pb.CredentialOperationError{
+						Code:                "provider_error",
+						Message:             "must-not-leak",
+						Retryable:           true,
+						ReconciliationState: test.nested,
+					},
+				},
+			})
+			response, err := server.Delete(context.Background(), credentialIssuerDeleteRequest("fixture", "expected-id"))
+			if err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+			assertUnsafeCredentialError(t, response.GetError(), response.GetReconciliationState(), test.want)
+			if response.GetIdentifier() != "" || strings.Contains(response.String(), "must-not-leak") {
+				t.Fatalf("Delete mutation error leaked provider values: %v", response)
+			}
+		})
+	}
+}
+
+func TestCredentialIssuerListPreservesRetryableProviderError(t *testing.T) {
+	providerResponse := &pb.CredentialListResponse{
+		Credentials:   []*pb.CredentialRecord{{Identifier: "must-not-leak"}},
+		NextPageToken: "must-not-leak",
+		Error: &pb.CredentialOperationError{
+			Code:      "temporarily_unavailable",
+			Message:   "must-not-leak",
+			Retryable: true,
+		},
+	}
+	server := newCredentialIssuerServer(&credentialIssuerTestProvider{
+		sources:      []*pb.CredentialSourceDeclaration{credentialIssuerTestSource("fixture", false)},
+		listResponse: providerResponse,
+	})
+	response, err := server.List(context.Background(), &pb.CredentialListRequest{Source: "fixture"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if response.GetError() == nil || !response.GetError().GetRetryable() {
+		t.Fatalf("List lost retryable provider error: %v", response.GetError())
+	}
+	if response.GetError().GetReconciliationState() != pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED {
+		t.Fatalf("List changed read-only reconciliation state: %s", response.GetError().GetReconciliationState())
+	}
+	if len(response.GetCredentials()) != 0 || response.GetNextPageToken() != "" || strings.Contains(response.String(), "must-not-leak") {
+		t.Fatalf("List error leaked provider values: %v", response)
+	}
+}
+
 func TestCredentialIssuerIssueRequiresCoherentIdentifierOutput(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -186,6 +293,15 @@ func TestCredentialIssuerIssueRequiresCoherentIdentifierOutput(t *testing.T) {
 			name: "empty identifier output",
 			response: &pb.CredentialIssueResponse{
 				Outputs:             []*pb.CredentialOutput{{Key: "identifier"}},
+				ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+			},
+			wantError: "invalid_identifier",
+		},
+		{
+			name: "blank identifier output",
+			response: &pb.CredentialIssueResponse{
+				Outputs:             []*pb.CredentialOutput{{Key: "identifier", Value: []byte(" \t\n")}},
+				Identifier:          " \t\n",
 				ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
 			},
 			wantError: "invalid_identifier",
