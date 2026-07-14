@@ -15,28 +15,36 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 // registryManifest is the manifest format for the GoCodeAlone/workflow-registry.
 // It differs from plugin.PluginManifest in field names and structure to match the registry schema.
 type registryManifest struct {
-	Name             string                 `json:"name"`
-	Version          string                 `json:"version"`
-	Author           string                 `json:"author"`
-	Description      string                 `json:"description"`
-	Source           string                 `json:"source,omitempty"`
-	Path             string                 `json:"path,omitempty"`
-	Type             string                 `json:"type"`
-	Tier             string                 `json:"tier"`
-	License          string                 `json:"license"`
-	MinEngineVersion string                 `json:"minEngineVersion,omitempty"`
-	Keywords         []string               `json:"keywords,omitempty"`
-	Homepage         string                 `json:"homepage,omitempty"`
-	Repository       string                 `json:"repository,omitempty"`
-	Capabilities     *registryCapabilities  `json:"capabilities,omitempty"`
-	Checksums        map[string]string      `json:"checksums,omitempty"`
-	RequiredConfig   []PluginRequiredConfig `json:"required_config,omitempty"`
-	ConfigTargets    []PluginConfigTarget   `json:"config_targets,omitempty"`
+	Name                string                          `json:"name"`
+	Version             string                          `json:"version"`
+	Author              string                          `json:"author"`
+	Description         string                          `json:"description"`
+	Source              string                          `json:"source,omitempty"`
+	Path                string                          `json:"path,omitempty"`
+	Type                string                          `json:"type"`
+	Tier                string                          `json:"tier"`
+	License             string                          `json:"license"`
+	MinEngineVersion    string                          `json:"minEngineVersion,omitempty"`
+	Keywords            []string                        `json:"keywords,omitempty"`
+	Homepage            string                          `json:"homepage,omitempty"`
+	Repository          string                          `json:"repository,omitempty"`
+	Capabilities        *registryCapabilities           `json:"capabilities,omitempty"`
+	Checksums           map[string]string               `json:"checksums,omitempty"`
+	RequiredConfig      []PluginRequiredConfig          `json:"required_config,omitempty"`
+	ConfigTargets       []PluginConfigTarget            `json:"config_targets,omitempty"`
+	CredentialSources   []config.CredentialSourceDecl   `json:"credentialSources,omitempty"`
+	CredentialResolvers []config.CredentialResolverDecl `json:"credentialResolvers,omitempty"`
+	KubernetesBackends  []config.KubernetesBackendDecl  `json:"kubernetesBackends,omitempty"`
+	ContainerRegistries []config.ContainerRegistryDecl  `json:"containerRegistries,omitempty"`
+	SecretStores        []config.SecretStoreDecl        `json:"secretStores,omitempty"`
+	ConsumesContracts   []config.ConsumedContractDecl   `json:"consumesContracts,omitempty"`
 }
 
 // registryCapabilities holds plugin capability declarations for the registry.
@@ -165,21 +173,27 @@ func loadRegistryManifest(path string) (*registryManifest, error) {
 
 // pluginJSONSchema mirrors the internal plugin.PluginManifest for loading plugin.json.
 type pluginJSONSchema struct {
-	Name           string                 `json:"name"`
-	Version        string                 `json:"version"`
-	Author         string                 `json:"author"`
-	Description    string                 `json:"description"`
-	License        string                 `json:"license"`
-	Tags           []string               `json:"tags"`
-	Repository     string                 `json:"repository"`
-	Tier           string                 `json:"tier"`
-	ModuleTypes    []string               `json:"moduleTypes"`
-	StepTypes      []string               `json:"stepTypes"`
-	TriggerTypes   []string               `json:"triggerTypes"`
-	WorkflowTypes  []string               `json:"workflowTypes"`
-	WiringHooks    []string               `json:"wiringHooks"`
-	RequiredConfig []PluginRequiredConfig `json:"required_config"`
-	ConfigTargets  []PluginConfigTarget   `json:"config_targets"`
+	Name                string                          `json:"name"`
+	Version             string                          `json:"version"`
+	Author              string                          `json:"author"`
+	Description         string                          `json:"description"`
+	License             string                          `json:"license"`
+	Tags                []string                        `json:"tags"`
+	Repository          string                          `json:"repository"`
+	Tier                string                          `json:"tier"`
+	ModuleTypes         []string                        `json:"moduleTypes"`
+	StepTypes           []string                        `json:"stepTypes"`
+	TriggerTypes        []string                        `json:"triggerTypes"`
+	WorkflowTypes       []string                        `json:"workflowTypes"`
+	WiringHooks         []string                        `json:"wiringHooks"`
+	RequiredConfig      []PluginRequiredConfig          `json:"required_config"`
+	ConfigTargets       []PluginConfigTarget            `json:"config_targets"`
+	CredentialSources   []config.CredentialSourceDecl   `json:"credentialSources"`
+	CredentialResolvers []config.CredentialResolverDecl `json:"credentialResolvers"`
+	KubernetesBackends  []config.KubernetesBackendDecl  `json:"kubernetesBackends"`
+	ContainerRegistries []config.ContainerRegistryDecl  `json:"containerRegistries"`
+	SecretStores        []config.SecretStoreDecl        `json:"secretStores"`
+	ConsumesContracts   []config.ConsumedContractDecl   `json:"consumesContracts"`
 }
 
 // loadRegistryManifestFromPluginJSON converts an internal plugin.json to registry format.
@@ -200,17 +214,23 @@ func loadRegistryManifestFromPluginJSON(path, pluginType, pluginTier string) (*r
 	pType := pluginType
 
 	m := &registryManifest{
-		Name:           p.Name,
-		Version:        p.Version,
-		Author:         p.Author,
-		Description:    p.Description,
-		License:        p.License,
-		Repository:     p.Repository,
-		Type:           pType,
-		Tier:           tier,
-		Keywords:       p.Tags,
-		RequiredConfig: p.RequiredConfig,
-		ConfigTargets:  p.ConfigTargets,
+		Name:                p.Name,
+		Version:             p.Version,
+		Author:              p.Author,
+		Description:         p.Description,
+		License:             p.License,
+		Repository:          p.Repository,
+		Type:                pType,
+		Tier:                tier,
+		Keywords:            p.Tags,
+		RequiredConfig:      p.RequiredConfig,
+		ConfigTargets:       p.ConfigTargets,
+		CredentialSources:   p.CredentialSources,
+		CredentialResolvers: p.CredentialResolvers,
+		KubernetesBackends:  p.KubernetesBackends,
+		ContainerRegistries: p.ContainerRegistries,
+		SecretStores:        p.SecretStores,
+		ConsumesContracts:   p.ConsumesContracts,
 	}
 	if hasCapabilities(p) {
 		m.Capabilities = &registryCapabilities{

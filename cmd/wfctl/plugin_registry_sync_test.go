@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -270,6 +271,70 @@ func TestPluginRegistrySync_MetadataSyncProjectsSecretAndConfigContracts(t *test
 	}
 	if got := raw["config_targets"].([]any)[0].(map[string]any)["provider"]; got != "github" {
 		t.Fatalf("config_targets[0].provider = %v, want github", got)
+	}
+}
+
+func TestPluginRegistrySync_ProviderDeclarationsAuthoritativeUpdate(t *testing.T) {
+	raw := map[string]any{
+		"credentialSources":   []any{"stale-source"},
+		"credentialResolvers": []any{"stale-resolver"},
+		"kubernetesBackends":  []any{"stale-backend"},
+		"containerRegistries": []any{"stale-registry"},
+		"secretStores":        []any{"stale-store"},
+		"consumesContracts":   []any{"stale-contract"},
+		"required_config":     []any{"keep-when-absent-upstream"},
+		"unrelated":           "keep",
+	}
+	pluginJSON := map[string]any{
+		"credentialSources": []any{map[string]any{
+			"source": "example.object-store", "concurrencyMode": "provider_idempotent",
+			"outputs": []any{map[string]any{"key": "accessKeyId", "sensitive": false}}, "identifierKey": "accessKeyId",
+		}},
+		"credentialResolvers": []any{},
+		"kubernetesBackends":  []any{map[string]any{"name": "gke", "resourceType": "infra.gke_cluster"}},
+		"containerRegistries": []any{map[string]any{"type": "ghcr", "operations": []any{"login", "push"}}},
+		"secretStores":        []any{map[string]any{"type": "aws-secrets-manager", "operations": []any{"get"}, "scopes": []any{"account"}}},
+		"consumesContracts":   []any{map[string]any{"id": "workflow.provider.credential-issuer", "protocol": map[string]any{"min": float64(1), "max": float64(2)}}},
+	}
+
+	if changed := syncManifestMetadataFromPluginJSON(raw, pluginJSON); !changed {
+		t.Fatal("provider declaration drift was not detected")
+	}
+	for _, key := range providerDeclarationManifestKeys {
+		if !reflect.DeepEqual(raw[key], pluginJSON[key]) {
+			t.Errorf("%s = %#v, want authoritative %#v", key, raw[key], pluginJSON[key])
+		}
+	}
+	if resolvers, ok := raw["credentialResolvers"].([]any); !ok || len(resolvers) != 0 {
+		t.Fatalf("present empty credentialResolvers was not preserved: %#v", raw["credentialResolvers"])
+	}
+	if raw["required_config"].([]any)[0] != "keep-when-absent-upstream" || raw["unrelated"] != "keep" {
+		t.Fatalf("unrelated metadata changed: %#v", raw)
+	}
+}
+
+func TestPluginRegistrySync_ProviderDeclarationsAuthoritativeRemoval(t *testing.T) {
+	raw := map[string]any{
+		"credentialSources":   []any{"stale-source"},
+		"credentialResolvers": []any{"stale-resolver"},
+		"kubernetesBackends":  []any{"stale-backend"},
+		"containerRegistries": []any{"stale-registry"},
+		"secretStores":        []any{"stale-store"},
+		"consumesContracts":   []any{"stale-contract"},
+		"required_config":     []any{"keep"},
+		"unrelated":           "keep",
+	}
+
+	if changed := syncManifestMetadataFromPluginJSON(raw, map[string]any{}); !changed {
+		t.Fatal("stale provider declaration removal was not detected")
+	}
+	for _, key := range providerDeclarationManifestKeys {
+		if _, exists := raw[key]; exists {
+			t.Errorf("stale %s was not removed: %#v", key, raw[key])
+		}
+	}
+	if raw["required_config"].([]any)[0] != "keep" || raw["unrelated"] != "keep" {
+		t.Fatalf("unrelated metadata changed: %#v", raw)
 	}
 }
 

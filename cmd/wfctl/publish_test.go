@@ -326,6 +326,78 @@ func TestLoadRegistryManifestFromPluginJSONPreservesRequiredConfig(t *testing.T)
 	}
 }
 
+func TestPublishProviderDeclarationsFromRegistryManifest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(path, providerDeclarationsPublishFixture(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := loadRegistryManifest(path)
+	if err != nil {
+		t.Fatalf("loadRegistryManifest: %v", err)
+	}
+	assertPublishedProviderDeclarations(t, got)
+}
+
+func TestPublishProviderDeclarationsFromPluginJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.json")
+	if err := os.WriteFile(path, providerDeclarationsPublishFixture(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := loadRegistryManifestFromPluginJSON(path, "external", "community")
+	if err != nil {
+		t.Fatalf("loadRegistryManifestFromPluginJSON: %v", err)
+	}
+	assertPublishedProviderDeclarations(t, got)
+}
+
+func providerDeclarationsPublishFixture() []byte {
+	return []byte(`{
+		"name":"provider-plugin","version":"1.0.0","author":"Test","description":"provider declarations","license":"Apache-2.0","type":"external","tier":"community",
+		"credentialSources":[{"source":"example.object-store","concurrencyMode":"provider_idempotent","outputs":[{"key":"secretAccessKey"},{"key":"accessKeyId","sensitive":false}],"identifierKey":"accessKeyId"}],
+		"credentialResolvers":[{"provider":"aws","credentialTypes":["static","env"]}],
+		"kubernetesBackends":[{"name":"gke","resourceType":"infra.gke_cluster"}],
+		"containerRegistries":[{"type":"ghcr","operations":["login","push"]}],
+		"secretStores":[{"type":"aws-secrets-manager","operations":["get","list"],"scopes":["account","region"]}],
+		"consumesContracts":[{"id":"workflow.provider.credential-issuer","protocol":{"min":1,"max":2}}]
+	}`)
+}
+
+func assertPublishedProviderDeclarations(t *testing.T, got *registryManifest) {
+	t.Helper()
+	if len(got.CredentialSources) != 1 || got.CredentialSources[0].Source != "example.object-store" {
+		t.Fatalf("credentialSources = %+v", got.CredentialSources)
+	}
+	outputs := got.CredentialSources[0].Outputs
+	if len(outputs) != 2 {
+		t.Fatalf("credential outputs = %+v", outputs)
+	}
+	if outputs[0].Sensitive != nil || !outputs[0].IsSensitive() {
+		t.Fatalf("omitted sensitive must remain nil and default true: %+v", outputs[0])
+	}
+	if outputs[1].Sensitive == nil || *outputs[1].Sensitive || outputs[1].IsSensitive() {
+		t.Fatalf("explicit sensitive=false was not preserved: %+v", outputs[1])
+	}
+	if len(got.CredentialResolvers) != 1 || got.CredentialResolvers[0].Provider != "aws" {
+		t.Fatalf("credentialResolvers = %+v", got.CredentialResolvers)
+	}
+	if len(got.KubernetesBackends) != 1 || got.KubernetesBackends[0].Name != "gke" {
+		t.Fatalf("kubernetesBackends = %+v", got.KubernetesBackends)
+	}
+	if len(got.ContainerRegistries) != 1 || got.ContainerRegistries[0].Type != "ghcr" {
+		t.Fatalf("containerRegistries = %+v", got.ContainerRegistries)
+	}
+	if len(got.SecretStores) != 1 || got.SecretStores[0].Type != "aws-secrets-manager" {
+		t.Fatalf("secretStores = %+v", got.SecretStores)
+	}
+	if len(got.ConsumesContracts) != 1 || got.ConsumesContracts[0].Protocol.Min != 1 || got.ConsumesContracts[0].Protocol.Max != 2 {
+		t.Fatalf("consumesContracts = %+v", got.ConsumesContracts)
+	}
+}
+
 // ---- dry-run integration test ----
 
 func TestRunPublish_DryRun(t *testing.T) {
