@@ -49,17 +49,33 @@ func mergeProviderServiceContracts(base *pb.ContractRegistry, services *provider
 	if base != nil {
 		registry = proto.Clone(base).(*pb.ContractRegistry)
 	}
-	seen := make(map[string]struct{}, len(registry.GetContracts()))
-	for _, descriptor := range registry.GetContracts() {
-		if descriptor != nil && descriptor.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE {
-			seen[descriptor.GetServiceName()] = struct{}{}
-		}
+	canonical := services.contractDescriptors()
+	if len(canonical) == 0 {
+		return registry
 	}
-	for _, descriptor := range services.contractDescriptors() {
-		if _, exists := seen[descriptor.GetServiceName()]; exists {
+	filtered := make([]*pb.ContractDescriptor, 0, len(registry.GetContracts())+len(canonical))
+	for _, descriptor := range registry.GetContracts() {
+		if providerServiceContractCollision(descriptor, canonical) {
 			continue
 		}
-		registry.Contracts = append(registry.Contracts, descriptor)
+		filtered = append(filtered, descriptor)
 	}
+	filtered = append(filtered, canonical...)
+	registry.Contracts = filtered
 	return registry
+}
+
+func providerServiceContractCollision(descriptor *pb.ContractDescriptor, canonical []*pb.ContractDescriptor) bool {
+	if descriptor == nil {
+		return false
+	}
+	for _, expected := range canonical {
+		if descriptor.GetServiceName() == expected.GetServiceName() {
+			return true
+		}
+		if expected.GetContractType() != "" && descriptor.GetContractType() == expected.GetContractType() {
+			return true
+		}
+	}
+	return false
 }

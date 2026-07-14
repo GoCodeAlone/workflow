@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc/status"
@@ -140,40 +141,66 @@ func (s *credentialIssuerServer) Issue(ctx context.Context, request *pb.Credenti
 	if requestError != nil {
 		return &pb.CredentialIssueResponse{Error: requestError}, nil
 	}
-	response, err := s.provider.Issue(ctx, request)
+	providerResponse, err := s.provider.Issue(ctx, request)
+	var response *pb.CredentialIssueResponse
+	if providerResponse != nil {
+		response = proto.Clone(providerResponse).(*pb.CredentialIssueResponse)
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, status.FromContextError(ctxErr).Err()
 		}
-		return &pb.CredentialIssueResponse{Error: credentialOperationFailure("issue", "provider_error", false, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN)}, nil
+		return credentialIssueFailure("provider_error", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN), nil
 	}
 	if response == nil {
-		return &pb.CredentialIssueResponse{Error: credentialOperationFailure("issue", "empty_response", false, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN)}, nil
+		return credentialIssueFailure("empty_response", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN), nil
 	}
 	if response.GetError() != nil {
 		response.Outputs = nil
 		response.Identifier = ""
 		response.IdentifierSensitive = false
 		identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
-		response.Error = redactCredentialOperationError("issue", response.GetError(), identifierSensitive)
+		response.Error = redactCredentialOperationError("issue", response.GetError(), identifierSensitive, response.GetReconciliationState())
+		response.ReconciliationState = response.Error.GetReconciliationState()
 		return response, nil
+	}
+	if response.GetReconciliationState() != pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED {
+		return credentialIssueFailure("invalid_reconciliation_state", normalizeCredentialReconciliationState(response.GetReconciliationState(), pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN)), nil
 	}
 
 	allowed := credentialOutputDeclarations(declaration)
 	seen := make(map[string]struct{}, len(response.GetOutputs()))
+	var identifierOutput []byte
+	var identifierCount int
 	for _, output := range response.GetOutputs() {
 		if output == nil {
-			return credentialUndeclaredOutputResponse(response.GetReconciliationState()), nil
+			return credentialIssueFailure("invalid_response", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
 		}
 		declared, exists := allowed[output.GetKey()]
 		if !exists {
-			return credentialUndeclaredOutputResponse(response.GetReconciliationState()), nil
+			return credentialIssueFailure("undeclared_output", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
 		}
 		if _, duplicate := seen[output.GetKey()]; duplicate {
-			return credentialUndeclaredOutputResponse(response.GetReconciliationState()), nil
+			if output.GetKey() == declaration.GetIdentifierKey() {
+				return credentialIssueFailure("invalid_identifier", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
+			}
+			return credentialIssueFailure("invalid_response", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
 		}
 		seen[output.GetKey()] = struct{}{}
 		output.Sensitive = declared.GetSensitive()
+		if output.GetKey() == declaration.GetIdentifierKey() {
+			identifierCount++
+			identifierOutput = output.GetValue()
+		}
+	}
+	if identifierCount != 1 || len(identifierOutput) == 0 || !utf8.Valid(identifierOutput) {
+		return credentialIssueFailure("invalid_identifier", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
+	}
+	identifier := string(identifierOutput)
+	if response.GetIdentifier() == "" {
+		response.Identifier = identifier
+	} else if response.GetIdentifier() != identifier {
+		return credentialIssueFailure("invalid_identifier", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED), nil
 	}
 	identifierDeclaration := allowed[declaration.GetIdentifierKey()]
 	response.IdentifierSensitive = identifierDeclaration.GetSensitive()
@@ -185,7 +212,11 @@ func (s *credentialIssuerServer) List(ctx context.Context, request *pb.Credentia
 	if requestError != nil {
 		return &pb.CredentialListResponse{Error: requestError}, nil
 	}
-	response, err := s.provider.List(ctx, request)
+	providerResponse, err := s.provider.List(ctx, request)
+	var response *pb.CredentialListResponse
+	if providerResponse != nil {
+		response = proto.Clone(providerResponse).(*pb.CredentialListResponse)
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, status.FromContextError(ctxErr).Err()
@@ -199,7 +230,7 @@ func (s *credentialIssuerServer) List(ctx context.Context, request *pb.Credentia
 		response.Credentials = nil
 		response.NextPageToken = ""
 		identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
-		response.Error = redactCredentialOperationError("list", response.GetError(), identifierSensitive)
+		response.Error = redactCredentialOperationError("list", response.GetError(), identifierSensitive, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED)
 		return response, nil
 	}
 	identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
@@ -216,22 +247,35 @@ func (s *credentialIssuerServer) Delete(ctx context.Context, request *pb.Credent
 	if requestError != nil {
 		return &pb.CredentialDeleteResponse{Error: requestError}, nil
 	}
-	response, err := s.provider.Delete(ctx, request)
+	providerResponse, err := s.provider.Delete(ctx, request)
+	var response *pb.CredentialDeleteResponse
+	if providerResponse != nil {
+		response = proto.Clone(providerResponse).(*pb.CredentialDeleteResponse)
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, status.FromContextError(ctxErr).Err()
 		}
-		return &pb.CredentialDeleteResponse{Error: credentialOperationFailure("delete", "provider_error", false, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN)}, nil
+		return credentialDeleteFailure("provider_error", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN), nil
 	}
 	if response == nil {
-		return &pb.CredentialDeleteResponse{Error: credentialOperationFailure("delete", "empty_response", false, pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN)}, nil
+		return credentialDeleteFailure("empty_response", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN), nil
 	}
 	identifierSensitive := credentialOutputDeclarations(declaration)[declaration.GetIdentifierKey()].GetSensitive()
-	response.IdentifierSensitive = identifierSensitive
 	if response.GetError() != nil {
 		response.Identifier = ""
-		response.Error = redactCredentialOperationError("delete", response.GetError(), identifierSensitive)
+		response.IdentifierSensitive = false
+		response.Error = redactCredentialOperationError("delete", response.GetError(), identifierSensitive, response.GetReconciliationState())
+		response.ReconciliationState = response.Error.GetReconciliationState()
+		return response, nil
 	}
+	if response.GetReconciliationState() != pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED {
+		return credentialDeleteFailure("invalid_reconciliation_state", normalizeCredentialReconciliationState(response.GetReconciliationState(), pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN)), nil
+	}
+	if response.GetIdentifier() == "" || response.GetIdentifier() != request.GetIdentifier() {
+		return credentialDeleteFailure("invalid_identifier", pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN), nil
+	}
+	response.IdentifierSensitive = identifierSensitive
 	return response, nil
 }
 
@@ -294,14 +338,17 @@ func credentialOutputDeclarations(declaration *pb.CredentialSourceDeclaration) m
 	return outputs
 }
 
-func credentialUndeclaredOutputResponse(state pb.CredentialReconciliationState) *pb.CredentialIssueResponse {
+func credentialIssueFailure(code string, state pb.CredentialReconciliationState) *pb.CredentialIssueResponse {
 	return &pb.CredentialIssueResponse{
 		ReconciliationState: state,
-		Error: &pb.CredentialOperationError{
-			Code:                "undeclared_output",
-			Message:             "credential issuer returned an undeclared output",
-			ReconciliationState: state,
-		},
+		Error:               credentialOperationFailure("issue", code, false, state),
+	}
+}
+
+func credentialDeleteFailure(code string, state pb.CredentialReconciliationState) *pb.CredentialDeleteResponse {
+	return &pb.CredentialDeleteResponse{
+		ReconciliationState: state,
+		Error:               credentialOperationFailure("delete", code, false, state),
 	}
 }
 
@@ -314,7 +361,7 @@ func credentialOperationFailure(operation, code string, retryable bool, state pb
 	}
 }
 
-func redactCredentialOperationError(operation string, providerError *pb.CredentialOperationError, identifierSensitive bool) *pb.CredentialOperationError {
+func redactCredentialOperationError(operation string, providerError *pb.CredentialOperationError, identifierSensitive bool, fallbackState pb.CredentialReconciliationState) *pb.CredentialOperationError {
 	if providerError == nil {
 		return nil
 	}
@@ -330,11 +377,32 @@ func redactCredentialOperationError(operation string, providerError *pb.Credenti
 			identifiers = append(identifiers, cloned)
 		}
 	}
+	state := normalizeCredentialReconciliationState(providerError.GetReconciliationState(), fallbackState)
+	retryable := providerError.GetRetryable() && credentialReconciliationAllowsRetry(state)
 	return &pb.CredentialOperationError{
 		Code:                code,
 		Message:             fmt.Sprintf("credential issuer %s failed", operation),
-		Retryable:           providerError.GetRetryable(),
-		ReconciliationState: providerError.GetReconciliationState(),
+		Retryable:           retryable,
+		ReconciliationState: state,
 		Identifiers:         identifiers,
 	}
+}
+
+func normalizeCredentialReconciliationState(state, fallback pb.CredentialReconciliationState) pb.CredentialReconciliationState {
+	if state == pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNSPECIFIED {
+		state = fallback
+	}
+	switch state {
+	case pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN_CREATED,
+		pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_AMBIGUOUS:
+		return state
+	default:
+		return pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_UNKNOWN
+	}
+}
+
+func credentialReconciliationAllowsRetry(state pb.CredentialReconciliationState) bool {
+	return state == pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED
 }
