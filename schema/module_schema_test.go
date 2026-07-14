@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -116,6 +117,36 @@ func TestModuleSchemaRegistry_CustomRegister(t *testing.T) {
 	}
 	if len(s.ConfigFields) != 1 {
 		t.Errorf("configFields = %d, want 1", len(s.ConfigFields))
+	}
+}
+
+func TestPlatformKubernetesSchemaDescribesPluginDeclaredBackends(t *testing.T) {
+	s := NewModuleSchemaRegistry().Get("platform.kubernetes")
+	if s == nil {
+		t.Fatal("platform.kubernetes schema not found")
+	}
+	description := strings.ToLower(s.Description)
+	if !strings.Contains(description, "plugin-declared backend") {
+		t.Fatalf("platform.kubernetes description = %q, want plugin-declared backend guidance", s.Description)
+	}
+	for _, stale := range []string{"eks/gke/aks stubs", "eks | gke | aks"} {
+		if strings.Contains(description, stale) {
+			t.Fatalf("platform.kubernetes description = %q, must not contain stale fixed-provider wording %q", s.Description, stale)
+		}
+	}
+
+	var typeDescription string
+	for _, field := range s.ConfigFields {
+		if field.Key == "type" {
+			typeDescription = field.Description
+			break
+		}
+	}
+	if !strings.Contains(strings.ToLower(typeDescription), "exact backend name declared by an installed provider plugin") {
+		t.Fatalf("platform.kubernetes type description = %q, want exact plugin-declared backend-name guidance", typeDescription)
+	}
+	if strings.Contains(strings.ToLower(typeDescription), "eks | gke | aks") {
+		t.Fatalf("platform.kubernetes type description = %q, must not imply a fixed provider set", typeDescription)
 	}
 }
 

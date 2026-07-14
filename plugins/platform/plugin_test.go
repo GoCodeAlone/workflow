@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/capability"
@@ -106,6 +107,39 @@ func TestModuleFactories(t *testing.T) {
 
 	if len(factories) != len(expectedModules) {
 		t.Errorf("expected %d module factories, got %d", len(expectedModules), len(factories))
+	}
+}
+
+func TestPlatformKubernetesModuleSchemaDescribesPluginDeclaredBackends(t *testing.T) {
+	var kubernetesSchema *schema.ModuleSchema
+	for _, moduleSchema := range New().ModuleSchemas() {
+		if moduleSchema.Type == "platform.kubernetes" {
+			kubernetesSchema = moduleSchema
+			break
+		}
+	}
+	if kubernetesSchema == nil {
+		t.Fatal("platform.kubernetes module schema not found")
+	}
+	if !strings.Contains(strings.ToLower(kubernetesSchema.Description), "plugin-declared backend") {
+		t.Fatalf("platform.kubernetes description = %q, want plugin-declared backend guidance", kubernetesSchema.Description)
+	}
+	if strings.Contains(strings.ToLower(kubernetesSchema.Description), "eks/gke/aks stubs") {
+		t.Fatalf("platform.kubernetes description = %q, must not contain stale fixed-provider wording", kubernetesSchema.Description)
+	}
+
+	var typeDescription string
+	for _, field := range kubernetesSchema.ConfigFields {
+		if field.Key == "type" {
+			typeDescription = field.Description
+			break
+		}
+	}
+	if !strings.Contains(strings.ToLower(typeDescription), "exact backend name declared by an installed provider plugin") {
+		t.Fatalf("platform.kubernetes type description = %q, want exact plugin-declared backend-name guidance", typeDescription)
+	}
+	if strings.Contains(strings.ToLower(typeDescription), "eks | gke | aks") {
+		t.Fatalf("platform.kubernetes type description = %q, must not imply a fixed provider set", typeDescription)
 	}
 }
 

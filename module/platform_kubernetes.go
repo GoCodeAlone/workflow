@@ -10,7 +10,7 @@ import (
 // KubernetesClusterState holds the current state of a managed Kubernetes cluster.
 type KubernetesClusterState struct {
 	Name       string           `json:"name"`
-	Provider   string           `json:"provider"` // eks, gke, aks, kind, k3s
+	Provider   string           `json:"provider"` // selected core or plugin-declared backend name
 	Version    string           `json:"version"`
 	Status     string           `json:"status"` // pending, creating, running, deleting, deleted
 	Endpoint   string           `json:"endpoint"`
@@ -31,7 +31,7 @@ type NodeGroupState struct {
 // Config:
 //
 //	account:    name of a cloud.account module (resolved from service registry)
-//	type:       backend type: eks | gke | aks | kind | k3s
+//	type:       kind, k3s, or an exact backend name declared by a loaded plugin
 //	version:    Kubernetes version (e.g. "1.29")
 //	nodeGroups: list of node group definitions
 type PlatformKubernetes struct {
