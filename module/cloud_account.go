@@ -108,17 +108,13 @@ func (m *CloudAccount) GetCredentials(_ context.Context) (*CloudCredentials, err
 // resolveCredentials resolves credentials based on provider and credential type config.
 // It dispatches to registered CloudCredentialResolvers via the global registry.
 func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
+	return m.resolveCredentialsContext(context.Background(), false)
+}
+
+func (m *CloudAccount) resolveCredentialsContext(ctx context.Context, externalOnly bool) (*CloudCredentials, error) {
 	creds := &CloudCredentials{
 		Provider: m.provider,
 		Region:   m.region,
-	}
-
-	// Read top-level provider-specific config fields.
-	if pid, ok := m.config["project_id"].(string); ok {
-		creds.ProjectID = pid
-	}
-	if sid, ok := m.config["subscription_id"].(string); ok {
-		creds.SubscriptionID = sid
 	}
 
 	if m.provider == "mock" {
@@ -139,18 +135,60 @@ func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
 	// Store creds on m so resolvers can write into it directly.
 	m.creds = creds
 
-	providerResolvers, ok := credentialResolvers[m.provider]
-	if !ok {
-		return nil, fmt.Errorf("unknown cloud provider: %s", m.provider)
+	resolver, err := selectCredentialResolver(m.provider, m.credType, externalOnly)
+	if err != nil {
+		return nil, err
 	}
-	resolver, ok := providerResolvers[m.credType]
-	if !ok {
-		return nil, fmt.Errorf("unsupported credential type %q for provider %q", m.credType, m.provider)
+	// Preserve the additive v0.86 built-in behavior while keeping the external
+	// adapter provider-neutral. Provider-shaped top-level fields are never
+	// interpreted on the external path; the plugin receives the opaque config.
+	if _, external := resolver.(*externalCloudCredentialResolver); !external {
+		if projectID, ok := m.config["project_id"].(string); ok {
+			creds.ProjectID = projectID
+		}
+		if subscriptionID, ok := m.config["subscription_id"].(string); ok {
+			creds.SubscriptionID = subscriptionID
+		}
 	}
-	if err := resolver.Resolve(m); err != nil {
+	if contextual, ok := resolver.(contextCloudCredentialResolver); ok {
+		err = contextual.ResolveContext(ctx, m)
+	} else {
+		err = resolver.Resolve(m)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return m.creds, nil
+}
+
+// ResolveExternalCloudCredentials resolves a provider/type exclusively through
+// registered external CredentialResolver services. It provides a
+// context-aware API for callers that must require plugin ownership instead of
+// the additive v0.86 built-in fallback.
+func ResolveExternalCloudCredentials(ctx context.Context, provider, credentialType string, cfg map[string]any) (*CloudCredentials, error) {
+	account := &CloudAccount{
+		config:   cfg,
+		provider: provider,
+		credType: credentialType,
+		creds:    &CloudCredentials{Provider: provider},
+	}
+	if region, ok := cfg["region"].(string); ok {
+		account.region = region
+		account.creds.Region = region
+	}
+	resolver, err := selectCredentialResolver(provider, credentialType, true)
+	if err != nil {
+		return nil, err
+	}
+	if contextual, ok := resolver.(contextCloudCredentialResolver); ok {
+		err = contextual.ResolveContext(ctx, account)
+	} else {
+		err = resolver.Resolve(account)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return account.creds, nil
 }
 
 func (m *CloudAccount) resolveMockCredentials(creds *CloudCredentials) (*CloudCredentials, error) {

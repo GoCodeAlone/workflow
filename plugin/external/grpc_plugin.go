@@ -96,3 +96,13 @@ func (p *PluginClient) CredentialIssuerClient() pb.CredentialIssuerClient {
 	}
 	return pb.NewCredentialIssuerClient(p.Conn())
 }
+
+// CredentialResolverClient constructs the typed optional credential-resolver
+// client over the same connection owned by the plugin manager. Hosts must also
+// require the CredentialResolver ContractRegistry advertisement before use.
+func (p *PluginClient) CredentialResolverClient() pb.CredentialResolverClient {
+	if p == nil || p.Conn() == nil {
+		return nil
+	}
+	return pb.NewCredentialResolverClient(p.Conn())
+}

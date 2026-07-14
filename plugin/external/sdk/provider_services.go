@@ -14,34 +14,59 @@ const providerServicesGoImportPath = "github.com/GoCodeAlone/workflow/plugin/ext
 // Serve options. Keeping registration and contract advertisement together
 // prevents an implemented service from being served but undiscoverable.
 type providerServices struct {
-	credentialIssuer *credentialIssuerServer
+	credentialIssuer   *credentialIssuerServer
+	credentialResolver *credentialResolverServer
 }
 
 func (services *providerServices) register(server *grpc.Server) error {
-	if services == nil || services.credentialIssuer == nil {
+	if services == nil {
 		return nil
 	}
-	if err := services.credentialIssuer.validate(); err != nil {
-		return fmt.Errorf("register credential issuer service: %w", err)
+	if services.credentialIssuer != nil {
+		if err := services.credentialIssuer.validate(); err != nil {
+			return fmt.Errorf("register credential issuer service: %w", err)
+		}
+		pb.RegisterCredentialIssuerServer(server, services.credentialIssuer)
 	}
-	pb.RegisterCredentialIssuerServer(server, services.credentialIssuer)
+	if services.credentialResolver != nil {
+		if err := services.credentialResolver.validate(); err != nil {
+			return fmt.Errorf("register credential resolver service: %w", err)
+		}
+		pb.RegisterCredentialResolverServer(server, services.credentialResolver)
+	}
 	return nil
 }
 
 func (services *providerServices) contractDescriptors() []*pb.ContractDescriptor {
-	if services == nil || services.credentialIssuer == nil || services.credentialIssuer.validate() != nil {
+	if services == nil {
 		return nil
 	}
-	return []*pb.ContractDescriptor{{
-		Kind:            pb.ContractKind_CONTRACT_KIND_SERVICE,
-		Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
-		ServiceName:     pb.CredentialIssuer_ServiceDesc.ServiceName,
-		ContractType:    CredentialIssuerContractID,
-		ProtoPackage:    "workflow.plugin.external.credentials",
-		MessageNames:    []string{"CredentialSourceDeclaration", "CredentialIssueRequest", "CredentialIssueResponse", "CredentialListRequest", "CredentialListResponse", "CredentialDeleteRequest", "CredentialDeleteResponse"},
-		GoImportPath:    providerServicesGoImportPath,
-		ProtocolVersion: CredentialIssuerProtocolVersion,
-	}}
+	var descriptors []*pb.ContractDescriptor
+	if services.credentialIssuer != nil && services.credentialIssuer.validate() == nil {
+		descriptors = append(descriptors, &pb.ContractDescriptor{
+			Kind:            pb.ContractKind_CONTRACT_KIND_SERVICE,
+			Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			ServiceName:     pb.CredentialIssuer_ServiceDesc.ServiceName,
+			ContractType:    CredentialIssuerContractID,
+			ProtoPackage:    "workflow.plugin.external.credentials",
+			MessageNames:    []string{"CredentialSourceDeclaration", "CredentialIssueRequest", "CredentialIssueResponse", "CredentialListRequest", "CredentialListResponse", "CredentialDeleteRequest", "CredentialDeleteResponse"},
+			GoImportPath:    providerServicesGoImportPath,
+			ProtocolVersion: CredentialIssuerProtocolVersion,
+		})
+	}
+	if services.credentialResolver != nil && services.credentialResolver.validate() == nil {
+		descriptors = append(descriptors, &pb.ContractDescriptor{
+			Kind:            pb.ContractKind_CONTRACT_KIND_SERVICE,
+			Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			ServiceName:     pb.CredentialResolver_ServiceDesc.ServiceName,
+			ContractType:    CredentialResolverContractID,
+			ProtoPackage:    "workflow.plugin.external.credentials",
+			MessageNames:    []string{"CredentialResolverDeclaration", "CredentialResolveRequest", "CredentialResolveResponse", "ResolvedCloudCredentials", "CredentialResolutionError"},
+			GoImportPath:    providerServicesGoImportPath,
+			ProtocolVersion: CredentialResolverProtocolVersion,
+		})
+	}
+	return descriptors
 }
 
 func mergeProviderServiceContracts(base *pb.ContractRegistry, services *providerServices) *pb.ContractRegistry {
