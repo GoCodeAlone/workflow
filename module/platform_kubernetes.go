@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/modular"
-	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 // KubernetesClusterState holds the current state of a managed Kubernetes cluster.
@@ -55,7 +54,7 @@ type kubernetesBackend interface {
 type KubernetesBackendFactory func(cfg map[string]any) (kubernetesBackend, error)
 
 type kubernetesBackendResolver interface {
-	ResolveKubernetesBackend(string) (pb.ResourceDriverClient, string, bool)
+	ResolveKubernetesBackend(string) (KubernetesBackendBinding, string, bool)
 }
 
 // kubernetesBackendRegistry maps cluster type name to its factory.
@@ -106,7 +105,7 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 		}
 		m.backend = backend
 	} else {
-		client, scoped, err := resolveApplicationKubernetesBackend(app, clusterType)
+		binding, scoped, err := resolveApplicationKubernetesBackend(app, clusterType)
 		if err != nil {
 			return fmt.Errorf("platform.kubernetes %q: %w", m.name, err)
 		}
@@ -114,10 +113,10 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 			// Compatibility for callers that initialize modules without a
 			// StdEngine. Engine-built applications always publish a scoped
 			// registry and never consult this singleton.
-			client, _ = kubernetesBackendClientRegistryInstance.resolve(clusterType)
+			binding, _ = kubernetesBackendClientRegistryInstance.resolve(clusterType)
 		}
-		if client != nil {
-			m.backend = newGRPCKubernetesBackend(client)
+		if binding.Client != nil {
+			m.backend = newGRPCKubernetesBackend(binding.Name, binding.ResourceType, binding.Client)
 		} else if factory, ok := kubernetesBackendRegistry[clusterType]; ok {
 			// Retained aks/eks compatibility backends apply only when the
 			// current engine has no provider declaration for the exact name.
@@ -145,20 +144,20 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 	return app.RegisterService(m.name, m)
 }
 
-func resolveApplicationKubernetesBackend(app modular.Application, name string) (pb.ResourceDriverClient, bool, error) {
+func resolveApplicationKubernetesBackend(app modular.Application, name string) (KubernetesBackendBinding, bool, error) {
 	service, scoped := app.SvcRegistry()[KubernetesBackendRegistryServiceName]
 	if !scoped {
-		return nil, false, nil
+		return KubernetesBackendBinding{}, false, nil
 	}
 	resolver, ok := service.(kubernetesBackendResolver)
 	if !ok {
-		return nil, true, fmt.Errorf("service %q has incompatible type %T", KubernetesBackendRegistryServiceName, service)
+		return KubernetesBackendBinding{}, true, fmt.Errorf("service %q has incompatible type %T", KubernetesBackendRegistryServiceName, service)
 	}
-	client, _, found := resolver.ResolveKubernetesBackend(name)
+	binding, _, found := resolver.ResolveKubernetesBackend(name)
 	if !found {
-		return nil, true, nil
+		return KubernetesBackendBinding{}, true, nil
 	}
-	return client, true, nil
+	return binding, true, nil
 }
 
 // ProvidesServices declares the service this module provides.

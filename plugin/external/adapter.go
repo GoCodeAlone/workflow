@@ -387,6 +387,12 @@ func (a *ExternalPluginAdapter) EngineManifest() *plugin.PluginManifest {
 	if triggerTypes != nil {
 		m.TriggerTypes = triggerTypes.Types
 	}
+	// Kubernetes backend declarations are disk-manifest-only; pb.Manifest has no
+	// field for them. Preserve the canonical declarations so engine routing can
+	// correlate runtime clients with exact backend/resource-type bindings.
+	if a.diskManifest != nil {
+		m.KubernetesBackends = append([]plugin.KubernetesBackendDecl(nil), a.diskManifest.KubernetesBackends...)
+	}
 	return m
 }
 

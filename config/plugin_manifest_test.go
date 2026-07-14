@@ -254,11 +254,20 @@ func TestProviderDeclarationsValidate(t *testing.T) {
 		}, "unsupported credential type"},
 		{"reserved kind backend", func(d *ProviderDeclarations) { d.KubernetesBackends[0].Name = "kind" }, "reserved"},
 		{"reserved k3s backend", func(d *ProviderDeclarations) { d.KubernetesBackends[0].Name = "k3s" }, "reserved"},
+		{"reserved kind backend with surrounding whitespace", func(d *ProviderDeclarations) { d.KubernetesBackends[0].Name = " kind " }, "reserved"},
+		{"reserved k3s backend with surrounding whitespace", func(d *ProviderDeclarations) { d.KubernetesBackends[0].Name = "k3s " }, "reserved"},
 		{"duplicate backend", func(d *ProviderDeclarations) {
 			d.KubernetesBackends = append(d.KubernetesBackends, d.KubernetesBackends[0])
 		}, "duplicate kubernetes backend"},
+		{"canonical duplicate backend", func(d *ProviderDeclarations) {
+			d.KubernetesBackends = []KubernetesBackendDecl{
+				{Name: "foo", ResourceType: "infra.foo"},
+				{Name: " foo ", ResourceType: "infra.foo.v2"},
+			}
+		}, "duplicate kubernetes backend"},
 		{"empty backend name", func(d *ProviderDeclarations) { d.KubernetesBackends[0].Name = "" }, "backend name is required"},
 		{"empty backend resource type", func(d *ProviderDeclarations) { d.KubernetesBackends[0].ResourceType = "" }, "resourceType is required"},
+		{"backend resource type with surrounding whitespace", func(d *ProviderDeclarations) { d.KubernetesBackends[0].ResourceType = " infra.gke_cluster " }, "surrounding whitespace"},
 		{"duplicate registry", func(d *ProviderDeclarations) {
 			d.ContainerRegistries = append(d.ContainerRegistries, d.ContainerRegistries[0])
 		}, "duplicate container registry"},

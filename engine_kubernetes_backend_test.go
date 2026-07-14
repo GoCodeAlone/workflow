@@ -19,12 +19,14 @@ import (
 const testEngineKubernetesBackendRegistryServiceName = "workflow.internal.kubernetes-backend-registry"
 
 type engineKubernetesBackendRegistryView interface {
-	ResolveKubernetesBackend(string) (pb.ResourceDriverClient, string, bool)
+	ResolveKubernetesBackend(string) (workflowmodule.KubernetesBackendBinding, string, bool)
 }
 
 type engineKubernetesBackendPlugin struct {
 	plugin.BaseEnginePlugin
-	clients map[string]pb.ResourceDriverClient
+	clients         map[string]pb.ResourceDriverClient
+	moduleFactories map[string]plugin.ModuleFactory
+	configHooks     []plugin.ConfigTransformHook
 }
 
 func newEngineKubernetesBackendPlugin(name string, clients map[string]pb.ResourceDriverClient) *engineKubernetesBackendPlugin {
@@ -58,15 +60,25 @@ func (p *engineKubernetesBackendPlugin) KubernetesBackendClients() (map[string]p
 	return p.clients, nil
 }
 
+func (p *engineKubernetesBackendPlugin) ModuleFactories() map[string]plugin.ModuleFactory {
+	return p.moduleFactories
+}
+
+func (p *engineKubernetesBackendPlugin) ConfigTransformHooks() []plugin.ConfigTransformHook {
+	return p.configHooks
+}
+
 type engineKubernetesResourceDriverClient struct {
-	id        string
-	readCalls atomic.Int32
+	id               string
+	readCalls        atomic.Int32
+	readResourceType atomic.Value
 }
 
 func (*engineKubernetesResourceDriverClient) Create(context.Context, *pb.ResourceCreateRequest, ...grpc.CallOption) (*pb.ResourceCreateResponse, error) {
 	return &pb.ResourceCreateResponse{}, nil
 }
-func (c *engineKubernetesResourceDriverClient) Read(context.Context, *pb.ResourceReadRequest, ...grpc.CallOption) (*pb.ResourceReadResponse, error) {
+func (c *engineKubernetesResourceDriverClient) Read(_ context.Context, request *pb.ResourceReadRequest, _ ...grpc.CallOption) (*pb.ResourceReadResponse, error) {
+	c.readResourceType.Store(request.GetResourceType())
 	c.readCalls.Add(1)
 	return &pb.ResourceReadResponse{}, nil
 }
@@ -125,12 +137,43 @@ func TestEngineKubernetesBackendsRejectCrossOwnerCollisionAtomically(t *testing.
 		t.Fatalf("LoadPlugin(provider-a): %v", err)
 	}
 
-	err := engine.LoadPlugin(newEngineKubernetesBackendPlugin("provider-b", map[string]pb.ResourceDriverClient{
+	providerB := newEngineKubernetesBackendPlugin("provider-b", map[string]pb.ResourceDriverClient{
 		"new-b":  ownerBClient,
 		"shared": ownerBClient,
-	}))
+	})
+	providerB.Manifest.ModuleTypes = []string{"provider-b.marker"}
+	providerB.moduleFactories = map[string]plugin.ModuleFactory{
+		"provider-b.marker": func(name string, cfg map[string]any) modular.Module {
+			return workflowmodule.NewServiceModule(name, cfg)
+		},
+	}
+	providerB.configHooks = []plugin.ConfigTransformHook{{
+		Name: "provider-b.marker-hook",
+		Hook: func(*config.WorkflowConfig) error { return nil },
+	}}
+	err := engine.LoadPlugin(providerB)
 	if err == nil || !strings.Contains(err.Error(), "provider-a") || !strings.Contains(err.Error(), "provider-b") {
 		t.Fatalf("LoadPlugin(provider-b) error = %v, want cross-owner shared backend collision", err)
+	}
+	for _, loaded := range engine.PluginLoader().LoadedPlugins() {
+		if loaded.EngineManifest().Name == "provider-b" {
+			t.Fatal("rejected provider-b remained in PluginLoader().LoadedPlugins()")
+		}
+	}
+	for _, loaded := range engine.LoadedPlugins() {
+		if loaded.EngineManifest().Name == "provider-b" {
+			t.Fatal("rejected provider-b remained in engine.LoadedPlugins()")
+		}
+	}
+	for _, moduleType := range engine.RegisteredModuleTypes() {
+		if moduleType == "provider-b.marker" {
+			t.Fatal("rejected provider-b module factory mutated engine registry")
+		}
+	}
+	for _, hook := range engine.PluginLoader().ConfigTransformHooks() {
+		if hook.Name == "provider-b.marker-hook" {
+			t.Fatal("rejected provider-b config hook mutated PluginLoader")
+		}
 	}
 	if err := engine.BuildFromConfig(emptyKubernetesBackendWorkflowConfig()); err != nil {
 		t.Fatalf("BuildFromConfig: %v", err)
@@ -138,13 +181,13 @@ func TestEngineKubernetesBackendsRejectCrossOwnerCollisionAtomically(t *testing.
 
 	registry := engineKubernetesBackendRegistry(t, app)
 	got, owner, ok := registry.ResolveKubernetesBackend("shared")
-	if !ok || owner != "provider-a" || got != ownerAClient {
+	if !ok || owner != "provider-a" || got.Client != ownerAClient || got.ResourceType != "infra.test_cluster" {
 		t.Fatalf("shared = (%v, %q, %v), want owner-a registration unchanged", got, owner, ok)
 	}
 	if got, owner, ok := registry.ResolveKubernetesBackend("new-b"); ok {
 		t.Fatalf("new-b leaked from rejected batch: (%v, %q, %v)", got, owner, ok)
 	}
-	if got, owner, ok := registry.ResolveKubernetesBackend("stable-a"); !ok || owner != "provider-a" || got != ownerAClient {
+	if got, owner, ok := registry.ResolveKubernetesBackend("stable-a"); !ok || owner != "provider-a" || got.Client != ownerAClient {
 		t.Fatalf("stable-a changed after rejected batch: (%v, %q, %v)", got, owner, ok)
 	}
 }
@@ -172,10 +215,10 @@ func TestEngineKubernetesBackendsAreIsolatedAcrossCandidateEngines(t *testing.T)
 
 	gotA, ownerA, okA := engineKubernetesBackendRegistry(t, appA).ResolveKubernetesBackend("shared-candidate")
 	gotB, ownerB, okB := engineKubernetesBackendRegistry(t, appB).ResolveKubernetesBackend("shared-candidate")
-	if !okA || ownerA != "same-provider" || gotA != clientA {
+	if !okA || ownerA != "same-provider" || gotA.Client != clientA || gotA.ResourceType != "infra.test_cluster" {
 		t.Fatalf("engine A selection = (%v, %q, %v), want its own client", gotA, ownerA, okA)
 	}
-	if !okB || ownerB != "same-provider" || gotB != clientB {
+	if !okB || ownerB != "same-provider" || gotB.Client != clientB || gotB.ResourceType != "infra.test_cluster" {
 		t.Fatalf("engine B selection = (%v, %q, %v), want its own client", gotB, ownerB, okB)
 	}
 }
@@ -212,6 +255,58 @@ func TestEngineKubernetesBackendRegistryIsAvailableDuringModuleInit(t *testing.T
 	}
 	if got := client.readCalls.Load(); got != 1 {
 		t.Fatalf("provider Read calls = %d, want 1; retained core AKS backend was selected", got)
+	}
+	if got, _ := client.readResourceType.Load().(string); got != "infra.test_cluster" {
+		t.Fatalf("provider Read resource type = %q, want exact manifest declaration", got)
+	}
+}
+
+func TestEngineKubernetesBackendBindingsRequireManifestRuntimeParity(t *testing.T) {
+	tests := []struct {
+		name   string
+		plugin func() *engineKubernetesBackendPlugin
+		want   string
+	}{
+		{
+			name: "manifest declaration missing runtime client",
+			plugin: func() *engineKubernetesBackendPlugin {
+				p := newEngineKubernetesBackendPlugin("missing-client", map[string]pb.ResourceDriverClient{
+					"served": &engineKubernetesResourceDriverClient{id: "served"},
+				})
+				p.Manifest.KubernetesBackends = append(p.Manifest.KubernetesBackends, plugin.KubernetesBackendDecl{
+					Name: "missing", ResourceType: "infra.missing",
+				})
+				return p
+			},
+			want: "has no runtime client",
+		},
+		{
+			name: "runtime client missing manifest declaration",
+			plugin: func() *engineKubernetesBackendPlugin {
+				p := newEngineKubernetesBackendPlugin("extra-client", map[string]pb.ResourceDriverClient{
+					"served": &engineKubernetesResourceDriverClient{id: "served"},
+					"extra":  &engineKubernetesResourceDriverClient{id: "extra"},
+				})
+				p.Manifest.KubernetesBackends = p.Manifest.KubernetesBackends[:1]
+				p.Manifest.KubernetesBackends[0] = plugin.KubernetesBackendDecl{Name: "served", ResourceType: "infra.served"}
+				return p
+			},
+			want: "is not declared in the manifest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &mock.Logger{})
+			engine := NewStdEngine(app, &mock.Logger{})
+			err := engine.LoadPlugin(tt.plugin())
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadPlugin error = %v, want %q", err, tt.want)
+			}
+			if len(engine.PluginLoader().LoadedPlugins()) != 0 || len(engine.LoadedPlugins()) != 0 {
+				t.Fatalf("manifest/runtime mismatch mutated plugin state: loader=%d engine=%d",
+					len(engine.PluginLoader().LoadedPlugins()), len(engine.LoadedPlugins()))
+			}
+		})
 	}
 }
 

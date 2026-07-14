@@ -197,18 +197,26 @@ func validateCredentialResolvers(declarations []CredentialResolverDecl) error {
 func validateKubernetesBackends(declarations []KubernetesBackendDecl) error {
 	seenNames := make(map[string]struct{}, len(declarations))
 	for _, declaration := range declarations {
-		if strings.TrimSpace(declaration.Name) == "" {
+		canonicalName := strings.TrimSpace(declaration.Name)
+		if canonicalName == "" {
 			return fmt.Errorf("provider declarations: kubernetes backend name is required")
 		}
-		if declaration.Name == "kind" || declaration.Name == "k3s" {
-			return fmt.Errorf("provider declarations: kubernetes backend name %q is reserved for core", declaration.Name)
+		if canonicalName == "kind" || canonicalName == "k3s" {
+			return fmt.Errorf("provider declarations: kubernetes backend name %q is reserved for core", canonicalName)
 		}
-		if _, exists := seenNames[declaration.Name]; exists {
-			return fmt.Errorf("provider declarations: duplicate kubernetes backend %q", declaration.Name)
+		if _, exists := seenNames[canonicalName]; exists {
+			return fmt.Errorf("provider declarations: duplicate kubernetes backend %q", canonicalName)
 		}
-		seenNames[declaration.Name] = struct{}{}
-		if strings.TrimSpace(declaration.ResourceType) == "" {
-			return fmt.Errorf("provider declarations: kubernetes backend %q resourceType is required", declaration.Name)
+		if canonicalName != declaration.Name {
+			return fmt.Errorf("provider declarations: kubernetes backend name %q must not contain surrounding whitespace", declaration.Name)
+		}
+		seenNames[canonicalName] = struct{}{}
+		canonicalResourceType := strings.TrimSpace(declaration.ResourceType)
+		if canonicalResourceType == "" {
+			return fmt.Errorf("provider declarations: kubernetes backend %q resourceType is required", canonicalName)
+		}
+		if canonicalResourceType != declaration.ResourceType {
+			return fmt.Errorf("provider declarations: kubernetes backend %q resourceType %q must not contain surrounding whitespace", canonicalName, declaration.ResourceType)
 		}
 	}
 	return nil

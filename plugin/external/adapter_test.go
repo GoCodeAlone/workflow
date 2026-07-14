@@ -942,8 +942,13 @@ func TestNewExternalPluginAdapterDiskManifestNilStillWorks(t *testing.T) {
 // and the disk-manifest overlay must populate the cached manifest so
 // EngineManifest()/Validate() can succeed downstream.
 func TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion(t *testing.T) {
+	declarations := []plugin.KubernetesBackendDecl{
+		{Name: "managed-a", ResourceType: "infra.k8s_cluster"},
+		{Name: "managed-b", ResourceType: "infra.managed_cluster"},
+	}
 	disk := &plugin.PluginManifest{
 		Name: "x", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
+		KubernetesBackends: declarations,
 	}
 	a, err := NewExternalPluginAdapter("x", &PluginClient{client: &adapterTestPluginServiceClient{
 		manifestResp: &pb.Manifest{Name: "x", Version: ""},
@@ -957,6 +962,9 @@ func TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion(t *testi
 	em := a.EngineManifest()
 	if em.Author != "GoCodeAlone" {
 		t.Fatalf("EngineManifest().Author = %q, want GoCodeAlone (disk overlay)", em.Author)
+	}
+	if len(em.KubernetesBackends) != 2 || em.KubernetesBackends[0] != declarations[0] || em.KubernetesBackends[1] != declarations[1] {
+		t.Fatalf("EngineManifest kubernetes backends = %+v, want exact disk declarations %+v", em.KubernetesBackends, declarations)
 	}
 }
 
@@ -1259,6 +1267,32 @@ func TestKubernetesBackendClientsRejectsCoreReservedNames(t *testing.T) {
 			_, err := a.KubernetesBackendClients()
 			if err == nil || !strings.Contains(err.Error(), "reserved") {
 				t.Fatalf("error = %v, want reserved backend %q rejection", err, name)
+			}
+		})
+	}
+}
+
+func TestKubernetesBackendClientsRejectsNonCanonicalNames(t *testing.T) {
+	tests := []struct {
+		name         string
+		declarations []plugin.KubernetesBackendDecl
+		want         string
+	}{
+		{"kind with whitespace", []plugin.KubernetesBackendDecl{{Name: " kind ", ResourceType: "infra.managed_cluster"}}, "reserved"},
+		{"k3s with whitespace", []plugin.KubernetesBackendDecl{{Name: "k3s ", ResourceType: "infra.managed_cluster"}}, "reserved"},
+		{"canonical duplicate", []plugin.KubernetesBackendDecl{
+			{Name: "foo", ResourceType: "infra.managed_cluster"},
+			{Name: " foo ", ResourceType: "infra.managed_cluster"},
+		}, "duplicate kubernetes backend"},
+		{"resource type with whitespace", []plugin.KubernetesBackendDecl{{Name: "foo", ResourceType: " infra.managed_cluster "}}, "surrounding whitespace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimeTypes := []string{"infra.managed_cluster", " infra.managed_cluster "}
+			adapter := newKubernetesBackendTestAdapter(t, tt.declarations, true, runtimeTypes)
+			_, err := adapter.KubernetesBackendClients()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want non-canonical declaration rejection", err)
 			}
 		})
 	}

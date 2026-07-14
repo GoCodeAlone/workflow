@@ -365,3 +365,34 @@ func TestVerifyCapabilities_KubernetesBackendRequiresRuntimeResourceType(t *test
 		t.Fatalf("error = %v, want missing runtime resource type mismatch", err)
 	}
 }
+
+func TestVerifyCapabilities_KubernetesBackendsRejectNonCanonicalNames(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "kubernetes-good", "v0.1.0")
+	tests := []struct {
+		name         string
+		declarations []plugin.KubernetesBackendDecl
+		want         string
+	}{
+		{"kind with whitespace", []plugin.KubernetesBackendDecl{{Name: " kind ", ResourceType: "infra.managed_cluster"}}, "reserved"},
+		{"k3s with whitespace", []plugin.KubernetesBackendDecl{{Name: "k3s ", ResourceType: "infra.managed_cluster"}}, "reserved"},
+		{"canonical duplicate", []plugin.KubernetesBackendDecl{
+			{Name: "foo", ResourceType: "infra.managed_cluster"},
+			{Name: " foo ", ResourceType: "infra.managed_cluster"},
+		}, "duplicate kubernetes backend"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeVerifyCapabilitiesManifest(t, plugin.PluginManifest{
+				Name:               "verify-kubernetes",
+				Version:            "0.0.0",
+				Author:             "test fixture",
+				Description:        "non-canonical kubernetes backend declaration",
+				KubernetesBackends: tt.declarations,
+			})
+			err := runPluginVerifyCapabilities([]string{"--binary", bin, dir})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want manifest validation rejection", err)
+			}
+		})
+	}
+}

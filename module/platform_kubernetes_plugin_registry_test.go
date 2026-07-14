@@ -13,9 +13,9 @@ type testScopedKubernetesBackendRegistry struct {
 	clients map[string]pb.ResourceDriverClient
 }
 
-func (r *testScopedKubernetesBackendRegistry) ResolveKubernetesBackend(name string) (pb.ResourceDriverClient, string, bool) {
+func (r *testScopedKubernetesBackendRegistry) ResolveKubernetesBackend(name string) (KubernetesBackendBinding, string, bool) {
 	client, ok := r.clients[name]
-	return client, "test-provider", ok
+	return KubernetesBackendBinding{Name: name, ResourceType: "infra." + name, Client: client}, "test-provider", ok
 }
 
 // TestKubernetesBackendClientRegistry exercises the engine-side registry that
@@ -31,7 +31,7 @@ func TestKubernetesBackendClientRegistry(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	got, ok := reg.resolve("gke")
-	if !ok || got != fake {
+	if !ok || got.Client != fake || got.ResourceType != legacyKubernetesBackendResourceType {
 		t.Fatalf("resolve gke: ok=%v got=%v", ok, got)
 	}
 	// Only core-local cluster types cannot be claimed by a plugin.
@@ -70,15 +70,15 @@ func TestKubernetesBackendRegistrySameOwnerReplacementDropsStaleNames(t *testing
 	reg := NewKubernetesBackendRegistry()
 	first := &fakeResourceDriverClient{}
 	replacement := &fakeResourceDriverClient{}
-	if err := reg.Register("provider-a", map[string]pb.ResourceDriverClient{
-		"dropped":  first,
-		"retained": first,
+	if err := reg.Register("provider-a", []KubernetesBackendBinding{
+		{Name: "dropped", ResourceType: "infra.dropped", Client: first},
+		{Name: "retained", ResourceType: "infra.retained", Client: first},
 	}); err != nil {
 		t.Fatalf("Register(initial): %v", err)
 	}
-	if err := reg.Register("provider-a", map[string]pb.ResourceDriverClient{
-		"retained": replacement,
-		"added":    replacement,
+	if err := reg.Register("provider-a", []KubernetesBackendBinding{
+		{Name: "retained", ResourceType: "infra.retained.v2", Client: replacement},
+		{Name: "added", ResourceType: "infra.added", Client: replacement},
 	}); err != nil {
 		t.Fatalf("Register(replacement): %v", err)
 	}
@@ -87,9 +87,9 @@ func TestKubernetesBackendRegistrySameOwnerReplacementDropsStaleNames(t *testing
 		t.Fatalf("dropped name survived replacement: (%v, %q, %v)", client, owner, ok)
 	}
 	for _, name := range []string{"retained", "added"} {
-		client, owner, ok := reg.ResolveKubernetesBackend(name)
-		if !ok || owner != "provider-a" || client != replacement {
-			t.Fatalf("%s = (%v, %q, %v), want provider-a replacement", name, client, owner, ok)
+		binding, owner, ok := reg.ResolveKubernetesBackend(name)
+		if !ok || owner != "provider-a" || binding.Client != replacement {
+			t.Fatalf("%s = (%v, %q, %v), want provider-a replacement", name, binding, owner, ok)
 		}
 	}
 }
@@ -105,11 +105,11 @@ func TestRegisterKubernetesBackendClient(t *testing.T) {
 	}
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
-		delete(kubernetesBackendClientRegistryInstance.clients, backend)
+		delete(kubernetesBackendClientRegistryInstance.bindings, backend)
 		delete(kubernetesBackendClientRegistryInstance.owners, backend)
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
 	}()
-	if got, ok := kubernetesBackendClientRegistryInstance.resolve(backend); !ok || got != fake {
+	if got, ok := kubernetesBackendClientRegistryInstance.resolve(backend); !ok || got.Client != fake {
 		t.Fatalf("resolve(%q): ok=%v got=%v", backend, ok, got)
 	}
 	if err := RegisterKubernetesBackendClient("kind", fake); err == nil {
@@ -129,7 +129,7 @@ func TestPlatformKubernetes_GKEDispatchToPluginClient(t *testing.T) {
 	}
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
-		delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+		delete(kubernetesBackendClientRegistryInstance.bindings, clusterType)
 		delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
 	}()
@@ -152,18 +152,18 @@ func TestPlatformKubernetes_GKEWithoutPluginErrors(t *testing.T) {
 	// this under the registry mutex keeps the test deterministic instead of
 	// skipping when a concurrent registration is present.
 	kubernetesBackendClientRegistryInstance.mu.Lock()
-	prev, hadPrev := kubernetesBackendClientRegistryInstance.clients[clusterType]
+	prev, hadPrev := kubernetesBackendClientRegistryInstance.bindings[clusterType]
 	prevOwner := kubernetesBackendClientRegistryInstance.owners[clusterType]
-	delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+	delete(kubernetesBackendClientRegistryInstance.bindings, clusterType)
 	delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 	kubernetesBackendClientRegistryInstance.mu.Unlock()
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
 		if hadPrev {
-			kubernetesBackendClientRegistryInstance.clients[clusterType] = prev
+			kubernetesBackendClientRegistryInstance.bindings[clusterType] = prev
 			kubernetesBackendClientRegistryInstance.owners[clusterType] = prevOwner
 		} else {
-			delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+			delete(kubernetesBackendClientRegistryInstance.bindings, clusterType)
 			delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 		}
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
@@ -190,7 +190,7 @@ func TestPlatformKubernetes_ScopedRegistryDoesNotFallBackToGlobal(t *testing.T) 
 	}
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
-		delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+		delete(kubernetesBackendClientRegistryInstance.bindings, clusterType)
 		delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
 	}()
