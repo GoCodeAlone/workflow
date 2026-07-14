@@ -120,55 +120,194 @@ grep_files_fail_closed() {
   fi
   return "${status}"
 }
-workflow_files=()
-collect_workflow_files() {
-  local include_yaml="$1"
-  local dotglob_was_set=0
-  local nullglob_was_set=0
-  local workflow_file
-  local workflow_candidates=()
-  workflow_files=()
-  if shopt -q dotglob; then
-    dotglob_was_set=1
-  fi
-  if shopt -q nullglob; then
-    nullglob_was_set=1
-  fi
-  shopt -s dotglob nullglob
-  workflow_candidates=("${repo_root}/.github/workflows"/*.yml)
-  if [[ "${include_yaml}" -eq 1 ]]; then
-    workflow_candidates+=("${repo_root}/.github/workflows"/*.yaml)
-  fi
-  if [[ "${dotglob_was_set}" -eq 0 ]]; then
-    shopt -u dotglob
-  fi
-  if [[ "${nullglob_was_set}" -eq 0 ]]; then
-    shopt -u nullglob
-  fi
-  for workflow_file in "${workflow_candidates[@]}"; do
-    if [[ -f "${workflow_file}" && ! -L "${workflow_file}" ]]; then
-      workflow_files+=("${workflow_file}")
-    fi
-  done
-}
-grep_workflow_files() {
-  collect_workflow_files 1
-  if [[ "${#workflow_files[@]}" -eq 0 ]]; then
+trusted_scan_env_binary=""
+if [[ -x /usr/bin/env ]]; then
+  trusted_scan_env_binary=/usr/bin/env
+elif [[ -x /bin/env ]]; then
+  trusted_scan_env_binary=/bin/env
+fi
+trusted_scan_bash_binary=""
+if [[ -x /bin/bash ]]; then
+  trusted_scan_bash_binary=/bin/bash
+elif [[ -x /usr/bin/bash ]]; then
+  trusted_scan_bash_binary=/usr/bin/bash
+fi
+trusted_scan_true_binary=""
+if [[ -x /usr/bin/true ]]; then
+  trusted_scan_true_binary=/usr/bin/true
+elif [[ -x /bin/true ]]; then
+  trusted_scan_true_binary=/bin/true
+fi
+resolve_scan_executable() {
+  local name="$1"
+  local resolved
+  if [[ -z "${trusted_scan_env_binary}" || -z "${trusted_scan_bash_binary}" ]]; then
     return 1
   fi
-  grep_files_fail_closed "top-level public workflow files" \
-    "$@" "${workflow_files[@]}"
+  if ! resolved="$(
+    "${trusted_scan_env_binary}" -i PATH="${PATH:-}" \
+      "${trusted_scan_bash_binary}" --noprofile --norc -c '
+        name="$1"
+        if ! resolved="$(builtin type -P "${name}")"; then
+          exit 1
+        fi
+        case "${resolved}" in
+          /*) ;;
+          */*)
+            if ! resolved_dir="$(builtin cd -- "${resolved%/*}" && builtin pwd -P)"; then
+              exit 1
+            fi
+            resolved="${resolved_dir%/}/${resolved##*/}"
+            ;;
+          *) resolved="$(builtin pwd -P)/${resolved}" ;;
+        esac
+        if [[ ! -x "${resolved}" ]]; then
+          exit 1
+        fi
+        printf "%s\n" "${resolved}"
+      ' _ "${name}"
+  )"; then
+    return 1
+  fi
+  printf '%s\n' "${resolved}"
 }
-workflow_match_count() {
-  local pattern="$1"
+find_top_level_yml() {
+  "${scan_find_binary}" . ! -name . -prune -type f -name '*.yml' -print0
+}
+find_top_level_yml_yaml() {
+  "${scan_find_binary}" . ! -name . -prune -type f \( -name '*.yml' -o -name '*.yaml' \) -print0
+}
+find_active_go_pin_files() {
+  "${scan_find_binary}" . \( -name .git -o \( -type d -path './docs/plans' \) \) -prune -o -type f -print0
+}
+grep_find_batches() {
+  local label="$1"
+  local literal_root="$2"
+  local producer="$3"
+  local marker
+  local marker_parent
+  local output
+  local physical_root
+  local pipeline_status=0
+  local match_status=1
+  local grep_binary
+  local grep_argument_count
+  local scan_find_binary
+  local scan_xargs_binary
+  shift 3
+  grep_argument_count="$#"
+  if [[ -z "${trusted_scan_env_binary}" ]]; then
+    echo "failed to resolve env for ${label}" >&2
+    return 2
+  fi
+  if [[ -z "${trusted_scan_bash_binary}" ]]; then
+    echo "failed to resolve bash for ${label}" >&2
+    return 2
+  fi
+  if ! grep_binary="$(resolve_scan_executable grep)"; then
+    echo "failed to resolve grep for ${label}" >&2
+    return 2
+  fi
+  if ! scan_find_binary="$(resolve_scan_executable find)"; then
+    echo "failed to resolve find for ${label}" >&2
+    return 2
+  fi
+  if ! scan_xargs_binary="$(resolve_scan_executable xargs)"; then
+    echo "failed to resolve xargs for ${label}" >&2
+    return 2
+  fi
+  if ! physical_root="$(cd -- "${literal_root}" && pwd -P)"; then
+    echo "failed to enter ${label} root" >&2
+    return 2
+  fi
+  if ! marker_parent="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)"; then
+    echo "failed to enter ${label} scan marker parent" >&2
+    return 2
+  fi
+  if [[ "${marker_parent}" == "${physical_root}" ||
+    "${marker_parent}" == "${physical_root}"/* ]] ||
+    [[ -n "${production_repo_root:-}" &&
+      ("${marker_parent}" == "${production_repo_root}" ||
+        "${marker_parent}" == "${production_repo_root}"/*) ]]; then
+    echo "refusing scan marker inside a protected root" >&2
+    return 2
+  fi
+  if ! marker="$(mktemp "${marker_parent%/}/workflow-grep-match.XXXXXX")"; then
+    echo "failed to create ${label} scan marker" >&2
+    return 2
+  fi
+  output="$(
+    set -o pipefail
+    if ! cd -- "${literal_root}"; then
+      echo "failed to enter ${label} root" >&2
+      exit 2
+    fi
+    "${producer}" |
+      LC_ALL=C "${scan_xargs_binary}" -0 -n 64 \
+        "${trusted_scan_env_binary}" -i LC_ALL=C BASH_ENV=/dev/null ENV=/dev/null \
+        "${trusted_scan_bash_binary}" --noprofile --norc -c '
+        grep_argument_count="$1"
+        marker="$2"
+        grep_binary="$3"
+        shift 3
+        if [[ "$#" -eq "${grep_argument_count}" ]]; then
+          exit 0
+        fi
+        status=0
+        LC_ALL=C "${grep_binary}" "$@" || status=$?
+        case "${status}" in
+          0)
+            if ! printf "1\n" >"${marker}"; then
+              echo "failed to record grep match" >&2
+              exit 2
+            fi
+            ;;
+          1) ;;
+          *) exit "${status}" ;;
+        esac
+      ' _ "${grep_argument_count}" "${marker}" "${grep_binary}" "$@"
+  )" || pipeline_status=$?
+  if [[ -s "${marker}" ]]; then
+    match_status=0
+  fi
+  if ! rm -f -- "${marker}"; then
+    echo "failed to remove ${label} scan marker" >&2
+    return 2
+  fi
+  if [[ -n "${output}" ]]; then
+    printf '%s\n' "${output}"
+  fi
+  if [[ "${pipeline_status}" -ne 0 ]]; then
+    echo "failed to scan ${label}" >&2
+    if [[ "${pipeline_status}" -eq 1 ]]; then
+      return 2
+    fi
+    return "${pipeline_status}"
+  fi
+  return "${match_status}"
+}
+grep_workflow_files_at() {
+  local workflow_repo_root="$1"
+  shift
+  grep_find_batches \
+    "top-level public workflow files" \
+    "${workflow_repo_root}/.github/workflows" \
+    find_top_level_yml_yaml \
+    "$@"
+}
+grep_workflow_files() {
+  grep_workflow_files_at "${repo_root}" "$@"
+}
+workflow_match_count_at() {
+  local workflow_repo_root="$1"
+  local pattern="$2"
   local matches
   local status=0
-  collect_workflow_files 0
-  if [[ "${#workflow_files[@]}" -eq 0 ]]; then
-    printf '0\n'
-    return
-  fi
-  matches="$(grep -Eoh -- "${pattern}" "${workflow_files[@]}")" || status=$?
+  matches="$(grep_find_batches \
+    "top-level public workflow .yml files" \
+    "${workflow_repo_root}/.github/workflows" \
+    find_top_level_yml \
+    -Eoh -- "${pattern}")" || status=$?
   if [[ "${status}" -gt 1 ]]; then
     return "${status}"
   fi
@@ -177,6 +316,9 @@ workflow_match_count() {
   else
     printf '%s\n' "${matches}" | wc -l | tr -d ' '
   fi
+}
+workflow_match_count() {
+  workflow_match_count_at "${repo_root}" "$1"
 }
 if [[ "$(grep -Fc -- 'uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5' "${governance_workflow}")" -ne 1 ]]; then
   echo "public policy must check out only the trusted base" >&2
@@ -678,55 +820,581 @@ fi
 
 legacy_go_patch='1.26.'
 legacy_go_patch+='4'
-scan_active_go_pin_batch() {
-  local status=0
-  grep -anHF -- "${legacy_go_patch}" "$@" || status=$?
-  if [[ "${status}" -gt 1 ]]; then
-    echo "failed to scan active/current Go pins" >&2
-  fi
-  return "${status}"
+scan_active_go_pins_at() {
+  local active_repo_root="$1"
+  grep_find_batches \
+    "active/current Go pin scan" \
+    "${active_repo_root}" \
+    find_active_go_pin_files \
+    -anHF -- "${legacy_go_patch}"
 }
-scan_active_go_pins() (
-  local archive_file_list="${tmp_dir}/active-go-pin-files"
-  local archive_files=()
-  local archive_path
-  local found=1
+scan_active_go_pins() {
+  scan_active_go_pins_at "${repo_root}"
+}
+
+run_portable_scan_regressions() (
+  local fixture_parent="${tmp_dir}/portable-scan[?*] fixtures"
+  local workflow_root="${fixture_parent}/workflow repo"
+  local workflow_dir="${workflow_root}/.github/workflows"
+  local empty_workflow_root="${fixture_parent}/empty workflow repo"
+  local actual_root="${fixture_parent}/actual repo"
+  local batch_root="${fixture_parent}/batch repo"
+  local fake_bin="${fixture_parent}/fake-bin"
+  local output
   local status
-  if ! cd "${repo_root}"; then
-    echo "failed to enter active/current Go pin scan root" >&2
-    exit 2
+  local saved_shopt
+  local saved_globignore_set=0
+  local saved_globignore=""
+  local file_index
+  local filename
+  local invocation_count
+  local expected_invocations
+  local ambient_true
+  local fake_grep_shebang
+  local bash_spoof_bin
+  local find_failure_bin
+  local grep_proxy_bin
+  local grep_failure_bin
+  local hostile_bash_env="${fixture_parent}/hostile-bash-env.sh"
+  local plans_file_root="${fixture_parent}/plans-file repo"
+  local true_proxy_bin="${fixture_parent}/true-bin"
+  local true_spoof_bin="${fixture_parent}/true-spoof-bin"
+  local worker_error_output
+  local worker_error_status
+  local worker_match_output
+  local worker_match_status
+  local xargs_failure_bin
+  local real_grep
+  local real_true
+  local restored_shopt
+
+  if ! real_grep="$(resolve_scan_executable grep)"; then
+    echo "failed to resolve grep for portable scan regressions" >&2
+    exit 1
   fi
-  if ! find . \
-    \( -name .git -o \( -type d -path './docs/plans' \) \) -prune -o \
-    -type f -print0 >"${archive_file_list}"; then
-    echo "failed to enumerate active/current Go pin files" >&2
-    exit 2
+  mkdir -p \
+    "${workflow_dir}/nested" \
+    "${actual_root}/.hidden" \
+    "${actual_root}/nested/docs/plans" \
+    "${actual_root}/docs/plans" \
+    "${actual_root}/docs/plans2" \
+    "${actual_root}/git-dir/.git" \
+    "${actual_root}/git-file" \
+    "${actual_root}/git-link" \
+    "${fixture_parent}/outside-git" \
+    "${batch_root}" \
+    "${fake_bin}" \
+    "${plans_file_root}/docs" \
+    "${true_proxy_bin}" \
+    "${true_spoof_bin}"
+
+  ln -s "${trusted_scan_bash_binary}" "${true_spoof_bin}/true"
+  if ! ambient_true="$(
+    PATH="${true_spoof_bin}:${PATH}" resolve_scan_executable true
+  )"; then
+    echo "failed to resolve hostile ambient PATH true" >&2
+    exit 1
   fi
-  while IFS= read -r -d '' archive_path; do
-    archive_files+=("${archive_path}")
-    if [[ "${#archive_files[@]}" -lt 64 ]]; then
-      continue
+  if [[ "${ambient_true}" != "${true_spoof_bin}/true" ]]; then
+    echo "ambient PATH true spoof was not selected by ambient resolution" >&2
+    printf 'resolved_ambient_true=%s\n' "${ambient_true}" >&2
+    exit 1
+  fi
+  if [[ -z "${trusted_scan_true_binary}" ]]; then
+    echo "failed to select trusted true for ambient PATH bash spoof" >&2
+    exit 1
+  fi
+  real_true="${trusted_scan_true_binary}"
+
+  ln -s "${real_true}" "${true_proxy_bin}/true"
+  if ! real_true="$(
+    cd -- "${fixture_parent}"
+    PATH="true-bin:${PATH}" resolve_scan_executable true
+  )"; then
+    echo "failed to resolve relative PATH true for ambient PATH bash spoof" >&2
+    exit 1
+  fi
+  if [[ "${real_true}" != "${true_proxy_bin}/true" || ! -x "${real_true}" ]]; then
+    echo "relative PATH true was not canonicalized for ambient PATH bash spoof" >&2
+    exit 1
+  fi
+
+  printf 'PORTABILITY_MARKER\nnpm ci\nNODE_AUTH_TOKEN: ${{ github.token }}\n' >"${workflow_dir}/visible.yml"
+  printf 'PORTABILITY_MARKER\n' >"${workflow_dir}/.hidden.yaml"
+  printf 'PORTABILITY_MARKER\n' >"${workflow_dir}/space name.yml"
+  printf 'PORTABILITY_MARKER\n' >"${workflow_dir}/-dash.yml"
+  printf 'PORTABILITY_MARKER\n' >"${workflow_dir}/"$'line\nbreak.yaml'
+  printf 'PORTABILITY_MARKER\n' >"${workflow_dir}/UPPER.YML"
+  printf 'PORTABILITY_MARKER\n' >"${workflow_dir}/nested/subdir.yml"
+  printf 'npm ci\n' >"${workflow_dir}/yaml-count-must-not-apply.yaml"
+  ln -s visible.yml "${workflow_dir}/linked.yml"
+
+  GLOBIGNORE='caller-state'
+  shopt -u dotglob
+  saved_shopt="$(shopt -p failglob nocaseglob dotglob nullglob || true)"
+  if [[ ${GLOBIGNORE+x} ]]; then
+    saved_globignore_set=1
+    saved_globignore="${GLOBIGNORE}"
+  fi
+  shopt -s failglob nocaseglob dotglob nullglob
+  GLOBIGNORE='visible.yml:space name.yml'
+  set +e
+  output="$(grep_workflow_files_at "${workflow_root}" -FnH -- 'PORTABILITY_MARKER' 2>&1)"
+  status=$?
+  set -e
+  if [[ "${saved_globignore_set}" -eq 1 ]]; then
+    GLOBIGNORE="${saved_globignore}"
+  else
+    unset GLOBIGNORE
+  fi
+  eval "${saved_shopt}"
+  restored_shopt="$(shopt -p failglob nocaseglob dotglob nullglob || true)"
+  if [[ "${restored_shopt}" != "${saved_shopt}" ]] ||
+    [[ ! ${GLOBIGNORE+x} || "${GLOBIGNORE}" != "${saved_globignore}" ]]; then
+    echo "portable workflow scan did not restore caller shell state" >&2
+    exit 1
+  fi
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *'./visible.yml:1:PORTABILITY_MARKER'* ]] ||
+    [[ "${output}" != *'./.hidden.yaml:1:PORTABILITY_MARKER'* ]] ||
+    [[ "${output}" != *'./space name.yml:1:PORTABILITY_MARKER'* ]] ||
+    [[ "${output}" != *'./-dash.yml:1:PORTABILITY_MARKER'* ]] ||
+    [[ "${output}" != *$'./line\nbreak.yaml:1:PORTABILITY_MARKER'* ]] ||
+    [[ "${output}" == *'UPPER.YML'* ]] ||
+    [[ "${output}" == *'subdir.yml'* ]] ||
+    [[ "${output}" == *'linked.yml'* ]]; then
+    echo "top-level workflow scan is not literal, shell-state-independent, or pathname-safe" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+  mkdir -p "${workflow_dir}/unsafe-tmp"
+  set +e
+  output="$(
+    TMPDIR="${workflow_dir}/unsafe-tmp" \
+      grep_workflow_files_at "${workflow_root}" -FnH -- 'PORTABILITY_MARKER' 2>&1
+  )"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] ||
+    [[ "${output}" != *'refusing scan marker inside a protected root'* ]]; then
+    echo "workflow scan allowed its temporary marker inside the scanned repository" >&2
+    exit 1
+  fi
+  printf 'exit 0\n' >"${hostile_bash_env}"
+  set +e
+  output="$(
+    BASH_ENV="${hostile_bash_env}" \
+      grep_workflow_files_at "${workflow_root}" -FnH -- 'PORTABILITY_MARKER' 2>&1
+  )"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *'./visible.yml:1:PORTABILITY_MARKER'* ]]; then
+    echo "ambient BASH_ENV bypassed a workflow grep batch" >&2
+    exit 1
+  fi
+  bash_spoof_bin="${fixture_parent}/bash-spoof-bin"
+  mkdir -p "${bash_spoof_bin}"
+  ln -s "${real_true}" "${bash_spoof_bin}/bash"
+  if [[ ! -x "${bash_spoof_bin}/bash" ]]; then
+    echo "failed to prepare ambient PATH bash spoof" >&2
+    exit 1
+  fi
+  set +e
+  output="$(
+    PATH="${bash_spoof_bin}:${PATH}" \
+      grep_workflow_files_at "${workflow_root}" -FnH -- 'PORTABILITY_MARKER' 2>&1
+  )"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *'./visible.yml:1:PORTABILITY_MARKER'* ]]; then
+    echo "ambient PATH bash bypassed a workflow grep batch" >&2
+    printf 'status=%s output=%s\n' "${status}" "${output}" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2329 # Exported-function interception regression.
+  printf() {
+    if [[ "$0" == _ ]]; then
+      return 0
     fi
-    status=0
-    scan_active_go_pin_batch "${archive_files[@]}" || status=$?
-    case "${status}" in
-      0) found=0 ;;
-      1) ;;
-      *) exit "${status}" ;;
-    esac
-    archive_files=()
-  done <"${archive_file_list}"
-  if [[ "${#archive_files[@]}" -gt 0 ]]; then
-    status=0
-    scan_active_go_pin_batch "${archive_files[@]}" || status=$?
-    case "${status}" in
-      0) found=0 ;;
-      1) ;;
-      *) exit "${status}" ;;
-    esac
+    command printf "$@"
+  }
+  # shellcheck disable=SC2329 # Exported-function interception regression.
+  exit() {
+    if [[ "$0" == _ ]]; then
+      return 0
+    fi
+    command exit "$@"
+  }
+  # shellcheck disable=SC2329 # Exported-function interception regression.
+  builtin() {
+    if [[ "$0" == _ ]]; then
+      return 0
+    fi
+    command builtin "$@"
+  }
+  export -f builtin exit printf
+  set +e
+  worker_match_output="$(
+    BASH_ENV="${hostile_bash_env}" ENV="${hostile_bash_env}" \
+      grep_workflow_files_at "${workflow_root}" -FnH -- 'PORTABILITY_MARKER' 2>&1
+  )"
+  worker_match_status=$?
+  worker_error_output="$(
+    BASH_ENV="${hostile_bash_env}" ENV="${hostile_bash_env}" \
+      grep_workflow_files_at "${workflow_root}" \
+      --portable-scan-invalid-option 2>&1
+  )"
+  worker_error_status=$?
+  set -e
+  unset -f builtin exit printf
+  if [[ "${worker_match_status}" -ne 0 ]] ||
+    [[ "${worker_match_output}" != *'./visible.yml:1:PORTABILITY_MARKER'* ]] ||
+    [[ "${worker_error_status}" -le 1 ]] ||
+    [[ "${worker_error_output}" != *'failed to scan top-level public workflow files'* ]]; then
+    echo "exported worker functions bypassed a workflow grep batch" >&2
+    printf 'match_status=%s match_output=%s\nerror_status=%s error_output=%s\n' \
+      "${worker_match_status}" "${worker_match_output}" \
+      "${worker_error_status}" "${worker_error_output}" >&2
+    exit 1
   fi
-  exit "${found}"
+  if [[ "$(workflow_match_count_at "${workflow_root}" 'npm ci')" != 1 ]] ||
+    [[ "$(workflow_match_count_at "${workflow_root}" 'NODE_AUTH_TOKEN: \$\{\{ github.token \}\}')" != 1 ]]; then
+    echo "workflow match counts do not retain the exact lowercase .yml scope" >&2
+    exit 1
+  fi
+
+  mkdir -p "${empty_workflow_root}/.github/workflows"
+  set +e
+  output="$(grep_workflow_files_at "${empty_workflow_root}" -FnH -- 'PORTABILITY_MARKER' 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 1 ]] || [[ -n "${output}" ]] ||
+    [[ "$(workflow_match_count_at "${empty_workflow_root}" 'npm ci')" != 0 ]]; then
+    echo "empty workflow scans do not report no-match cleanly" >&2
+    exit 1
+  fi
+
+  printf 'Go %s hidden\n' "${legacy_go_patch}" >"${actual_root}/.hidden/untracked.txt"
+  printf 'Go %s nested plans\n' "${legacy_go_patch}" >"${actual_root}/nested/docs/plans/included.txt"
+  printf 'Go %s plans2\n' "${legacy_go_patch}" >"${actual_root}/docs/plans2/included.txt"
+  printf 'Go %s excluded root plans\n' "${legacy_go_patch}" >"${actual_root}/docs/plans/excluded.txt"
+  printf 'Go %s excluded git dir\n' "${legacy_go_patch}" >"${actual_root}/git-dir/.git/excluded.txt"
+  printf 'Go %s excluded git file\n' "${legacy_go_patch}" >"${actual_root}/git-file/.git"
+  printf 'Go %s excluded git link\n' "${legacy_go_patch}" >"${fixture_parent}/outside-git/excluded.txt"
+  ln -s ../../outside-git "${actual_root}/git-link/.git"
+  ln -s .hidden/untracked.txt "${actual_root}/ordinary-link.txt"
+  set +e
+  output="$(scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./.hidden/untracked.txt:1:Go ${legacy_go_patch} hidden"* ]] ||
+    [[ "${output}" != *"./nested/docs/plans/included.txt:1:Go ${legacy_go_patch} nested plans"* ]] ||
+    [[ "${output}" != *"./docs/plans2/included.txt:1:Go ${legacy_go_patch} plans2"* ]] ||
+    [[ "${output}" == *'excluded root plans'* ]] ||
+    [[ "${output}" == *'excluded git'* ]] ||
+    [[ "${output}" == *'ordinary-link.txt'* ]]; then
+    echo "actual archive scan does not retain the required recursive/pruning semantics" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+
+  printf 'Go %s regular plans file\n' "${legacy_go_patch}" >"${plans_file_root}/docs/plans"
+  set +e
+  output="$(scan_active_go_pins_at "${plans_file_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./docs/plans:1:Go ${legacy_go_patch} regular plans file"* ]]; then
+    echo "actual archive scan pruned a regular docs/plans file" >&2
+    printf 'status=%s output=%s\n' "${status}" "${output}" >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC2329 # Exported-function interception regression.
+  find() { return 0; }
+  export -f find
+  set +e
+  output="$(scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  unset -f find
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./.hidden/untracked.txt:1:Go ${legacy_go_patch} hidden"* ]]; then
+    echo "exported find function bypassed actual archive enumeration" >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC2329 # Exported-function interception regression.
+  xargs() {
+    command cat >/dev/null
+    return 0
+  }
+  export -f xargs
+  set +e
+  output="$(scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  unset -f xargs
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./.hidden/untracked.txt:1:Go ${legacy_go_patch} hidden"* ]]; then
+    echo "exported xargs function bypassed actual archive grep batches" >&2
+    exit 1
+  fi
+
+  # shellcheck disable=SC2329 # Exported-function interception regression.
+  builtin() { printf '%s\n' "${real_true}"; }
+  export -f builtin
+  set +e
+  output="$(scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  unset -f builtin
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./.hidden/untracked.txt:1:Go ${legacy_go_patch} hidden"* ]]; then
+    echo "exported builtin function bypassed executable resolution" >&2
+    exit 1
+  fi
+
+  rm -rf "${actual_root}"
+  mkdir -p "${actual_root}"
+  printf '\0\nGo %s binary line\n' "${legacy_go_patch}" >"${actual_root}/binary.dat"
+  set +e
+  output="$(scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./binary.dat:2:Go ${legacy_go_patch} binary line"* ]]; then
+    echo "actual archive binary diagnostic lost filename or line information" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+
+  printf '#!%s\n' "${trusted_scan_bash_binary}" >"${fake_bin}/grep"
+  cat >>"${fake_bin}/grep" <<'BASH'
+set -euo pipefail
+script_dir="${0%/*}"
+IFS= read -r grep_log <"${script_dir}/grep-log"
+grep_mode_path="${script_dir}/grep-mode"
+if [[ ! -f "${grep_mode_path}" || ! -r "${grep_mode_path}" ]] ||
+  ! grep_mode="$(<"${grep_mode_path}")"; then
+  echo "failed to read fake grep mode sidecar" >&2
+  exit 65
+fi
+IFS= read -r real_grep <"${script_dir}/real-grep"
+printf 'x' >>"${grep_log}"
+invocation_log="$(<"${grep_log}")"
+invocation_count="${#invocation_log}"
+case "${grep_mode}" in
+  real) exec "${real_grep}" "$@" ;;
+  error) echo "synthetic grep failure" >&2; exit 19 ;;
+  match-then-error)
+    if [[ "${invocation_count}" -eq 1 ]]; then
+      IFS= read -r legacy_pin <"${script_dir}/legacy-pin"
+      printf './synthetic-first-batch.txt:1:Go %s\n' "${legacy_pin}"
+      exit 0
+    fi
+    echo "synthetic later grep failure" >&2
+    exit 19
+    ;;
+  *) echo "unknown fake grep mode: ${grep_mode}" >&2; exit 64 ;;
+esac
+BASH
+  cat >"${fake_bin}/find" <<'BASH'
+#!/usr/bin/env bash
+echo "synthetic find failure" >&2
+exit 17
+BASH
+  cat >"${fake_bin}/xargs" <<'BASH'
+#!/usr/bin/env bash
+echo "synthetic xargs failure" >&2
+exit 18
+BASH
+  chmod +x "${fake_bin}/grep" "${fake_bin}/find" "${fake_bin}/xargs"
+  IFS= read -r fake_grep_shebang <"${fake_bin}/grep"
+  if [[ "${fake_grep_shebang}" != "#!${trusted_scan_bash_binary}" ]]; then
+    echo "fake grep does not use the trusted Bash interpreter" >&2
+    printf 'shebang=%s\n' "${fake_grep_shebang}" >&2
+    exit 1
+  fi
+  configure_fake_grep() {
+    local bin_dir="$1"
+    local mode="$2"
+    printf '%s\n' "${fixture_parent}/grep.log" >"${bin_dir}/grep-log"
+    printf '%s\n' "${mode}" >"${bin_dir}/grep-mode"
+    printf '%s\n' "${real_grep}" >"${bin_dir}/real-grep"
+    printf '%s\n' "${legacy_go_patch}" >"${bin_dir}/legacy-pin"
+  }
+
+  grep_proxy_bin="${fixture_parent}/grep-proxy-bin"
+  mkdir -p "${grep_proxy_bin}"
+  cp "${fake_bin}/grep" "${grep_proxy_bin}/grep"
+  configure_fake_grep "${grep_proxy_bin}" unknown
+  find_failure_bin="${fixture_parent}/find-failure-bin"
+  mkdir -p "${find_failure_bin}"
+  cp "${fake_bin}/find" "${find_failure_bin}/find"
+
+  : >"${fixture_parent}/grep.log"
+  set +e
+  output="$(PATH="${grep_proxy_bin}:${PATH}" scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] || [[ "${output}" != *'unknown fake grep mode'* ]]; then
+    echo "unknown fake grep mode did not fail closed" >&2
+    printf 'status=%s output=%s\n' "${status}" "${output}" >&2
+    exit 1
+  fi
+
+  : >"${grep_proxy_bin}/grep-mode"
+  : >"${fixture_parent}/grep.log"
+  set +e
+  output="$(PATH="${grep_proxy_bin}:${PATH}" scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] ||
+    [[ "${output}" != *'unknown fake grep mode: '* ]]; then
+    echo "empty fake grep mode did not fail closed" >&2
+    printf 'status=%s output=%s\n' "${status}" "${output}" >&2
+    exit 1
+  fi
+
+  rm -f "${grep_proxy_bin}/grep-mode"
+  : >"${fixture_parent}/grep.log"
+  set +e
+  output="$(PATH="${grep_proxy_bin}:${PATH}" scan_active_go_pins_at "${actual_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] ||
+    [[ "${output}" != *'failed to read fake grep mode sidecar'* ]]; then
+    echo "missing fake grep mode sidecar did not fail closed" >&2
+    printf 'status=%s output=%s\n' "${status}" "${output}" >&2
+    exit 1
+  fi
+
+  configure_fake_grep "${grep_proxy_bin}" real
+  : >"${fixture_parent}/grep.log"
+  set +e
+  output="$(
+    cd -- "${fixture_parent}"
+    PATH="grep-proxy-bin:${PATH}" \
+      scan_active_go_pins_at "${actual_root}" 2>&1
+  )"
+  status=$?
+  set -e
+  if [[ "${status}" -ne 0 ]] ||
+    [[ "${output}" != *"./binary.dat:2:Go ${legacy_go_patch} binary line"* ]]; then
+    echo "relative PATH entry left the resolved grep path cwd-dependent" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+
+  for file_index in 0 1 64 65; do
+    rm -rf "${batch_root}"
+    mkdir -p "${batch_root}"
+    : >"${fixture_parent}/grep.log"
+    for ((invocation_count = 0; invocation_count < file_index; invocation_count++)); do
+      printf -v filename 'file-%03d.txt' "${invocation_count}"
+      printf 'current Go pin\n' >"${batch_root}/${filename}"
+    done
+    set +e
+    output="$(
+      PATH="${grep_proxy_bin}:${PATH}" \
+        scan_active_go_pins_at "${batch_root}" 2>&1
+    )"
+    status=$?
+    set -e
+    invocation_count="$(wc -c <"${fixture_parent}/grep.log" | tr -d ' ')"
+    case "${file_index}" in
+      0) expected_invocations=0 ;;
+      1|64) expected_invocations=1 ;;
+      65) expected_invocations=2 ;;
+    esac
+    if [[ "${status}" -ne 1 ]] || [[ -n "${output}" ]] ||
+      [[ "${invocation_count}" -ne "${expected_invocations}" ]]; then
+      echo "actual archive batching mismatch for ${file_index} files" >&2
+      printf 'status=%s invocations=%s output=%s\n' \
+        "${status}" "${invocation_count}" "${output}" >&2
+      exit 1
+    fi
+  done
+
+  set +e
+  output="$(scan_active_go_pins_at "${fixture_parent}/missing-root" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] ||
+    [[ "${output}" != *'failed to enter active/current Go pin scan root'* ]]; then
+    echo "missing actual archive root did not fail closed" >&2
+    exit 1
+  fi
+
+  set +e
+  output="$(PATH="${find_failure_bin}:${PATH}" scan_active_go_pins_at "${batch_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] || [[ "${output}" != *'synthetic find failure'* ]]; then
+    echo "actual archive find failure did not fail closed" >&2
+    exit 1
+  fi
+
+  xargs_failure_bin="${fixture_parent}/xargs-failure-bin"
+  mkdir -p "${xargs_failure_bin}"
+  cp "${fake_bin}/xargs" "${xargs_failure_bin}/xargs"
+  set +e
+  output="$(PATH="${xargs_failure_bin}:${PATH}" scan_active_go_pins_at "${batch_root}" 2>&1)"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] || [[ "${output}" != *'synthetic xargs failure'* ]]; then
+    echo "actual archive xargs transport failure did not fail closed" >&2
+    exit 1
+  fi
+
+  grep_failure_bin="${fixture_parent}/grep-failure-bin"
+  mkdir -p "${grep_failure_bin}"
+  cp "${fake_bin}/grep" "${grep_failure_bin}/grep"
+  configure_fake_grep "${grep_failure_bin}" error
+  : >"${fixture_parent}/grep.log"
+  set +e
+  output="$(
+    PATH="${grep_failure_bin}:${PATH}" \
+      scan_active_go_pins_at "${batch_root}" 2>&1
+  )"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] || [[ "${output}" != *'synthetic grep failure'* ]]; then
+    echo "actual archive grep failure did not fail closed" >&2
+    printf 'status=%s output=%s\n' "${status}" "${output}" >&2
+    exit 1
+  fi
+
+  rm -rf "${batch_root}"
+  mkdir -p "${batch_root}"
+  for ((file_index = 0; file_index < 65; file_index++)); do
+    printf -v filename 'file-%03d.txt' "${file_index}"
+    printf 'current Go pin\n' >"${batch_root}/${filename}"
+  done
+  : >"${fixture_parent}/grep.log"
+  configure_fake_grep "${grep_failure_bin}" match-then-error
+  set +e
+  output="$(
+    PATH="${grep_failure_bin}:${PATH}" \
+      scan_active_go_pins_at "${batch_root}" 2>&1
+  )"
+  status=$?
+  set -e
+  if [[ "${status}" -le 1 ]] ||
+    [[ "${output}" != *"./synthetic-first-batch.txt:1:Go ${legacy_go_patch}"* ]] ||
+    [[ "${output}" != *'synthetic later grep failure'* ]]; then
+    echo "later grep failure was hidden by an earlier matching batch" >&2
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
 )
+
+run_portable_scan_regressions
+
 if active_go_1264="$(scan_active_go_pins 2>&1)"; then
   echo "active/current Go pins still reference vulnerable Go ${legacy_go_patch}" >&2
   printf '%s\n' "${active_go_1264}" >&2
