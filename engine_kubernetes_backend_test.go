@@ -3,8 +3,10 @@ package workflow
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
@@ -27,6 +29,21 @@ type engineKubernetesBackendPlugin struct {
 	clients         map[string]pb.ResourceDriverClient
 	moduleFactories map[string]plugin.ModuleFactory
 	configHooks     []plugin.ConfigTransformHook
+}
+
+type blockingEngineKubernetesBackendPlugin struct {
+	*engineKubernetesBackendPlugin
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingEngineKubernetesBackendPlugin) ModuleFactories() map[string]plugin.ModuleFactory {
+	p.once.Do(func() {
+		close(p.entered)
+		<-p.release
+	})
+	return p.engineKubernetesBackendPlugin.ModuleFactories()
 }
 
 func newEngineKubernetesBackendPlugin(name string, clients map[string]pb.ResourceDriverClient) *engineKubernetesBackendPlugin {
@@ -189,6 +206,88 @@ func TestEngineKubernetesBackendsRejectCrossOwnerCollisionAtomically(t *testing.
 	}
 	if got, owner, ok := registry.ResolveKubernetesBackend("stable-a"); !ok || owner != "provider-a" || got.Client != ownerAClient {
 		t.Fatalf("stable-a changed after rejected batch: (%v, %q, %v)", got, owner, ok)
+	}
+}
+
+func TestEngineKubernetesBackendPublishedServiceSealsPreflightCommitWindow(t *testing.T) {
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &mock.Logger{})
+	engine := NewStdEngine(app, &mock.Logger{})
+	if err := engine.BuildFromConfig(emptyKubernetesBackendWorkflowConfig()); err != nil {
+		t.Fatalf("BuildFromConfig: %v", err)
+	}
+
+	service, ok := app.SvcRegistry()[testEngineKubernetesBackendRegistryServiceName]
+	if !ok {
+		t.Fatalf("engine did not publish kubernetes backend resolver service %q", testEngineKubernetesBackendRegistryServiceName)
+	}
+	resolver, ok := service.(engineKubernetesBackendRegistryView)
+	if !ok {
+		t.Fatalf("published service = %T, want read-only resolver", service)
+	}
+
+	client := &engineKubernetesResourceDriverClient{id: "managed"}
+	provider := &blockingEngineKubernetesBackendPlugin{
+		engineKubernetesBackendPlugin: newEngineKubernetesBackendPlugin("managed-provider", map[string]pb.ResourceDriverClient{
+			"managed": client,
+		}),
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	loadResult := make(chan error, 1)
+	go func() {
+		loadResult <- engine.LoadPlugin(provider)
+	}()
+
+	select {
+	case <-provider.entered:
+	case <-time.After(5 * time.Second):
+		close(provider.release)
+		t.Fatal("plugin load did not enter generic loader work after backend preflight")
+	}
+
+	type backendRegistryMutator interface {
+		Register(string, []workflowmodule.KubernetesBackendBinding) error
+	}
+	mutator, exposed := service.(backendRegistryMutator)
+	if exposed {
+		if err := mutator.Register("interloper", []workflowmodule.KubernetesBackendBinding{{
+			Name:         "managed",
+			ResourceType: "infra.interloper",
+			Client:       &engineKubernetesResourceDriverClient{id: "interloper"},
+		}}); err != nil {
+			close(provider.release)
+			t.Fatalf("exercise leaked registry mutator: %v", err)
+		}
+	}
+	close(provider.release)
+
+	select {
+	case err := <-loadResult:
+		if exposed {
+			t.Fatalf("published resolver exposed Register during preflight/commit; plugin load result = %v", err)
+		}
+		if err != nil {
+			t.Fatalf("LoadPlugin(managed-provider): %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("plugin load did not complete after release")
+	}
+
+	binding, owner, ok := resolver.ResolveKubernetesBackend("managed")
+	if !ok || owner != "managed-provider" || binding.Client != client || binding.ResourceType != "infra.test_cluster" {
+		t.Fatalf("managed binding = (%+v, %q, %v), want completed provider binding", binding, owner, ok)
+	}
+}
+
+func TestEngineKubernetesBackendPublishedServiceRejectsPreexistingOwner(t *testing.T) {
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), &mock.Logger{})
+	if err := app.RegisterService(testEngineKubernetesBackendRegistryServiceName, map[string]any{"owner": "other"}); err != nil {
+		t.Fatalf("RegisterService(preexisting): %v", err)
+	}
+	engine := NewStdEngine(app, &mock.Logger{})
+	err := engine.BuildFromConfig(emptyKubernetesBackendWorkflowConfig())
+	if err == nil || !strings.Contains(err.Error(), "already registered by another owner") {
+		t.Fatalf("BuildFromConfig error = %v, want incompatible preexisting service rejection", err)
 	}
 }
 

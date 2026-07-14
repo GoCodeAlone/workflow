@@ -96,13 +96,24 @@ type StdEngine struct {
 	provisioner *infra.Provisioner
 
 	// kubernetesBackends is scoped to this engine and published to its
-	// modular.Application before module initialization.
-	kubernetesBackends *module.KubernetesBackendRegistry
-	pluginLoadMu       sync.Mutex
+	// modular.Application through a read-only resolver before module
+	// initialization. The mutable registry remains engine-private so backend
+	// preflight cannot be invalidated between generic loader mutation and commit.
+	kubernetesBackends       *module.KubernetesBackendRegistry
+	kubernetesBackendService *kubernetesBackendResolverService
+	pluginLoadMu             sync.Mutex
 
 	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
 	configHash string
+}
+
+type kubernetesBackendResolverService struct {
+	registry *module.KubernetesBackendRegistry
+}
+
+func (s *kubernetesBackendResolverService) ResolveKubernetesBackend(name string) (module.KubernetesBackendBinding, string, bool) {
+	return s.registry.ResolveKubernetesBackend(name)
 }
 
 // App returns the underlying modular.Application.
@@ -153,6 +164,7 @@ func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
+	kubernetesBackends := module.NewKubernetesBackendRegistry()
 	e := &StdEngine{
 		app:                   app,
 		workflowHandlers:      make([]WorkflowHandler, 0),
@@ -166,7 +178,10 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		triggerTypeMap:        make(map[string]string),
 		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
 		pipelineRegistry:      make(map[string]*module.Pipeline),
-		kubernetesBackends:    module.NewKubernetesBackendRegistry(),
+		kubernetesBackends:    kubernetesBackends,
+		kubernetesBackendService: &kubernetesBackendResolverService{
+			registry: kubernetesBackends,
+		},
 	}
 	// Register the step.workflow_call factory with a closure that looks up
 	// pipelines from this engine's registry at execution time.
@@ -719,11 +734,10 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 		}
 	}
 	if existing, exists := e.app.SvcRegistry()[module.KubernetesBackendRegistryServiceName]; exists {
-		registry, ok := existing.(*module.KubernetesBackendRegistry)
-		if !ok || registry != e.kubernetesBackends {
+		if existing != e.kubernetesBackendService {
 			return fmt.Errorf("application service %q is already registered by another owner", module.KubernetesBackendRegistryServiceName)
 		}
-	} else if err := e.app.RegisterService(module.KubernetesBackendRegistryServiceName, e.kubernetesBackends); err != nil {
+	} else if err := e.app.RegisterService(module.KubernetesBackendRegistryServiceName, e.kubernetesBackendService); err != nil {
 		return fmt.Errorf("register engine kubernetes backend registry: %w", err)
 	}
 	if err := e.app.Init(); err != nil {
