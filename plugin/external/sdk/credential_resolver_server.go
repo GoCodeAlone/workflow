@@ -143,7 +143,12 @@ func (s *credentialResolverServer) Resolve(ctx context.Context, request *pb.Cred
 	if err := s.validateRequest(request); err != nil {
 		return &pb.CredentialResolveResponse{Error: err}, nil
 	}
-	providerResponse, providerErr := s.provider.Resolve(ctx, request)
+	provider := request.GetProvider()
+	credentialType := request.GetCredentialType()
+	providerRequest := proto.Clone(request).(*pb.CredentialResolveRequest)
+	providerRequest.Provider = provider
+	providerRequest.CredentialType = credentialType
+	providerResponse, providerErr := s.provider.Resolve(ctx, providerRequest)
 	var response *pb.CredentialResolveResponse
 	if providerResponse != nil {
 		response = proto.Clone(providerResponse).(*pb.CredentialResolveResponse)
@@ -166,8 +171,8 @@ func (s *credentialResolverServer) Resolve(ctx context.Context, request *pb.Cred
 		return &pb.CredentialResolveResponse{Error: credentialResolutionFailure("empty_response", false)}, nil
 	}
 	if response.GetCredentials().GetProvider() == "" {
-		response.Credentials.Provider = request.GetProvider()
-	} else if response.GetCredentials().GetProvider() != request.GetProvider() {
+		response.Credentials.Provider = provider
+	} else if response.GetCredentials().GetProvider() != provider {
 		return &pb.CredentialResolveResponse{Error: credentialResolutionFailure("invalid_response", false)}, nil
 	}
 	return response, nil

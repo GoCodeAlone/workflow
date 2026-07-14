@@ -215,6 +215,22 @@ type externalCloudCredentialResolver struct {
 	client         pb.CredentialResolverClient
 }
 
+// ExternalCredentialResolutionError is a sanitized provider-reported
+// resolution failure. Code is a stable machine-readable value and Retryable
+// is safe orchestration metadata; provider messages and credential payloads
+// are intentionally excluded.
+type ExternalCredentialResolutionError struct {
+	Code      string
+	Retryable bool
+}
+
+func (e *ExternalCredentialResolutionError) Error() string {
+	if e == nil {
+		return "external credential resolver failed"
+	}
+	return fmt.Sprintf("external credential resolver failed (%s)", safeCredentialResolutionCode(e.Code))
+}
+
 func (r *externalCloudCredentialResolver) Provider() string       { return r.provider }
 func (r *externalCloudCredentialResolver) CredentialType() string { return r.credentialType }
 func (r *externalCloudCredentialResolver) Resolve(account *CloudAccount) error {
@@ -238,7 +254,10 @@ func (r *externalCloudCredentialResolver) ResolveContext(ctx context.Context, ac
 		return fmt.Errorf("external credential resolver failed (transport_%s)", status.Code(err).String())
 	}
 	if response.GetError() != nil {
-		return fmt.Errorf("external credential resolver failed (%s)", safeCredentialResolutionCode(response.GetError().GetCode()))
+		return &ExternalCredentialResolutionError{
+			Code:      safeCredentialResolutionCode(response.GetError().GetCode()),
+			Retryable: response.GetError().GetRetryable(),
+		}
 	}
 	resolved := response.GetCredentials()
 	if resolved == nil {

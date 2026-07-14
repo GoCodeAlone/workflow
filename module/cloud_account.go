@@ -123,7 +123,10 @@ func (m *CloudAccount) resolveCredentialsContext(ctx context.Context, externalOn
 
 	credsMap, _ := m.config["credentials"].(map[string]any)
 	if credsMap == nil {
-		// No credentials configured — return empty (valid for some providers)
+		// No credentials configured remains a valid built-in compatibility path.
+		// Preserve the historical top-level provider fields without selecting or
+		// invoking an external resolver.
+		m.populateBuiltinProviderFields(creds)
 		return creds, nil
 	}
 
@@ -143,12 +146,7 @@ func (m *CloudAccount) resolveCredentialsContext(ctx context.Context, externalOn
 	// adapter provider-neutral. Provider-shaped top-level fields are never
 	// interpreted on the external path; the plugin receives the opaque config.
 	if _, external := resolver.(*externalCloudCredentialResolver); !external {
-		if projectID, ok := m.config["project_id"].(string); ok {
-			creds.ProjectID = projectID
-		}
-		if subscriptionID, ok := m.config["subscription_id"].(string); ok {
-			creds.SubscriptionID = subscriptionID
-		}
+		m.populateBuiltinProviderFields(creds)
 	}
 	if contextual, ok := resolver.(contextCloudCredentialResolver); ok {
 		err = contextual.ResolveContext(ctx, m)
@@ -159,6 +157,15 @@ func (m *CloudAccount) resolveCredentialsContext(ctx context.Context, externalOn
 		return nil, err
 	}
 	return m.creds, nil
+}
+
+func (m *CloudAccount) populateBuiltinProviderFields(credentials *CloudCredentials) {
+	if projectID, ok := m.config["project_id"].(string); ok {
+		credentials.ProjectID = projectID
+	}
+	if subscriptionID, ok := m.config["subscription_id"].(string); ok {
+		credentials.SubscriptionID = subscriptionID
+	}
 }
 
 // ResolveExternalCloudCredentials resolves a provider/type exclusively through

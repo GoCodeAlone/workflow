@@ -249,21 +249,93 @@ func TestCloudAccountExternalPreservesConfiguredRegionWhenResponseOmitsIt(t *tes
 	}
 }
 
+func TestCloudAccountExternalCompatibilityMissingCredentialsPreservesTopLevelFields(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		provider    string
+		config      map[string]any
+		wantProject string
+		wantSub     string
+	}{
+		{
+			name:        "gcp project",
+			provider:    "gcp",
+			config:      map[string]any{"project_id": "top-level-project"},
+			wantProject: "top-level-project",
+		},
+		{
+			name:     "azure subscription",
+			provider: "azure",
+			config:   map[string]any{"subscription_id": "top-level-subscription"},
+			wantSub:  "top-level-subscription",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := map[string]any{"provider": test.provider}
+			for key, value := range test.config {
+				config[key] = value
+			}
+			account := module.NewCloudAccount("compatibility", config)
+			if err := account.Init(module.NewMockApplication()); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			credentials, err := account.GetCredentials(context.Background())
+			if err != nil {
+				t.Fatalf("GetCredentials: %v", err)
+			}
+			if credentials.ProjectID != test.wantProject || credentials.SubscriptionID != test.wantSub {
+				t.Fatalf("top-level compatibility fields = project %q subscription %q", credentials.ProjectID, credentials.SubscriptionID)
+			}
+		})
+	}
+}
+
+func TestCloudAccountExternalDoesNotInterpretProviderShapedTopLevelFields(t *testing.T) {
+	server := &cloudAccountExternalResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "gcp", CredentialTypes: []string{"static"}}},
+		resolve: func(_ context.Context, request *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error) {
+			return &pb.CredentialResolveResponse{Credentials: &pb.ResolvedCloudCredentials{Provider: request.GetProvider()}}, nil
+		},
+	}
+	registerCloudAccountExternalResolver(t, server)
+	account := module.NewCloudAccount("opaque-provider-fields", map[string]any{
+		"provider":   "gcp",
+		"project_id": "must-remain-opaque",
+		"credentials": map[string]any{
+			"type": "static",
+		},
+	})
+	if err := account.Init(module.NewMockApplication()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	credentials, err := account.GetCredentials(context.Background())
+	if err != nil {
+		t.Fatalf("GetCredentials: %v", err)
+	}
+	if credentials.ProjectID != "" {
+		t.Fatalf("external path interpreted project_id: %+v", credentials)
+	}
+}
+
 func TestCloudAccountExternalErrorsAreRedactedAndPayloadCleared(t *testing.T) {
 	for _, test := range []struct {
-		name    string
-		resolve func(context.Context, *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error)
-		code    string
+		name          string
+		resolve       func(context.Context, *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error)
+		code          string
+		wantTyped     bool
+		wantRetryable bool
 	}{
 		{
 			name: "structured",
 			resolve: func(context.Context, *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error) {
 				return &pb.CredentialResolveResponse{
 					Credentials: &pb.ResolvedCloudCredentials{Provider: "aws", SecretKey: "payload-secret"},
-					Error:       &pb.CredentialResolutionError{Code: "expired_token", Message: "structured-secret"},
+					Error:       &pb.CredentialResolutionError{Code: "expired_token", Message: "structured-secret", Retryable: true},
 				}, nil
 			},
-			code: "expired_token",
+			code:          "expired_token",
+			wantTyped:     true,
+			wantRetryable: true,
 		},
 		{
 			name: "plain",
@@ -282,6 +354,13 @@ func TestCloudAccountExternalErrorsAreRedactedAndPayloadCleared(t *testing.T) {
 			credentials, err := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{"secret": "request-secret"})
 			if err == nil || credentials != nil || !strings.Contains(err.Error(), test.code) {
 				t.Fatalf("resolution = %+v, %v", credentials, err)
+			}
+			var typedError *module.ExternalCredentialResolutionError
+			if gotTyped := errors.As(err, &typedError); gotTyped != test.wantTyped {
+				t.Fatalf("errors.As typed resolution error = %t, want %t (error %v)", gotTyped, test.wantTyped, err)
+			}
+			if typedError != nil && (typedError.Code != test.code || typedError.Retryable != test.wantRetryable) {
+				t.Fatalf("typed resolution error = %+v", typedError)
 			}
 			for _, forbidden := range []string{"payload-secret", "structured-secret", "plain-secret", "request-secret"} {
 				if strings.Contains(err.Error(), forbidden) {

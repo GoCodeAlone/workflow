@@ -64,6 +64,60 @@ func TestCredentialResolverPreservesFullOutputAndClonesProviderResponse(t *testi
 	}
 }
 
+func TestCredentialResolverProviderCannotMutateOrRetainCallerRequest(t *testing.T) {
+	var retained *pb.CredentialResolveRequest
+	provider := &credentialResolverTestProvider{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		resolve: func(_ context.Context, request *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error) {
+			retained = request
+			request.Provider = "gcp"
+			request.CredentialType = "env"
+			request.ConfigJson[0] = '['
+			return &pb.CredentialResolveResponse{Credentials: &pb.ResolvedCloudCredentials{}}, nil
+		},
+	}
+	original := &pb.CredentialResolveRequest{
+		Provider: "aws", CredentialType: "static", ConfigJson: []byte(`{"secret":"caller-owned"}`),
+	}
+	response, err := newCredentialResolverServer(provider).Resolve(context.Background(), original)
+	if err != nil || response.GetError() != nil {
+		t.Fatalf("Resolve = %v, %v", response, err)
+	}
+	if response.GetCredentials().GetProvider() != "aws" {
+		t.Fatalf("response provider = %q, want captured aws", response.GetCredentials().GetProvider())
+	}
+	if original.GetProvider() != "aws" || original.GetCredentialType() != "static" || string(original.GetConfigJson()) != `{"secret":"caller-owned"}` {
+		t.Fatalf("provider mutated caller request: %v", original)
+	}
+
+	retained.Provider = "azure"
+	retained.ConfigJson[0] = ']'
+	if original.GetProvider() != "aws" || string(original.GetConfigJson()) != `{"secret":"caller-owned"}` {
+		t.Fatalf("provider retained caller-owned storage: %v", original)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 10_000 {
+			retained.Provider = "gcp"
+			retained.ConfigJson[0] = '['
+		}
+	}()
+	for {
+		select {
+		case <-done:
+			if original.GetProvider() != "aws" || string(original.GetConfigJson()) != `{"secret":"caller-owned"}` {
+				t.Fatalf("asynchronous provider retention mutated caller request: %v", original)
+			}
+			return
+		default:
+			_ = original.GetProvider()
+			_ = original.GetConfigJson()
+		}
+	}
+}
+
 func TestCredentialResolverRejectsMismatchBeforeProvider(t *testing.T) {
 	provider := &credentialResolverTestProvider{
 		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},

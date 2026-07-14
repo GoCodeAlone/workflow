@@ -1,6 +1,7 @@
 package external
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -10,7 +11,9 @@ import (
 	"sync"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	"github.com/GoCodeAlone/workflow/module"
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 // ExternalPluginManager discovers, loads, and manages external plugin subprocesses.
@@ -23,6 +26,10 @@ type ExternalPluginManager struct {
 	opsMu   sync.Mutex
 	mu      sync.RWMutex
 	clients map[string]*goplugin.Client
+	// credentialResolverCleanups tracks optional resolver registrations owned
+	// by each loaded plugin so reload/unload/shutdown cannot leave stale clients
+	// in the module registry.
+	credentialResolverCleanups map[string]func()
 
 	callbackServer *CallbackServer
 
@@ -40,9 +47,10 @@ func NewExternalPluginManager(pluginsDir string, logger *log.Logger) *ExternalPl
 		logger = log.New(os.Stderr, "[external-plugins] ", log.LstdFlags)
 	}
 	return &ExternalPluginManager{
-		pluginsDir: pluginsDir,
-		logger:     logger,
-		clients:    make(map[string]*goplugin.Client),
+		pluginsDir:                 pluginsDir,
+		logger:                     logger,
+		clients:                    make(map[string]*goplugin.Client),
+		credentialResolverCleanups: make(map[string]func()),
 	}
 }
 
@@ -108,16 +116,28 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		return nil, err
 	}
 	if err := validatePluginLaunch(name, launch); err != nil {
+		discardPluginLaunch(launch)
+		return nil, err
+	}
+	resolverCleanup, err := registerLaunchCredentialResolver(name, launch)
+	if err != nil {
+		discardPluginLaunch(launch)
 		return nil, err
 	}
 
 	m.mu.Lock()
 	if _, exists := m.clients[name]; exists {
 		m.mu.Unlock()
+		if resolverCleanup != nil {
+			resolverCleanup()
+		}
 		launch.client.Kill()
 		return nil, fmt.Errorf("plugin %q is already loaded", name)
 	}
 	m.clients[name] = launch.client
+	if resolverCleanup != nil {
+		m.credentialResolverCleanups[name] = resolverCleanup
+	}
 	m.mu.Unlock()
 	m.logger.Printf("plugin %q loaded successfully", name)
 
@@ -260,9 +280,14 @@ func (m *ExternalPluginManager) UnloadPlugin(name string) error {
 		return fmt.Errorf("plugin %q is not loaded", name)
 	}
 	delete(m.clients, name)
+	resolverCleanup := m.credentialResolverCleanups[name]
+	delete(m.credentialResolverCleanups, name)
 	m.mu.Unlock()
 
 	m.logger.Printf("unloading plugin %q", name)
+	if resolverCleanup != nil {
+		resolverCleanup()
+	}
 	client.Kill()
 	m.logger.Printf("plugin %q unloaded", name)
 
@@ -277,6 +302,7 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 
 	m.mu.RLock()
 	oldClient, wasLoaded := m.clients[name]
+	oldResolverCleanup := m.credentialResolverCleanups[name]
 	m.mu.RUnlock()
 	if !wasLoaded {
 		launch, err := m.startPluginUnlocked(name)
@@ -284,10 +310,19 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 			return nil, err
 		}
 		if err := validatePluginLaunch(name, launch); err != nil {
+			discardPluginLaunch(launch)
+			return nil, err
+		}
+		resolverCleanup, err := registerLaunchCredentialResolver(name, launch)
+		if err != nil {
+			discardPluginLaunch(launch)
 			return nil, err
 		}
 		m.mu.Lock()
 		m.clients[name] = launch.client
+		if resolverCleanup != nil {
+			m.credentialResolverCleanups[name] = resolverCleanup
+		}
 		m.mu.Unlock()
 		m.logger.Printf("plugin %q loaded successfully", name)
 		return launch.adapter, nil
@@ -299,13 +334,28 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
 	}
 	if err := validatePluginLaunch(name, launch); err != nil {
+		discardPluginLaunch(launch)
+		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
+		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
+	}
+	resolverCleanup, err := registerLaunchCredentialResolver(name, launch)
+	if err != nil {
+		discardPluginLaunch(launch)
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
 	}
 
 	m.mu.Lock()
 	m.clients[name] = launch.client
+	if resolverCleanup != nil {
+		m.credentialResolverCleanups[name] = resolverCleanup
+	} else {
+		delete(m.credentialResolverCleanups, name)
+	}
 	m.mu.Unlock()
+	if oldResolverCleanup != nil {
+		oldResolverCleanup()
+	}
 	oldClient.Kill()
 	m.logger.Printf("plugin %q reloaded successfully", name)
 	return launch.adapter, nil
@@ -322,6 +372,38 @@ func validatePluginLaunch(name string, launch *pluginLaunch) error {
 		return fmt.Errorf("plugin %q launch returned nil adapter", name)
 	}
 	return nil
+}
+
+func discardPluginLaunch(launch *pluginLaunch) {
+	if launch != nil && launch.client != nil {
+		launch.client.Kill()
+	}
+}
+
+func registerLaunchCredentialResolver(name string, launch *pluginLaunch) (func(), error) {
+	if launch == nil || launch.adapter == nil || !contractRegistryAdvertisesCredentialResolver(launch.adapter.ContractRegistry()) {
+		return nil, nil
+	}
+	if launch.adapter.client == nil {
+		return nil, fmt.Errorf("plugin %q advertises CredentialResolver without a shared plugin client", name)
+	}
+	cleanup, err := module.RegisterExternalCredentialResolver(context.Background(), launch.adapter.client.CredentialResolverClient())
+	if err != nil {
+		return nil, fmt.Errorf("plugin %q credential resolver registration failed: %w", name, err)
+	}
+	return cleanup, nil
+}
+
+func contractRegistryAdvertisesCredentialResolver(registry *pb.ContractRegistry) bool {
+	if registry == nil {
+		return false
+	}
+	for _, descriptor := range registry.GetContracts() {
+		if descriptor.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE && descriptor.GetServiceName() == pb.CredentialResolver_ServiceDesc.ServiceName {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadedPlugins returns the names of all currently loaded plugins.
@@ -352,10 +434,15 @@ func (m *ExternalPluginManager) Shutdown() {
 	m.mu.Lock()
 	clients := m.clients
 	m.clients = make(map[string]*goplugin.Client)
+	resolverCleanups := m.credentialResolverCleanups
+	m.credentialResolverCleanups = make(map[string]func())
 	m.mu.Unlock()
 
 	for name, client := range clients {
 		m.logger.Printf("shutting down plugin %q", name)
+		if resolverCleanup := resolverCleanups[name]; resolverCleanup != nil {
+			resolverCleanup()
+		}
 		client.Kill()
 	}
 	m.logger.Printf("all external plugins shut down")
