@@ -85,3 +85,14 @@ type PluginClient struct {
 func (p *PluginClient) Conn() *grpc.ClientConn {
 	return p.conn
 }
+
+// CredentialIssuerClient constructs the typed optional credential-issuer
+// client over the same connection owned by the plugin manager. A nil result
+// means this PluginClient has no live connection; callers must also require
+// the CredentialIssuer ContractRegistry advertisement before dispatch.
+func (p *PluginClient) CredentialIssuerClient() pb.CredentialIssuerClient {
+	if p == nil || p.Conn() == nil {
+		return nil
+	}
+	return pb.NewCredentialIssuerClient(p.Conn())
+}

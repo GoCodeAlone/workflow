@@ -104,16 +104,19 @@ func Serve(provider PluginProvider, opts ...ServeOption) {
 }
 
 // servePlugin implements goplugin.Plugin for the plugin (server) side.
-// It registers the gRPC PluginService implementation on the gRPC server.
+// It registers PluginService plus any optional typed provider services.
 type servePlugin struct {
 	server *grpcServer
 }
 
-// GRPCServer registers the PluginService implementation on the gRPC server.
+// GRPCServer registers the plugin's gRPC services on the gRPC server.
 // The broker is stored so that the server can dial back to the host's callback
 // service on the first incoming request that carries the broker ID.
 func (p *servePlugin) GRPCServer(broker *goplugin.GRPCBroker, s *grpc.Server) error {
 	pb.RegisterPluginServiceServer(s, p.server)
+	if err := p.server.providerServices.register(s); err != nil {
+		return err
+	}
 	p.server.setBroker(broker)
 	return nil
 }
