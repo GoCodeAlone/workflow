@@ -1,0 +1,10 @@
+{
+  "name": "verify-kubernetes",
+  "version": "0.0.0",
+  "author": "test fixture",
+  "description": "Kubernetes backend declarations match runtime ResourceDriver capabilities",
+  "kubernetesBackends": [
+    {"name": "managed-a", "resourceType": "infra.k8s_cluster"},
+    {"name": "managed-b", "resourceType": "infra.managed_cluster"}
+  ]
+}

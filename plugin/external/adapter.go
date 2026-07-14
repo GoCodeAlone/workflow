@@ -870,10 +870,10 @@ func sameStringSet(a, b []string) bool {
 // ─────────────────────────────────────────────────────────────────────────────
 // KubernetesBackendProvider — plugin-served platform.kubernetes backends.
 //
-// Per ADR 0037 a kubernetes backend (gke) folds into the existing
-// ResourceDriver contract — no new proto surface. A plugin serves the `gke`
-// platform.kubernetes backend when it advertises the ResourceDriver service AND
-// its live Capabilities RPC declares the infra.k8s_cluster resource type.
+// Per ADR 0037 a kubernetes backend folds into the existing ResourceDriver
+// contract — no new proto surface. The disk manifest names each backend and its
+// resource type; the live contract registry and Capabilities RPC prove that the
+// plugin serves those declarations.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // resourceDriverServiceName is the fully-qualified gRPC service a plugin's
@@ -881,16 +881,6 @@ func sameStringSet(a, b []string) bool {
 // kubernetes-backend provider. Sourced from the generated proto's ServiceDesc
 // so it cannot drift if the proto package path/service name ever changes.
 var resourceDriverServiceName = pb.ResourceDriver_ServiceDesc.ServiceName
-
-// k8sClusterResourceType is the ResourceDriver resource type a plugin must
-// declare (via the Capabilities RPC) for the adapter to register it as the
-// platform.kubernetes `gke` backend. Mirrors module's gkeResourceType — kept
-// local so the plugin/external package takes no dependency on module.
-const k8sClusterResourceType = "infra.k8s_cluster"
-
-// gkeKubernetesBackendType is the platform.kubernetes cluster type name the
-// infra.k8s_cluster ResourceDriver is registered under in core.
-const gkeKubernetesBackendType = "gke"
 
 // advertisesResourceDriverService reports whether the adapter's ContractRegistry
 // carries a CONTRACT_KIND_SERVICE descriptor for the ResourceDriver service.
@@ -914,18 +904,26 @@ func (a *ExternalPluginAdapter) advertisesResourceDriverService() bool {
 // registers each returned (cluster-type → ResourceDriver client) pair into
 // module's kubernetes backend registry. Per ADR 0037.
 //
-// Behaviour:
-//   - If the plugin does not advertise the ResourceDriver service it serves no
-//     kubernetes backend — return (nil, nil); the engine type-assert still
-//     succeeds and just registers nothing.
-//   - Otherwise the live Capabilities RPC is the source of truth (mirroring how
-//     IaCStateBackendClients trusts the ListBackendNames RPC): when it declares
-//     the infra.k8s_cluster resource type, the plugin serves the `gke`
-//     kubernetes backend and a ResourceDriver client is registered under that
-//     name.
+// A silent manifest serves no kubernetes backends. Every declaration must be
+// valid, the ResourceDriver service must be advertised, and the live
+// Capabilities RPC must include its exact resource type. Validation completes
+// before any clients are returned so a partial declaration set is never
+// registered.
 func (a *ExternalPluginAdapter) KubernetesBackendClients() (map[string]pb.ResourceDriverClient, error) {
-	if !a.advertisesResourceDriverService() {
+	var declarations []plugin.KubernetesBackendDecl
+	if a.diskManifest != nil {
+		declarations = a.diskManifest.KubernetesBackends
+	}
+	if len(declarations) == 0 {
 		return nil, nil
+	}
+	if err := (config.ProviderDeclarations{KubernetesBackends: declarations}).Validate(); err != nil {
+		return nil, fmt.Errorf("plugin %s: kubernetes backend declarations: %w", a.name, err)
+	}
+	if !a.advertisesResourceDriverService() {
+		return nil, fmt.Errorf(
+			"plugin %s: manifest declares kubernetes backends but the plugin does not advertise the ResourceDriver service",
+			a.name)
 	}
 	conn := a.Conn()
 	if conn == nil {
@@ -938,14 +936,24 @@ func (a *ExternalPluginAdapter) KubernetesBackendClients() (map[string]pb.Resour
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s: Capabilities RPC: %w", a.name, err)
 	}
-	for _, decl := range caps.GetCapabilities() {
-		if decl.GetResourceType() == k8sClusterResourceType {
-			return map[string]pb.ResourceDriverClient{
-				gkeKubernetesBackendType: pb.NewResourceDriverClient(conn),
-			}, nil
+	runtimeResourceTypes := make(map[string]struct{}, len(caps.GetCapabilities()))
+	for _, declaration := range caps.GetCapabilities() {
+		runtimeResourceTypes[declaration.GetResourceType()] = struct{}{}
+	}
+	for _, declaration := range declarations {
+		if _, served := runtimeResourceTypes[declaration.ResourceType]; !served {
+			return nil, fmt.Errorf(
+				"plugin %s: kubernetes backend %q declares resource type %q but Capabilities RPC does not advertise it",
+				a.name, declaration.Name, declaration.ResourceType)
 		}
 	}
-	return nil, nil
+
+	client := pb.NewResourceDriverClient(conn)
+	clients := make(map[string]pb.ResourceDriverClient, len(declarations))
+	for _, declaration := range declarations {
+		clients[declaration.Name] = client
+	}
+	return clients, nil
 }
 
 // Ensure ExternalPluginAdapter satisfies plugin.EnginePlugin at compile time.

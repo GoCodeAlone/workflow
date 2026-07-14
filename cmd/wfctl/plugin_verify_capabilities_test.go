@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -306,5 +307,61 @@ func TestVerifyCapabilities_IaCExtraService(t *testing.T) {
 	// Extra services produce WARN (stderr) but exit 0 per design §3.
 	if err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/iac-extra-service"}); err != nil {
 		t.Fatalf("want PASS (extra=WARN, not FAIL); got: %v", err)
+	}
+}
+
+func writeVerifyCapabilitiesManifest(t *testing.T, manifest plugin.PluginManifest) string {
+	t.Helper()
+	dir := t.TempDir()
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("json.Marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), data, 0o600); err != nil {
+		t.Fatalf("write plugin.json: %v", err)
+	}
+	return dir
+}
+
+func TestVerifyCapabilities_KubernetesBackendsMatchRuntime(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "kubernetes-good", "v0.1.0")
+	if err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/kubernetes-good"}); err != nil {
+		t.Fatalf("want PASS, got: %v", err)
+	}
+}
+
+func TestVerifyCapabilities_KubernetesBackendRequiresResourceDriverAdvertisement(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "iac-missing-service", "v0.1.0")
+	dir := writeVerifyCapabilitiesManifest(t, plugin.PluginManifest{
+		Name:        "verify-iac-missing",
+		Version:     "0.0.0",
+		Author:      "test fixture",
+		Description: "declares a backend without serving ResourceDriver",
+		KubernetesBackends: []plugin.KubernetesBackendDecl{
+			{Name: "managed", ResourceType: "infra.managed_cluster"},
+		},
+	})
+
+	err := runPluginVerifyCapabilities([]string{"--binary", bin, dir})
+	if err == nil || !strings.Contains(err.Error(), "ResourceDriver") {
+		t.Fatalf("error = %v, want missing ResourceDriver advertisement mismatch", err)
+	}
+}
+
+func TestVerifyCapabilities_KubernetesBackendRequiresRuntimeResourceType(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "kubernetes-good", "v0.1.0")
+	dir := writeVerifyCapabilitiesManifest(t, plugin.PluginManifest{
+		Name:        "verify-kubernetes",
+		Version:     "0.0.0",
+		Author:      "test fixture",
+		Description: "declares a backend absent from runtime capabilities",
+		KubernetesBackends: []plugin.KubernetesBackendDecl{
+			{Name: "managed", ResourceType: "infra.missing_cluster"},
+		},
+	})
+
+	err := runPluginVerifyCapabilities([]string{"--binary", bin, dir})
+	if err == nil || !strings.Contains(err.Error(), "infra.missing_cluster") {
+		t.Fatalf("error = %v, want missing runtime resource type mismatch", err)
 	}
 }

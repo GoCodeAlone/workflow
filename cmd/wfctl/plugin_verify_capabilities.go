@@ -182,6 +182,37 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 		fmt.Fprintf(os.Stderr, "WARN  %s: binary advertises %q not in plugin.json.iacServices (additive — consider updating plugin.json)\n", declared.Name, s)
 	}
 
+	if len(declared.KubernetesBackends) > 0 {
+		resourceDriverAdvertised := false
+		for _, contract := range contractReg.GetContracts() {
+			if contract.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE &&
+				contract.GetServiceName() == pb.ResourceDriver_ServiceDesc.ServiceName {
+				resourceDriverAdvertised = true
+				break
+			}
+		}
+		if !resourceDriverAdvertised {
+			failures = append(failures,
+				"kubernetesBackends: plugin.json declares backends but binary does not advertise ResourceDriver")
+		} else {
+			caps, capsErr := pb.NewIaCProviderRequiredClient(pluginClient.Conn()).Capabilities(ctx, &pb.CapabilitiesRequest{})
+			if capsErr != nil {
+				return fmt.Errorf("IaCProviderRequired.Capabilities RPC: %w (stderr: %s)", capsErr, stderr.String())
+			}
+			runtimeResourceTypes := make(map[string]struct{}, len(caps.GetCapabilities()))
+			for _, capability := range caps.GetCapabilities() {
+				runtimeResourceTypes[capability.GetResourceType()] = struct{}{}
+			}
+			for _, backend := range declared.KubernetesBackends {
+				if _, advertised := runtimeResourceTypes[backend.ResourceType]; !advertised {
+					failures = append(failures, fmt.Sprintf(
+						"kubernetesBackends: plugin.json declares backend %q resourceType %q but binary Capabilities does not advertise it",
+						backend.Name, backend.ResourceType))
+				}
+			}
+		}
+	}
+
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "FAIL  %s (plugin.json)\nerror: %d mismatch(es)\n", declared.Name, len(failures))
 		for _, f := range failures {
