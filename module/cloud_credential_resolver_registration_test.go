@@ -2,9 +2,11 @@ package module
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
@@ -139,6 +141,38 @@ func TestExternalCredentialResolverReplacementIsAtomic(t *testing.T) {
 		}
 	}
 	assertNoResolverErrorContains(t, "multiple external credential resolvers")
+}
+
+func TestExternalCredentialResolverTransitionFailureKeepsOldRegistrationActive(t *testing.T) {
+	oldRegistration, err := PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"plugin-owner:transition-error",
+		&preparedCredentialResolverClient{accessKey: "old"},
+	)
+	if err != nil {
+		t.Fatalf("prepare old: %v", err)
+	}
+	if err := oldRegistration.Activate(); err != nil {
+		t.Fatalf("activate old: %v", err)
+	}
+	defer oldRegistration.Close()
+	invalidReplacement, err := PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"plugin-owner:transition-error",
+		&preparedCredentialResolverClient{accessKey: "invalid"},
+	)
+	if err != nil {
+		t.Fatalf("prepare replacement: %v", err)
+	}
+	invalidReplacement.Close()
+
+	if _, err := TransitionExternalCredentialResolverRegistration(oldRegistration, invalidReplacement); err == nil {
+		t.Fatal("closed replacement unexpectedly transitioned")
+	}
+	credentials, err := ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+	if err != nil || credentials.AccessKey != "old" {
+		t.Fatalf("failed transition retired old resolver: %+v, %v", credentials, err)
+	}
 }
 
 func TestOwnedExternalCredentialResolverSelectsLatestAndRestoresPrevious(t *testing.T) {
@@ -335,6 +369,137 @@ func TestExternalCredentialResolverReplacementDrainsInFlightResolution(t *testin
 	if err := <-swapDone; err != nil {
 		t.Fatalf("replacement: %v", err)
 	}
+}
+
+func TestExternalCredentialResolverCloseContextDeselectsBeforeBoundedDrain(t *testing.T) {
+	resolveStarted := make(chan struct{})
+	resolveRelease := make(chan struct{})
+	registration, err := PrepareExternalCredentialResolver(
+		context.Background(),
+		&preparedCredentialResolverClient{accessKey: "blocked", resolveStarted: resolveStarted, resolveRelease: resolveRelease},
+	)
+	if err != nil {
+		t.Fatalf("prepare resolver: %v", err)
+	}
+	if err := registration.Activate(); err != nil {
+		t.Fatalf("activate resolver: %v", err)
+	}
+	t.Cleanup(func() {
+		select {
+		case <-resolveRelease:
+		default:
+			close(resolveRelease)
+		}
+		registration.Close()
+	})
+
+	resolveDone := make(chan error, 1)
+	go func() {
+		_, resolveErr := ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+		resolveDone <- resolveErr
+	}()
+	<-resolveStarted
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = registration.CloseContext(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CloseContext error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("CloseContext exceeded bounded deadline: %v", elapsed)
+	}
+	assertNoPreparedCredentialResolver(t)
+
+	close(resolveRelease)
+	if err := <-resolveDone; err != nil {
+		t.Fatalf("in-flight resolution after release: %v", err)
+	}
+}
+
+func TestCloudAccountScopedResolversOverlayOnlyActiveAnonymousGlobals(t *testing.T) {
+	resolveScoped := func(registrations []*ExternalCredentialResolverRegistration) (string, error) {
+		t.Helper()
+		app := NewMockApplication()
+		if err := app.RegisterService(ExternalCredentialResolverRegistrationProviderServiceName, preparedCredentialResolverProvider{registrations: registrations}); err != nil {
+			return "", err
+		}
+		account := NewCloudAccount("scoped-account", map[string]any{
+			"provider": "aws",
+			"credentials": map[string]any{
+				"type":      "static",
+				"accessKey": "builtin",
+			},
+		})
+		if err := account.Init(app); err != nil {
+			return "", err
+		}
+		credentials, err := account.GetCredentials(context.Background())
+		if err != nil {
+			return "", err
+		}
+		return credentials.AccessKey, nil
+	}
+
+	t.Run("zero ignores foreign owned global", func(t *testing.T) {
+		foreign, err := PrepareOwnedExternalCredentialResolver(context.Background(), "foreign-engine", &preparedCredentialResolverClient{accessKey: "foreign"})
+		if err != nil {
+			t.Fatalf("prepare foreign resolver: %v", err)
+		}
+		if err := foreign.Activate(); err != nil {
+			t.Fatalf("activate foreign resolver: %v", err)
+		}
+		defer foreign.Close()
+		accessKey, err := resolveScoped(nil)
+		if err != nil || accessKey != "builtin" {
+			t.Fatalf("zero anonymous scoped resolution = %q, %v", accessKey, err)
+		}
+	})
+
+	t.Run("one public anonymous", func(t *testing.T) {
+		cleanup, err := RegisterExternalCredentialResolver(context.Background(), &preparedCredentialResolverClient{accessKey: "anonymous"})
+		if err != nil {
+			t.Fatalf("register anonymous resolver: %v", err)
+		}
+		defer cleanup()
+		accessKey, err := resolveScoped(nil)
+		if err != nil || accessKey != "anonymous" {
+			t.Fatalf("one anonymous scoped resolution = %q, %v", accessKey, err)
+		}
+	})
+
+	t.Run("multiple public anonymous", func(t *testing.T) {
+		cleanupFirst, err := RegisterExternalCredentialResolver(context.Background(), &preparedCredentialResolverClient{accessKey: "first"})
+		if err != nil {
+			t.Fatalf("register first anonymous resolver: %v", err)
+		}
+		defer cleanupFirst()
+		cleanupSecond, err := RegisterExternalCredentialResolver(context.Background(), &preparedCredentialResolverClient{accessKey: "second"})
+		if err != nil {
+			t.Fatalf("register second anonymous resolver: %v", err)
+		}
+		defer cleanupSecond()
+		if _, err := resolveScoped(nil); err == nil || !strings.Contains(err.Error(), "multiple external credential resolvers") {
+			t.Fatalf("multiple anonymous scoped resolution = %v", err)
+		}
+	})
+
+	t.Run("scoped owned collides with public anonymous", func(t *testing.T) {
+		owned, err := PrepareOwnedExternalCredentialResolver(context.Background(), "scoped-engine", &preparedCredentialResolverClient{accessKey: "owned"})
+		if err != nil {
+			t.Fatalf("prepare scoped resolver: %v", err)
+		}
+		defer owned.Close()
+		cleanup, err := RegisterExternalCredentialResolver(context.Background(), &preparedCredentialResolverClient{accessKey: "anonymous"})
+		if err != nil {
+			t.Fatalf("register anonymous resolver: %v", err)
+		}
+		defer cleanup()
+		if _, err := resolveScoped([]*ExternalCredentialResolverRegistration{owned}); err == nil || !strings.Contains(err.Error(), "multiple external credential resolvers") {
+			t.Fatalf("scoped and anonymous collision = %v", err)
+		}
+	})
 }
 
 func TestCloudAccountScopedCandidateResolverDoesNotDisplaceLiveResolution(t *testing.T) {

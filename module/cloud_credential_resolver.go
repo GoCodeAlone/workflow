@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc/codes"
@@ -91,6 +92,31 @@ type ExternalCredentialResolverRegistration struct {
 	closed     bool
 	inFlight   int
 	drained    chan struct{}
+}
+
+const externalCredentialResolverDefaultDrainTimeout = 30 * time.Second
+
+// ExternalCredentialResolverDrain represents calls that selected a resolver
+// before it was deselected. Waiting is context-bounded; a timed-out wait does
+// not make the retired registration selectable again.
+type ExternalCredentialResolverDrain struct {
+	done <-chan struct{}
+}
+
+// Wait waits for calls that already leased the retired resolver to finish.
+func (drain *ExternalCredentialResolverDrain) Wait(ctx context.Context) error {
+	if drain == nil || drain.done == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-drain.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ExternalCredentialResolverRegistrationProviderServiceName is the service
@@ -206,79 +232,129 @@ func ActivateExternalCredentialResolverRegistrations(registrations []*ExternalCr
 			return fmt.Errorf("activate external credential resolvers: registration is duplicated")
 		}
 		seen[registration] = struct{}{}
-		if registration.closed {
-			return fmt.Errorf("activate external credential resolvers: registration is closed")
-		}
-		if registration.active {
-			return fmt.Errorf("activate external credential resolvers: registration is already active")
+		if err := validateExternalCredentialResolverActivationLocked(registration); err != nil {
+			return fmt.Errorf("activate external credential resolvers: %w", err)
 		}
 	}
 	for _, registration := range registrations {
-		if err := activateExternalCredentialResolverRegistrationLocked(registration); err != nil {
-			return err
-		}
+		publishExternalCredentialResolverRegistrationLocked(registration)
 	}
 	return nil
 }
 
 // Close removes an active registration and permanently closes the handle. It
-// is idempotent and also safely closes a prepared-but-never-activated handle.
+// is idempotent, safely closes prepared handles, and uses a bounded compatibility
+// timeout so a leaked caller cannot block legacy cleanup forever.
 func (registration *ExternalCredentialResolverRegistration) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), externalCredentialResolverDefaultDrainTimeout)
+	defer cancel()
+	_ = registration.CloseContext(ctx)
+}
+
+// CloseContext deselects a registration before waiting for already leased
+// calls to drain. A context deadline leaves the registration permanently
+// closed while allowing the owner to force-retire its backing client.
+func (registration *ExternalCredentialResolverRegistration) CloseContext(ctx context.Context) error {
+	return registration.Deselect().Wait(ctx)
+}
+
+// Deselect atomically prevents new selections and returns a separately
+// waitable drain. This lets owners publish replacement state before waiting.
+func (registration *ExternalCredentialResolverRegistration) Deselect() *ExternalCredentialResolverDrain {
 	if registration == nil {
-		return
+		return nil
 	}
 	credentialResolvers.Lock()
 	drained := deactivateExternalCredentialResolverRegistrationLocked(registration, true)
 	credentialResolvers.Unlock()
-	if drained != nil {
-		<-drained
-	}
+	return &ExternalCredentialResolverDrain{done: drained}
 }
 
 // ReplaceExternalCredentialResolverRegistration atomically swaps the old live
 // registration for the prepared replacement. Either argument may be nil for
 // advertised-to-unadvertised and unadvertised-to-advertised transitions.
 func ReplaceExternalCredentialResolverRegistration(oldRegistration, newRegistration *ExternalCredentialResolverRegistration) error {
-	return replaceExternalCredentialResolverRegistration(oldRegistration, newRegistration, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), externalCredentialResolverDefaultDrainTimeout)
+	defer cancel()
+	return ReplaceExternalCredentialResolverRegistrationContext(ctx, oldRegistration, newRegistration)
+}
+
+// ReplaceExternalCredentialResolverRegistrationContext atomically transitions
+// selection to a prepared replacement, then waits for old calls within ctx.
+func ReplaceExternalCredentialResolverRegistrationContext(ctx context.Context, oldRegistration, newRegistration *ExternalCredentialResolverRegistration) error {
+	drain, err := TransitionExternalCredentialResolverRegistration(oldRegistration, newRegistration)
+	if err != nil {
+		return err
+	}
+	return drain.Wait(ctx)
+}
+
+// TransitionExternalCredentialResolverRegistration atomically deselects the
+// old registration and publishes the replacement without waiting for old
+// leases. The caller owns the returned bounded drain.
+func TransitionExternalCredentialResolverRegistration(oldRegistration, newRegistration *ExternalCredentialResolverRegistration) (*ExternalCredentialResolverDrain, error) {
+	return transitionExternalCredentialResolverRegistration(oldRegistration, newRegistration, nil)
 }
 
 func replaceExternalCredentialResolverRegistration(oldRegistration, newRegistration *ExternalCredentialResolverRegistration, whileLocked func()) error {
+	ctx, cancel := context.WithTimeout(context.Background(), externalCredentialResolverDefaultDrainTimeout)
+	defer cancel()
+	drain, err := transitionExternalCredentialResolverRegistration(oldRegistration, newRegistration, whileLocked)
+	if err != nil {
+		return err
+	}
+	return drain.Wait(ctx)
+}
+
+func transitionExternalCredentialResolverRegistration(oldRegistration, newRegistration *ExternalCredentialResolverRegistration, whileLocked func()) (*ExternalCredentialResolverDrain, error) {
 	credentialResolvers.Lock()
 	if oldRegistration != nil && (oldRegistration.closed || !oldRegistration.active) {
 		credentialResolvers.Unlock()
-		return fmt.Errorf("replace external credential resolver: old registration is not active")
+		return nil, fmt.Errorf("replace external credential resolver: old registration is not active")
 	}
-	if newRegistration != nil && (newRegistration.closed || newRegistration.active) {
+	if newRegistration != nil {
+		if err := validateExternalCredentialResolverActivationLocked(newRegistration); err != nil {
+			credentialResolvers.Unlock()
+			return nil, fmt.Errorf("replace external credential resolver: %w", err)
+		}
+	}
+	if oldRegistration != nil && oldRegistration == newRegistration {
 		credentialResolvers.Unlock()
-		return fmt.Errorf("replace external credential resolver: new registration is not prepared")
+		return nil, fmt.Errorf("replace external credential resolver: old and new registration are identical")
 	}
 	drained := deactivateExternalCredentialResolverRegistrationLocked(oldRegistration, true)
 	if newRegistration != nil {
-		if err := activateExternalCredentialResolverRegistrationLocked(newRegistration); err != nil {
-			credentialResolvers.Unlock()
-			return err
-		}
+		publishExternalCredentialResolverRegistrationLocked(newRegistration)
 	}
 	if whileLocked != nil {
 		whileLocked()
 	}
 	credentialResolvers.Unlock()
-	if drained != nil {
-		<-drained
+	return &ExternalCredentialResolverDrain{done: drained}, nil
+}
+
+func activateExternalCredentialResolverRegistrationLocked(registration *ExternalCredentialResolverRegistration) error {
+	if err := validateExternalCredentialResolverActivationLocked(registration); err != nil {
+		return fmt.Errorf("activate external credential resolver: %w", err)
+	}
+	publishExternalCredentialResolverRegistrationLocked(registration)
+	return nil
+}
+
+func validateExternalCredentialResolverActivationLocked(registration *ExternalCredentialResolverRegistration) error {
+	if registration == nil {
+		return fmt.Errorf("registration is nil")
+	}
+	if registration.closed {
+		return fmt.Errorf("registration is closed")
+	}
+	if registration.active {
+		return fmt.Errorf("registration is already active")
 	}
 	return nil
 }
 
-func activateExternalCredentialResolverRegistrationLocked(registration *ExternalCredentialResolverRegistration) error {
-	if registration == nil {
-		return fmt.Errorf("activate external credential resolver: registration is nil")
-	}
-	if registration.closed {
-		return fmt.Errorf("activate external credential resolver: registration is closed")
-	}
-	if registration.active {
-		return fmt.Errorf("activate external credential resolver: registration is already active")
-	}
+func publishExternalCredentialResolverRegistrationLocked(registration *ExternalCredentialResolverRegistration) {
 	credentialResolvers.nextID++
 	registration.id = credentialResolvers.nextID
 	if registration.owner != "" {
@@ -300,7 +376,6 @@ func activateExternalCredentialResolverRegistrationLocked(registration *External
 		}
 	}
 	registration.active = true
-	return nil
 }
 
 func deactivateExternalCredentialResolverRegistrationLocked(registration *ExternalCredentialResolverRegistration, closeRegistration bool) <-chan struct{} {
@@ -505,24 +580,33 @@ func selectCredentialResolverFromRegistrations(registrations []*ExternalCredenti
 	}
 
 	pair := credentialResolverPair{provider: provider, credentialType: credentialType}
-	matching := make([]*ExternalCredentialResolverRegistration, 0, len(latestByOwner)+len(anonymous))
+	matching := make(map[*ExternalCredentialResolverRegistration]CloudCredentialResolver, len(latestByOwner)+len(anonymous))
 	for _, registration := range latestByOwner {
-		if registration.resolvers[pair] != nil {
-			matching = append(matching, registration)
+		if resolver := registration.resolvers[pair]; resolver != nil {
+			matching[registration] = resolver
 		}
 	}
 	for _, registration := range anonymous {
-		if registration.resolvers[pair] != nil {
-			matching = append(matching, registration)
+		if resolver := registration.resolvers[pair]; resolver != nil {
+			matching[registration] = resolver
+		}
+	}
+	// Public one-step registrations are process-global and anonymous. Overlay
+	// only those active entries; importing active owned entries here would leak
+	// resolver generations from another application manager into this scope.
+	for _, entry := range credentialResolvers.external[provider][credentialType] {
+		if entry.registration.owner == "" && entry.registration.active && !entry.registration.closed {
+			matching[entry.registration] = entry.resolver
 		}
 	}
 	if len(matching) > 1 {
 		return nil, fmt.Errorf("multiple external credential resolvers match provider %q and credential type %q; remove the duplicate plugin before resolving", provider, credentialType)
 	}
 	if len(matching) == 1 {
-		registration := matching[0]
-		registration.inFlight++
-		return &credentialResolverLease{resolver: registration.resolvers[pair], registration: registration}, nil
+		for registration, resolver := range matching {
+			registration.inFlight++
+			return &credentialResolverLease{resolver: resolver, registration: registration}, nil
+		}
 	}
 	if !externalOnly {
 		if builtin := credentialResolvers.builtins[provider][credentialType]; builtin != nil {

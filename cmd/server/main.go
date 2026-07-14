@@ -103,13 +103,13 @@ const (
 
 type externalPluginManagerLifecycleModule struct {
 	manager  *pluginexternal.ExternalPluginManager
-	shutdown func()
+	shutdown func(context.Context) error
 }
 
 func newExternalPluginManagerLifecycleModule(manager *pluginexternal.ExternalPluginManager) *externalPluginManagerLifecycleModule {
 	lifecycle := &externalPluginManagerLifecycleModule{manager: manager}
 	if manager != nil {
-		lifecycle.shutdown = manager.Shutdown
+		lifecycle.shutdown = manager.ShutdownContext
 	}
 	return lifecycle
 }
@@ -141,9 +141,9 @@ func registerExternalPluginManagerService(app modular.Application, name string, 
 	return app.RegisterService(name, manager)
 }
 
-func (m *externalPluginManagerLifecycleModule) Stop(context.Context) error {
+func (m *externalPluginManagerLifecycleModule) Stop(ctx context.Context) error {
 	if m != nil && m.shutdown != nil {
-		m.shutdown()
+		return m.shutdown(ctx)
 	}
 	return nil
 }
@@ -327,6 +327,100 @@ func runPostStartHooksWithCleanup(engine engineStopLifecycle, hooks []func() err
 	for _, hook := range hooks {
 		if err := hook(); err != nil {
 			return cleanupEngineAfterFailure(engine, fmt.Errorf("post-start hook failed: %w", err), "clean up failed post-start hook")
+		}
+	}
+	return nil
+}
+
+type candidateCommitPhase string
+
+const (
+	candidateCommitPhaseRetire    candidateCommitPhase = "retire"
+	candidateCommitPhaseStart     candidateCommitPhase = "start"
+	candidateCommitPhasePostStart candidateCommitPhase = "post-start"
+	candidateCommitPhaseActivate  candidateCommitPhase = "activate"
+)
+
+type candidateCommitError struct {
+	phase candidateCommitPhase
+	err   error
+}
+
+func (e *candidateCommitError) Error() string { return e.err.Error() }
+func (e *candidateCommitError) Unwrap() error { return e.err }
+
+func cleanupCandidateCommitFailure(phase candidateCommitPhase, candidate engineStopLifecycle, cause error, cleanupLabel string) error {
+	return &candidateCommitError{
+		phase: phase,
+		err:   cleanupEngineAfterFailure(candidate, cause, cleanupLabel),
+	}
+}
+
+func rollbackCommitFailureLabel(err error) string {
+	var commitErr *candidateCommitError
+	if !errors.As(err, &commitErr) {
+		return "rollback commit failed"
+	}
+	switch commitErr.phase {
+	case candidateCommitPhaseRetire:
+		return "rollback retirement failed"
+	case candidateCommitPhaseStart:
+		return "rollback start failed"
+	case candidateCommitPhasePostStart:
+		return "rollback post-start acceptance failed"
+	case candidateCommitPhaseActivate:
+		return "rollback credential resolver activation failed"
+	default:
+		return "rollback commit failed"
+	}
+}
+
+// commitCandidateEngine retires the old engine, starts the staged candidate,
+// completes application-specific acceptance, and only then publishes its
+// credential resolvers. Any failure closes the candidate before returning.
+func commitCandidateEngine(
+	ctx context.Context,
+	oldEngine engineStopLifecycle,
+	candidate engineStartStopLifecycle,
+	afterStart func() error,
+	activateCredentialResolvers func() error,
+) error {
+	if oldEngine != nil {
+		if err := oldEngine.Stop(ctx); err != nil {
+			return cleanupCandidateCommitFailure(
+				candidateCommitPhaseRetire,
+				candidate,
+				fmt.Errorf("retire current engine before candidate acceptance: %w", err),
+				"clean up candidate after current engine retirement failure",
+			)
+		}
+	}
+	if err := candidate.Start(ctx); err != nil {
+		return cleanupCandidateCommitFailure(
+			candidateCommitPhaseStart,
+			candidate,
+			fmt.Errorf("candidate engine start failed: %w", err),
+			"clean up candidate after failed reload start",
+		)
+	}
+	if afterStart != nil {
+		if err := afterStart(); err != nil {
+			return cleanupCandidateCommitFailure(
+				candidateCommitPhasePostStart,
+				candidate,
+				fmt.Errorf("candidate post-start acceptance failed: %w", err),
+				"clean up candidate after post-start acceptance failure",
+			)
+		}
+	}
+	if activateCredentialResolvers != nil {
+		if err := activateCredentialResolvers(); err != nil {
+			return cleanupCandidateCommitFailure(
+				candidateCommitPhaseActivate,
+				candidate,
+				fmt.Errorf("candidate credential resolver activation failed: %w", err),
+				"clean up candidate after credential resolver activation failure",
+			)
 		}
 	}
 	return nil
@@ -1227,9 +1321,11 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 
 // reloadEngine implements a safe try-activate reload:
 //  1. Build candidate engine from newCfg (no ports bound, current engine stays live).
-//  2. Stop current engine only after the candidate has been built successfully.
-//  3. Start candidate engine; on failure rebuild from the previous config and
-//     restart it (rollback).
+//  2. Retire the current engine after the candidate has built successfully.
+//  3. Start and accept the candidate while its credential resolvers remain
+//     application-scoped.
+//  4. Publish candidate resolvers only after the engine is fully accepted;
+//     rebuild and restart the previous config on any failed commit step.
 //
 // Stores, handlers, and database connections stored on serverApp survive
 // every reload cycle.
@@ -1242,72 +1338,58 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	if buildErr != nil {
 		return fmt.Errorf("failed to build candidate engine (current engine unchanged): %w", buildErr)
 	}
-	if activationErr := activateEngineCredentialResolvers(newEngine); activationErr != nil {
-		return cleanupEngineAfterFailure(newEngine, activationErr, "clean up rejected candidate engine")
-	}
-
-	// Stage 2: Stop the current engine now that a viable candidate exists.
 	oldEngine := app.engine
 	oldConfig := app.currentConfig
-	if stopErr := oldEngine.Stop(context.Background()); stopErr != nil {
-		logger.Warn("Error stopping engine during reload", "error", stopErr)
+	candidateFailure := commitCandidateEngine(
+		context.Background(),
+		oldEngine,
+		newEngine,
+		func() error {
+			// Register service consumers only after Start succeeds. Resolver
+			// promotion remains the final acceptance step below.
+			app.engine = newEngine
+			app.currentConfig = newCfg
+			registerManagementServices(logger, app)
+			if app.stores.v1Store != nil {
+				return app.registerPostStartServices(logger)
+			}
+			return nil
+		},
+		func() error { return activateEngineCredentialResolvers(newEngine) },
+	)
+	if candidateFailure == nil {
+		logger.Info("Engine reloaded successfully — all services preserved")
+		return nil
 	}
 
-	// Update references before registering services (registerManagementServices
-	// reads app.engine to reach the Application registry).
-	app.engine = newEngine
-	app.currentConfig = newCfg
-	registerManagementServices(logger, app)
-
-	// Stage 3: Activate candidate.
-	if startErr := newEngine.Start(context.Background()); startErr != nil {
-		logger.Error("Candidate engine failed to start; attempting rollback to previous config", "error", startErr)
-		candidateFailure := cleanupEngineAfterFailure(
-			newEngine,
-			fmt.Errorf("candidate engine start failed: %w", startErr),
-			"clean up candidate after failed reload start",
-		)
-
-		// Rollback: rebuild from previous config and restart.
-		rollbackEngine, _, _, rollbackBuildErr := buildEngine(oldConfig, logger)
-		if rollbackBuildErr != nil {
-			app.currentConfig = oldConfig // keep old config pointer for diagnostics
-			return errors.Join(candidateFailure, fmt.Errorf("rollback build failed — process is degraded: %w", rollbackBuildErr))
-		}
-		app.engine = rollbackEngine
+	logger.Error("Candidate engine commit failed; attempting rollback to previous config", "error", candidateFailure)
+	rollbackEngine, _, _, rollbackBuildErr := buildCandidateEngine(oldConfig, logger)
+	if rollbackBuildErr != nil {
+		app.engine = oldEngine
 		app.currentConfig = oldConfig
 		registerManagementServices(logger, app)
-		if rollbackStartErr := startEngineWithCleanup(context.Background(), rollbackEngine, "rollback start failed"); rollbackStartErr != nil {
-			return errors.Join(candidateFailure, fmt.Errorf("rollback start failed — process is degraded: %w", rollbackStartErr))
-		}
-		if app.stores.v1Store != nil {
-			if regErr := app.registerPostStartServices(logger); regErr != nil {
-				rollbackFailure := cleanupEngineAfterFailure(
-					rollbackEngine,
-					fmt.Errorf("rollback post-start registration failed: %w", regErr),
-					"clean up rollback engine after post-start registration failure",
-				)
-				return errors.Join(candidateFailure, rollbackFailure)
+		return errors.Join(candidateFailure, fmt.Errorf("rollback build failed — process is degraded: %w", rollbackBuildErr))
+	}
+	rollbackFailure := commitCandidateEngine(
+		context.Background(),
+		nil,
+		rollbackEngine,
+		func() error {
+			app.engine = rollbackEngine
+			app.currentConfig = oldConfig
+			registerManagementServices(logger, app)
+			if app.stores.v1Store != nil {
+				return app.registerPostStartServices(logger)
 			}
-		}
-		logger.Info("Engine reload rolled back to previous config")
-		return fmt.Errorf("reload failed (rolled back to previous config): %w", candidateFailure)
+			return nil
+		},
+		func() error { return activateEngineCredentialResolvers(rollbackEngine) },
+	)
+	if rollbackFailure != nil {
+		return errors.Join(candidateFailure, fmt.Errorf("%s — process is degraded: %w", rollbackCommitFailureLabel(rollbackFailure), rollbackFailure))
 	}
-
-	// Stage 4: Re-register post-start services with the new Application's
-	// service registry (stores are already initialized, just need re-wiring).
-	if app.stores.v1Store != nil {
-		if regErr := app.registerPostStartServices(logger); regErr != nil {
-			return cleanupEngineAfterFailure(
-				newEngine,
-				fmt.Errorf("failed to re-register post-start services: %w", regErr),
-				"clean up candidate after post-start registration failure",
-			)
-		}
-	}
-
-	logger.Info("Engine reloaded successfully — all services preserved")
-	return nil
+	logger.Info("Engine reload rolled back to previous config")
+	return fmt.Errorf("reload failed (rolled back to previous config): %w", candidateFailure)
 }
 
 // tryActivateEngine builds a candidate engine from cfg without stopping the

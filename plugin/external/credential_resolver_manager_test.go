@@ -2,7 +2,9 @@ package external
 
 import (
 	"context"
+	"errors"
 	"net"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -89,6 +91,29 @@ func managerCloudAccountAccessKey(t *testing.T) (string, error) {
 		},
 	})
 	if err := account.Init(module.NewMockApplication()); err != nil {
+		return "", err
+	}
+	credentials, err := account.GetCredentials(context.Background())
+	if err != nil {
+		return "", err
+	}
+	return credentials.AccessKey, nil
+}
+
+func managerScopedCloudAccountAccessKey(t *testing.T, manager *ExternalPluginManager) (string, error) {
+	t.Helper()
+	app := module.NewMockApplication()
+	if err := app.RegisterService(module.ExternalCredentialResolverRegistrationProviderServiceName, manager); err != nil {
+		return "", err
+	}
+	account := module.NewCloudAccount("manager-scoped-account", map[string]any{
+		"provider": "aws",
+		"credentials": map[string]any{
+			"type":      "static",
+			"accessKey": "builtin-access",
+		},
+	})
+	if err := account.Init(app); err != nil {
 		return "", err
 	}
 	credentials, err := account.GetCredentials(context.Background())
@@ -498,10 +523,17 @@ func TestExternalPluginManagerReloadDrainsInFlightResolverBeforeKillingOldClient
 			t.Fatalf("new resolver did not become selectable during old drain: %+v, %v", credentials, resolveErr)
 		}
 	}
+	if accessKey, err := managerScopedCloudAccountAccessKey(t, manager); err != nil || accessKey != "new-access" {
+		t.Fatalf("scoped resolver during old drain = %q, %v", accessKey, err)
+	}
 	select {
 	case err := <-reloadDone:
 		t.Fatalf("ReloadPlugin returned before old resolution drained: %v", err)
 	default:
+	}
+	if manager.opsMu.TryLock() {
+		manager.opsMu.Unlock()
+		t.Fatal("reload released operation serialization before retiring the old client")
 	}
 	close(releaseOld)
 	if result := <-oldResult; result != "old-access" {
@@ -512,5 +544,171 @@ func TestExternalPluginManagerReloadDrainsInFlightResolverBeforeKillingOldClient
 	}
 	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "new-access" {
 		t.Fatalf("post-reload resolver = %q, %v", accessKey, err)
+	}
+}
+
+func TestExternalPluginManagerReloadContextPublishesBeforeBoundedDrain(t *testing.T) {
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	oldServer := &managerCredentialResolverServer{
+		declarations:   []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:      "old-access",
+		resolveStarted: oldStarted,
+		resolveRelease: releaseOld,
+	}
+	newServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "new-access",
+	}
+	manager := NewExternalPluginManager(t.TempDir(), nil)
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, oldServer, true)}, nil
+	}
+	if _, err := manager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	t.Cleanup(func() {
+		select {
+		case <-releaseOld:
+		default:
+			close(releaseOld)
+		}
+		manager.Shutdown()
+	})
+
+	oldDone := make(chan error, 1)
+	go func() {
+		_, err := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+		oldDone <- err
+	}()
+	<-oldStarted
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, newServer, true)}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	reloadDone := make(chan error, 1)
+	go func() {
+		_, err := manager.ReloadPluginContext(ctx, "resolver-fixture")
+		reloadDone <- err
+	}()
+
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for {
+		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		credentials, globalErr := module.ResolveExternalCloudCredentials(resolveCtx, "aws", "static", map[string]any{})
+		resolveCancel()
+		if globalErr == nil && credentials.AccessKey == "new-access" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("replacement not globally published: credentials=%+v, error=%v", credentials, globalErr)
+		}
+	}
+	if scoped, scopedErr := managerScopedCloudAccountAccessKey(t, manager); scopedErr != nil || scoped != "new-access" {
+		t.Fatalf("replacement not scoped atomically: scoped=%q/%v", scoped, scopedErr)
+	}
+	if err := <-reloadDone; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ReloadPluginContext error = %v, want deadline exceeded", err)
+	}
+	close(releaseOld)
+	if err := <-oldDone; err != nil {
+		t.Fatalf("old resolution after release: %v", err)
+	}
+}
+
+func TestExternalPluginManagerUnloadAndShutdownContextDoNotHangOnLeakedLease(t *testing.T) {
+	for _, operation := range []string{"unload", "shutdown"} {
+		t.Run(operation, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			server := &managerCredentialResolverServer{
+				declarations:   []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+				accessKey:      "blocked",
+				resolveStarted: started,
+				resolveRelease: release,
+			}
+			manager := NewExternalPluginManager(t.TempDir(), nil)
+			manager.startPlugin = func(string) (*pluginLaunch, error) {
+				return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, server, true)}, nil
+			}
+			if _, err := manager.LoadPlugin("resolver-fixture"); err != nil {
+				t.Fatalf("LoadPlugin: %v", err)
+			}
+			resolveDone := make(chan error, 1)
+			go func() {
+				_, err := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+				resolveDone <- err
+			}()
+			<-started
+
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+			began := time.Now()
+			var err error
+			if operation == "unload" {
+				err = manager.UnloadPluginContext(ctx, "resolver-fixture")
+			} else {
+				err = manager.ShutdownContext(ctx)
+			}
+			cancel()
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("%s context error = %v, want deadline exceeded", operation, err)
+			}
+			if elapsed := time.Since(began); elapsed > 500*time.Millisecond {
+				t.Fatalf("%s exceeded bounded deadline: %v", operation, elapsed)
+			}
+			if manager.IsLoaded("resolver-fixture") {
+				t.Fatalf("%s retained retired client", operation)
+			}
+			if accessKey, resolveErr := managerCloudAccountAccessKey(t); resolveErr != nil || accessKey != "builtin-access" {
+				t.Fatalf("%s retained resolver: %q, %v", operation, accessKey, resolveErr)
+			}
+			close(release)
+			if err := <-resolveDone; err != nil {
+				t.Fatalf("blocked resolution after release: %v", err)
+			}
+		})
+	}
+}
+
+func TestPluginHandlerUnloadUsesRequestContextForResolverDrain(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := &managerCredentialResolverServer{
+		declarations:   []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:      "blocked",
+		resolveStarted: started,
+		resolveRelease: release,
+	}
+	manager := NewExternalPluginManager(t.TempDir(), nil)
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, server, true)}, nil
+	}
+	if _, err := manager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	resolveDone := make(chan error, 1)
+	go func() {
+		_, err := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+		resolveDone <- err
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	request := httptest.NewRequest("POST", "/api/v1/plugins/external/resolver-fixture/unload", nil).WithContext(ctx)
+	request.SetPathValue("name", "resolver-fixture")
+	response := httptest.NewRecorder()
+	NewPluginHandler(manager).handleUnload(response, request)
+	if response.Code != 500 {
+		t.Fatalf("unload response status = %d, want 500 deadline response", response.Code)
+	}
+	if manager.IsLoaded("resolver-fixture") {
+		t.Fatal("request cancellation left plugin loaded")
+	}
+	close(release)
+	if err := <-resolveDone; err != nil {
+		t.Fatalf("blocked resolution after release: %v", err)
 	}
 }

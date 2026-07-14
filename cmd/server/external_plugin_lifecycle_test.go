@@ -9,15 +9,21 @@ import (
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/module"
 	pluginexternal "github.com/GoCodeAlone/workflow/plugin/external"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/grpc"
 )
 
 type candidateEngineLifecycleFixture struct {
-	buildErr   error
-	startErr   error
-	stopErr    error
-	startCalls int
-	stopCalls  int
+	buildErr    error
+	startErr    error
+	stopErr     error
+	startCalls  int
+	stopCalls   int
+	stopStarted chan struct{}
+	stopRelease <-chan struct{}
+	stopFunc    func()
 }
 
 func (f *candidateEngineLifecycleFixture) BuildFromConfig(*config.WorkflowConfig) error {
@@ -26,7 +32,32 @@ func (f *candidateEngineLifecycleFixture) BuildFromConfig(*config.WorkflowConfig
 
 func (f *candidateEngineLifecycleFixture) Stop(context.Context) error {
 	f.stopCalls++
+	if f.stopStarted != nil {
+		close(f.stopStarted)
+	}
+	if f.stopRelease != nil {
+		<-f.stopRelease
+	}
+	if f.stopFunc != nil {
+		f.stopFunc()
+	}
 	return f.stopErr
+}
+
+type lifecycleCredentialResolverClient struct {
+	accessKey string
+}
+
+func (c *lifecycleCredentialResolverClient) DescribeResolvers(context.Context, *pb.CredentialResolverDeclarationsRequest, ...grpc.CallOption) (*pb.CredentialResolverDeclarationsResponse, error) {
+	return &pb.CredentialResolverDeclarationsResponse{Resolvers: []*pb.CredentialResolverDeclaration{{
+		Provider: "aws", CredentialTypes: []string{"static"},
+	}}}, nil
+}
+
+func (c *lifecycleCredentialResolverClient) Resolve(_ context.Context, request *pb.CredentialResolveRequest, _ ...grpc.CallOption) (*pb.CredentialResolveResponse, error) {
+	return &pb.CredentialResolveResponse{Credentials: &pb.ResolvedCloudCredentials{
+		Provider: request.GetProvider(), AccessKey: c.accessKey,
+	}}, nil
 }
 
 func (f *candidateEngineLifecycleFixture) Start(context.Context) error {
@@ -70,12 +101,56 @@ func TestExternalPluginManagerLifecycleExposesStartupManagerAndStopsIt(t *testin
 	}
 
 	stopCalls := 0
-	lifecycle.shutdown = func() { stopCalls++ }
-	if err := lifecycle.Stop(context.Background()); err != nil {
+	shutdownCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lifecycle.shutdown = func(ctx context.Context) error {
+		stopCalls++
+		return ctx.Err()
+	}
+	if err := lifecycle.Stop(shutdownCtx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("lifecycle Stop: %v", err)
 	}
 	if stopCalls != 1 {
 		t.Fatalf("plugin manager shutdown calls = %d, want 1", stopCalls)
+	}
+}
+
+func TestCommitCandidateEnginePromotesOnlyAfterOldRetiresAndCandidateStarts(t *testing.T) {
+	oldStopStarted := make(chan struct{})
+	releaseOldStop := make(chan struct{})
+	oldEngine := &candidateEngineLifecycleFixture{stopStarted: oldStopStarted, stopRelease: releaseOldStop}
+	candidate := &candidateEngineLifecycleFixture{}
+	activated := make(chan struct{}, 1)
+	commitDone := make(chan error, 1)
+	go func() {
+		commitDone <- commitCandidateEngine(
+			context.Background(),
+			oldEngine,
+			candidate,
+			nil,
+			func() error { activated <- struct{}{}; return nil },
+		)
+	}()
+	<-oldStopStarted
+	if candidate.startCalls != 0 {
+		t.Fatalf("candidate started before old retirement: %d", candidate.startCalls)
+	}
+	select {
+	case <-activated:
+		t.Fatal("candidate resolvers promoted while old Stop was blocked")
+	default:
+	}
+	close(releaseOldStop)
+	if err := <-commitDone; err != nil {
+		t.Fatalf("commitCandidateEngine: %v", err)
+	}
+	if candidate.startCalls != 1 {
+		t.Fatalf("candidate start calls = %d, want 1", candidate.startCalls)
+	}
+	select {
+	case <-activated:
+	default:
+		t.Fatal("candidate resolvers were not promoted after acceptance")
 	}
 }
 
@@ -107,6 +182,50 @@ func TestInspectCandidateEngineStopsAfterCollectingTypes(t *testing.T) {
 	}
 	if result.Status != "build_ok" || len(result.ModuleTypes) != 1 || result.ModuleTypes[0] != "module.fixture" {
 		t.Fatalf("candidate result = %+v", result)
+	}
+}
+
+func TestTryActivateInspectionDoesNotPromoteStagedResolver(t *testing.T) {
+	live, err := module.PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"server-try-activate-owner",
+		&lifecycleCredentialResolverClient{accessKey: "live"},
+	)
+	if err != nil {
+		t.Fatalf("prepare live resolver: %v", err)
+	}
+	if err := live.Activate(); err != nil {
+		t.Fatalf("activate live resolver: %v", err)
+	}
+	defer live.Close()
+	candidate, err := module.PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"server-try-activate-owner",
+		&lifecycleCredentialResolverClient{accessKey: "candidate"},
+	)
+	if err != nil {
+		t.Fatalf("prepare candidate resolver: %v", err)
+	}
+	engine := &candidateEngineLifecycleFixture{stopFunc: candidate.Close}
+	if _, err := inspectAndStopCandidateEngine(engine); err != nil {
+		t.Fatalf("inspect candidate: %v", err)
+	}
+	credentials, err := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+	if err != nil || credentials.AccessKey != "live" {
+		t.Fatalf("try-activate inspection displaced live resolver: %+v, %v", credentials, err)
+	}
+}
+
+func TestCommitCandidateEngineActivationFailureStopsCandidate(t *testing.T) {
+	activationErr := errors.New("activation failed")
+	stopErr := errors.New("candidate stop failed")
+	candidate := &candidateEngineLifecycleFixture{stopErr: stopErr}
+	err := commitCandidateEngine(context.Background(), nil, candidate, nil, func() error { return activationErr })
+	if !errors.Is(err, activationErr) || !errors.Is(err, stopErr) {
+		t.Fatalf("commit activation error = %v", err)
+	}
+	if candidate.startCalls != 1 || candidate.stopCalls != 1 {
+		t.Fatalf("candidate lifecycle calls = start %d stop %d; want 1 each", candidate.startCalls, candidate.stopCalls)
 	}
 }
 

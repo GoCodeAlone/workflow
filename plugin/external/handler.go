@@ -109,7 +109,7 @@ func (h *PluginHandler) handleUnload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.manager.UnloadPlugin(name); err != nil {
+	if err := h.manager.UnloadPluginContext(r.Context(), name); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -126,7 +126,7 @@ func (h *PluginHandler) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.manager.ReloadPlugin(name)
+	_, err := h.manager.ReloadPluginContext(r.Context(), name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
