@@ -1,0 +1,57 @@
+name: Forbidden shell command shapes
+
+on:
+  pull_request:
+
+jobs:
+  assignment-prefix:
+    runs-on: ubuntu-latest
+    steps:
+      - run: MODE=ci ./scripts/live.sh
+
+  command-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - run: command ./scripts/live.sh
+
+  exec-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exec ./scripts/live.sh
+
+  sudo-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sudo ./scripts/live.sh
+
+  env-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - run: env AUTH=x ./scripts/live.sh
+
+  subshell:
+    runs-on: ubuntu-latest
+    steps:
+      - run: (./scripts/live.sh)
+
+  group:
+    runs-on: ubuntu-latest
+    steps:
+      - run: '{ ./scripts/live.sh; }'
+
+  command-substitution:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "$(./scripts/live.sh)"
+
+  dynamic-path:
+    runs-on: ubuntu-latest
+    steps:
+      - run: "$(pwd)/scripts/live.sh"
+
+  wrapped-dynamic-command:
+    runs-on: ubuntu-latest
+    env:
+      TOOL: ${{ vars.TOOL }}
+    steps:
+      - run: sudo "$TOOL"

@@ -408,7 +408,7 @@ func prepareConformanceFixture(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatalf("repo root: %v", err)
 	}
-	goMod := "module example.com/" + name + "\n\ngo 1.26.4\n\nrequire github.com/GoCodeAlone/workflow v0.0.0\n\nreplace github.com/GoCodeAlone/workflow => " + filepath.ToSlash(root) + "\n"
+	goMod := "module example.com/" + name + "\n\ngo 1.26.5\n\nrequire github.com/GoCodeAlone/workflow v0.0.0\n\nreplace github.com/GoCodeAlone/workflow => " + filepath.ToSlash(root) + "\n"
 	if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte(goMod), 0o600); err != nil {
 		t.Fatalf("write fixture go.mod: %v", err)
 	}

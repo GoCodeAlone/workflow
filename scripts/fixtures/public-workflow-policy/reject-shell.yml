@@ -1,0 +1,22 @@
+name: Forbidden workflow shell selection
+
+on:
+  pull_request:
+
+jobs:
+  custom-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: python
+        run: print('not shell policy analyzed')
+
+  dynamic-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - shell: ${{ vars.SHELL }}
+        run: go test ./...
+
+  invalid-shell-program:
+    runs-on: ubuntu-latest
+    steps:
+      - run: "if then"

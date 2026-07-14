@@ -227,7 +227,7 @@ COPY ui/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
-FROM golang:1.26.4-alpine AS go-builder
+FROM golang:1.26.5-alpine AS go-builder
 WORKDIR /app
 COPY --from=ui-builder /app/ui/dist ./module/ui_dist
 COPY . .

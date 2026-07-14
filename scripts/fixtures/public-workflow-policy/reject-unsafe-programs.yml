@@ -1,0 +1,129 @@
+name: Forbidden dynamic and provider-capable programs
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  curl-endpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl "${{ vars.ENDPOINT }}"
+
+  wget-endpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: wget https://example.invalid/resource
+
+  http-client:
+    runs-on: ubuntu-latest
+    steps:
+      - run: http GET "${{ vars.ENDPOINT }}"
+
+  python-code:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -c "$CODE"
+
+  node-code:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node -e "${{ vars.CODE }}"
+
+  dynamic-interpreter-script:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python "$SCRIPT"
+
+  powershell-endpoint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: pwsh -Command 'Invoke-RestMethod -Uri https://api.digitalocean.com/v2/droplets'
+
+  go-run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: go run ./cmd/tool
+
+  npx-exec:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npx provider-tool
+
+  npm-exec:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm exec provider-tool
+
+  docker-run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker run provider/image
+
+  docker-login:
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker login registry.example.invalid
+
+  docker-push:
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker push registry.example.invalid/provider/image
+
+  terraform-plan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: terraform plan
+
+  tofu-plan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: command tofu plan
+
+  pulumi-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exec pulumi preview
+
+  kubectl-get:
+    runs-on: ubuntu-latest
+    steps:
+      - run: env MODE=ci kubectl get pods
+
+  helm-list:
+    runs-on: ubuntu-latest
+    steps:
+      - run: helm list
+
+  ansible-playbook:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ansible site.yml
+
+  rclone-list:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'rclone lsd remote:'
+
+  s3cmd-list:
+    runs-on: ubuntu-latest
+    steps:
+      - run: s3cmd ls
+
+  mc-list:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mc ls storage
+
+  unknown-executable:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mystery-tool inspect
+
+  sudo-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sudo go test ./...

@@ -1,0 +1,25 @@
+name: Forbidden permission shapes
+
+on:
+  pull_request:
+
+permissions: write-all
+
+jobs:
+  job-write-all:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - run: go test ./...
+
+  dynamic-permissions:
+    runs-on: ubuntu-latest
+    permissions: ${{ vars.PERMISSIONS }}
+    steps:
+      - run: go test ./...
+
+  malformed-permissions:
+    runs-on: ubuntu-latest
+    permissions: [read-all]
+    steps:
+      - run: go test ./...

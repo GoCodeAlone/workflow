@@ -1,0 +1,19 @@
+name: Forbidden builtin wrapper
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  builtin-wrapper:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tunnel dynamic execution through builtin
+        shell: bash
+        env:
+          COMMAND: printf builtin-wrapper
+        run: |
+          builtin eval "$COMMAND"
+          command builtin eval "$COMMAND"

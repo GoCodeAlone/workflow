@@ -1,0 +1,32 @@
+name: Forbidden YAML structure
+
+on:
+  pull_request:
+
+x-run: &shared-run echo aliased
+x-uses: &shared-uses actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+x-env: &shared-env
+  VALUE: aliased
+x-shell: &shared-shell bash
+x-runner: &shared-runner ubuntu-latest
+
+jobs:
+  aliases:
+    runs-on: *shared-runner
+    env: *shared-env
+    steps:
+      - uses: *shared-uses
+      - shell: *shared-shell
+        run: *shared-run
+
+  duplicates:
+    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo first
+        run: echo second
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        env:
+          VALUE: first
+          VALUE: second

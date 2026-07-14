@@ -1,0 +1,10 @@
+name: Missing explicit effective shell
+
+on:
+  pull_request:
+
+jobs:
+  implicit-platform-default:
+    runs-on: windows-2022
+    steps:
+      - run: Invoke-RestMethod -Uri https://api.digitalocean.com/v2/droplets

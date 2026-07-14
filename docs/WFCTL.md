@@ -2058,7 +2058,9 @@ components, and use `current_state` fixtures to cover update/delete plan shapes.
 
 Tag-based force-cleanup across every provider declared in the config. For each `iac.provider` module, type-asserts to the optional `interfaces.Enumerator`; providers that implement it are queried via `EnumerateByTag`, and the matched resources are either listed (`--dry-run`, default) or deleted (`--fix`). Providers that do **not** implement `Enumerator` are skipped with `skipped <provider>: provider does not implement Enumerator` to stdout so operators see the explicit skip.
 
-Used by the conformance smoke gate (`.github/workflows/conformance-smoke.yml`) to scrub resources orphaned by panicking tests before the hourly leak-scrubber cron picks them up. Safe to call from any operator workstation against any IaC config.
+This is an operator-local recovery command. Public Workflow automation never
+invokes it against live providers; run it only from an explicitly authorized
+operator environment against the intended IaC config.
 
 ```
 wfctl infra cleanup --tag NAME [-c CONFIG] [--env ENV] [--dry-run | --fix]

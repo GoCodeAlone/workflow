@@ -1,0 +1,21 @@
+name: Credential-free negative provider guard
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  boundary-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Reject provider dependencies
+        run: |
+          if rg 'digitalocean/action-doctl|api.digitalocean.com|doctl' internal/; then
+            echo 'provider dependency crossed the boundary'
+            exit 1
+          fi

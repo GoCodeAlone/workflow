@@ -1,0 +1,75 @@
+name: Forbidden public automation examples
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+jobs:
+  self-hosted:
+    runs-on: [self-hosted, linux]
+    steps:
+      - run: go test ./...
+
+  oidc:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - run: go test ./...
+
+  known-cloud-secret:
+    runs-on: ubuntu-latest
+    env:
+      CLOUD_AUTH: ${{ secrets.DIGITALOCEAN_TOKEN }}
+    steps:
+      - run: go test ./...
+
+  aliased-cloud-secret:
+    runs-on: ubuntu-latest
+    env:
+      CLOUD_AUTH: ${{ secrets.DEPLOY_AUTH }}
+    steps:
+      - run: doctl compute droplet list
+
+  fixed-provider-api:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl https://api.digitalocean.com/v2/droplets
+
+  sdk-with-authority:
+    runs-on: ubuntu-latest
+    env:
+      CLOUD_AUTH: ${{ secrets.DIGITALOCEAN_TOKEN }}
+    steps:
+      - run: GOWORK=off go test github.com/digitalocean/godo/...
+
+  integration-with-authority:
+    runs-on: ubuntu-latest
+    env:
+      CLOUD_AUTH: ${{ secrets.DIGITALOCEAN_TOKEN }}
+    steps:
+      - run: GOWORK=off go test -tags=integration ./internal/drivers/...
+
+  named-live-test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: GOWORK=off go test ./internal/... -run TestDatabaseDriver_Live
+
+  manual-provider-job:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gcloud compute instances list
+
+  scheduled-provider-job:
+    runs-on: ubuntu-latest
+    steps:
+      - run: az account show
+
+  unknown-secret:
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_TOKEN: ${{ secrets.UNREVIEWED_TOKEN }}
+    steps:
+      - run: go test ./...

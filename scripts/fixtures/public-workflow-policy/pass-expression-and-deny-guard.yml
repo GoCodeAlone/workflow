@@ -1,0 +1,28 @@
+name: No secrets are used by provider rejection guards
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  reject-provider-markers:
+    name: No secrets are used
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      STATUS_MESSAGE: ${{ format('No secrets are used by {0}', github.actor) }}
+    steps:
+      - name: Reject provider execution markers
+        env:
+          PROVIDER_DENY_PATTERN: digitalocean/action-doctl|api.digitalocean.com|doctl
+        run: |
+          if rg "${PROVIDER_DENY_PATTERN}" .github/workflows/; then
+            echo 'provider execution marker crossed the boundary'
+            exit 1
+          fi
+      - name: Ordinary path arguments are not commands
+        run: go test ./...

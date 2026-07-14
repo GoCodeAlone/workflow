@@ -1,0 +1,53 @@
+name: Credential-free examples
+
+on:
+  pull_request:
+  schedule:
+    - cron: '30 4 * * 1'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  local-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+      - name: Exercise local integration boundary
+        run: GOWORK=off go test -tags=integration ./internal/local/...
+      - name: Exact safe assignment
+        run: SAFE_VALUE=one
+      - name: Reject provider dependencies
+        run: |
+          if rg 'github.com/digitalocean/godo|api.digitalocean.com|doctl' core/; then
+            echo 'provider dependency crossed the boundary'
+            exit 1
+          fi
+
+  scheduled-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/*
+
+  macos-build:
+    runs-on: macos-14
+    permissions: read-all
+    steps:
+      - run: go test ./...
+
+  windows-build:
+    runs-on: windows-2022
+    steps:
+      - run: go test ./...

@@ -1,0 +1,20 @@
+name: Forbidden runner selectors
+
+on:
+  pull_request:
+
+jobs:
+  custom-scalar:
+    runs-on: private-linux
+    steps:
+      - run: go test ./...
+
+  custom-label-array:
+    runs-on: [linux, x64, private]
+    steps:
+      - run: go test ./...
+
+  dynamic-expression:
+    runs-on: ${{ vars.RUNNER_LABEL }}
+    steps:
+      - run: go test ./...

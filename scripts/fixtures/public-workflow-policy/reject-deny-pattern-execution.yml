@@ -1,0 +1,17 @@
+name: Deny pattern execution bypass
+
+on:
+  pull_request:
+
+jobs:
+  execute-deny-value:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          PROVIDER_DENY_PATTERN: digitalocean/action-doctl|api.digitalocean.com|doctl
+        run: |
+          if rg "${PROVIDER_DENY_PATTERN}" .github/workflows/; then
+            echo 'provider execution marker crossed the boundary'
+            exit 1
+          fi
+          "$PROVIDER_DENY_PATTERN"

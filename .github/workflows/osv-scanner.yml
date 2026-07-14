@@ -1,13 +1,6 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# A sample workflow which sets up periodic OSV-Scanner scanning for vulnerabilities,
-# in addition to a PR check which fails if new vulnerabilities are introduced.
-#
-# For more examples and options, including how to ignore specific vulnerabilities,
-# see https://google.github.io/osv-scanner/github-action/
+# This workflow uses a digest-pinned OSV-Scanner container published by Google.
+# It preserves differential pull-request reporting and scheduled SARIF uploads
+# without delegating authority to a reusable workflow from another repository.
 
 name: OSV-Scanner
 
@@ -22,29 +15,163 @@ on:
     branches: [ "main" ]
 
 permissions:
-  # Required to upload SARIF file to CodeQL
-  actions: read
-  # Require writing security events to upload SARIF file to security tab
-  security-events: write
-  # Read commit contents
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   scan-scheduled:
     if: ${{ github.event_name == 'push' || github.event_name == 'schedule' }}
-    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2" # v2.3.8
-    with:
-      # Example of specifying custom arguments
-      scan-args: |-
-        -r
-        --skip-git
-        ./
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+    - name: Check out code
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        persist-credentials: false
+
+    - name: Scan dependency manifests
+      uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
+      continue-on-error: true
+      with:
+        args: >-
+          scan
+          source
+          --format=json
+          --output-file=results.json
+          -r
+          --allow-no-lockfiles
+          ./
+
+    - name: Build SARIF report
+      uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
+      with:
+        entrypoint: /root/osv-reporter
+        args: >-
+          --output-files=sarif:results.sarif
+          --new=results.json
+          --fail-on-vuln=true
+
+    - name: Upload SARIF artifact
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: OSV Scanner SARIF file
+        path: results.sarif
+        retention-days: 5
+
+    - name: Upload to code scanning
+      if: ${{ !cancelled() }}
+      uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+      with:
+        sarif_file: results.sarif
+
   scan-pr:
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
-    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@9a498708959aeaef5ef730655706c5a1df1edbc2" # v2.3.8
-    with:
-      # Example of specifying custom arguments
-      scan-args: |-
-        -r
-        --skip-git
-        ./
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+    - name: Check out code
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Check out pull-request base commit
+      if: ${{ github.event_name == 'pull_request' }}
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "invalid pull-request base SHA" >&2
+          exit 1
+        fi
+        git checkout --detach "$BASE_SHA"
+
+    - name: Check out merge-group base commit
+      if: ${{ github.event_name == 'merge_group' }}
+      env:
+        BASE_SHA: ${{ github.event.merge_group.base_sha }}
+      run: |
+        if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "invalid merge-group base SHA" >&2
+          exit 1
+        fi
+        git checkout --detach "$BASE_SHA"
+
+    - name: Scan existing dependency manifests
+      uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
+      continue-on-error: true
+      with:
+        args: >-
+          scan
+          source
+          --format=json
+          --output-file=old-results.json
+          -r
+          --allow-no-lockfiles
+          ./
+
+    - name: Restore candidate commit
+      run: git checkout --force "$GITHUB_SHA"
+
+    - name: Scan candidate dependency manifests
+      uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
+      continue-on-error: true
+      with:
+        args: >-
+          scan
+          source
+          --format=json
+          --output-file=new-results.json
+          -r
+          --allow-no-lockfiles
+          ./
+
+    - name: Build differential SARIF report
+      uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
+      with:
+        entrypoint: /root/osv-reporter
+        args: >-
+          --output-files=sarif:results.sarif,gh-annotations:#stderr
+          --old=old-results.json
+          --new=new-results.json
+          --fail-on-vuln=true
+
+    - name: Upload SARIF artifact
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: OSV Scanner PR SARIF file
+        path: results.sarif
+        retention-days: 5
+
+    - name: Upload old scan JSON
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: OSV Scanner old JSON results
+        path: old-results.json
+        retention-days: 5
+
+    - name: Upload new scan JSON
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: OSV Scanner new JSON results
+        path: new-results.json
+        retention-days: 5
+
+    - name: Upload to code scanning
+      if: ${{ !cancelled() }}
+      uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+      with:
+        sarif_file: results.sarif

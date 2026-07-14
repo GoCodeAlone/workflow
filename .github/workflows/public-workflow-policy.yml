@@ -1,0 +1,124 @@
+name: Public Workflow Policy
+
+# Bootstrap note: the PR that first introduces this workflow cannot be guarded
+# by a workflow absent from its base branch. Once merged, pull_request_target
+# always runs the trusted base copy and treats the candidate archive as data.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted base policy
+        id: trusted-checkout
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+
+      - name: Fetch candidate as inert data
+        env:
+          CANDIDATE_REPOSITORY: ${{ github.event_name == 'push' && github.repository || github.event.pull_request.head.repo.full_name }}
+          CANDIDATE_SHA: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.head.sha }}
+          GIT_ASKPASS: /bin/false
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: 1
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          if [[ ! "$CANDIDATE_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$ ]]; then
+            echo "candidate repository must be an exact GitHub owner/name" >&2
+            exit 1
+          fi
+          if [[ ! "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "candidate SHA must be exactly 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          origin="https://github.com/${CANDIDATE_REPOSITORY}.git"
+          mkdir candidate-source candidate
+          git -C candidate-source init --quiet
+          git -C candidate-source \
+            -c credential.helper= \
+            -c core.askPass=/bin/false \
+            -c credential.interactive=never \
+            -c http.https://github.com/.extraheader= \
+            fetch --no-tags --depth=1 "$origin" "$CANDIDATE_SHA"
+          fetched_sha="$(git -C candidate-source rev-parse 'FETCH_HEAD^{commit}')"
+          if [[ "$fetched_sha" != "$CANDIDATE_SHA" ]]; then
+            echo "fetched candidate does not match the requested SHA" >&2
+            exit 1
+          fi
+          git -C candidate-source ls-tree -r --format='%(objectmode)' FETCH_HEAD > candidate-tree-modes
+          while read -r object_mode; do
+            case "$object_mode" in
+              100644|100755) ;;
+              *)
+                echo "candidate tree contains forbidden object mode: $object_mode" >&2
+                exit 1
+                ;;
+            esac
+          done < candidate-tree-modes
+          git -C candidate-source archive --worktree-attributes --format=tar FETCH_HEAD > candidate.tar
+          if ! LC_ALL=C tar -tvf candidate.tar > candidate.tar.list; then
+            echo "candidate archive listing failed" >&2
+            exit 1
+          fi
+          while read -r archive_entry; do
+            case "${archive_entry:0:1}" in
+              -|d) ;;
+              *)
+                echo "candidate archive contains a forbidden entry type" >&2
+                exit 1
+                ;;
+            esac
+          done < candidate.tar.list
+          tar --extract --file=candidate.tar --directory=candidate --no-same-owner --no-same-permissions
+          symlink_path="$(find candidate -type l -print -quit)"
+          if [[ -n "$symlink_path" ]]; then
+            echo "candidate archive contains a forbidden symlink" >&2
+            exit 1
+          fi
+
+      - name: Select exact trusted policy root
+        id: policy-root
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          root=trusted
+          if [ ! -x trusted/scripts/check-public-workflow-policy.sh ]; then
+            # This one-time push executes newly merged main, never PR-head data.
+            if [ "$EVENT_NAME" = push ] && [ "$BEFORE_SHA" = 9c364dd4e6dad83808f8a87c1ba990d0132f0372 ]; then
+              root=candidate
+            else
+              echo "trusted workflow policy is missing or incomplete" >&2
+              exit 1
+            fi
+          fi
+          echo "root=$root" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go for the trusted analyzer
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: ${{ steps.policy-root.outputs.root }}/.github/workflows/policytool/go.mod
+          cache: false
+
+      - name: Scan candidate workflows with trusted base policy
+        run: |
+          if [ "${{ steps.policy-root.outputs.root }}" = candidate ]; then
+            cd candidate && ./scripts/check-public-workflow-policy.sh --scan-root "${GITHUB_WORKSPACE}/candidate" --bootstrap-authority
+          else
+            cd trusted && ./scripts/check-public-workflow-policy.sh --scan-root "${GITHUB_WORKSPACE}/candidate"
+          fi

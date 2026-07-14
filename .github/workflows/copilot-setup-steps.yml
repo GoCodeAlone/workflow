@@ -11,6 +11,10 @@ on:
     paths:
       - .github/workflows/copilot-setup-steps.yml
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
@@ -36,11 +40,6 @@ jobs:
           cache: false
           cache-dependency-path: go.sum
 
-      # Configure Go for private repository access
-      - name: Configure Go for private repositories
-        run: |
-          git config --global url."https://${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
-
       # Setup Docker for containerized development
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
@@ -64,5 +63,4 @@ jobs:
           echo "=== Tool Versions ==="
           go version
           golangci-lint version
-          docker --version
           echo "All tools installed successfully!"
