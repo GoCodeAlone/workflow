@@ -3,7 +3,9 @@ package external
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -240,5 +242,121 @@ func TestExternalPluginManagerCredentialResolverShutdownCleansRegistration(t *te
 	manager.Shutdown()
 	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "builtin-access" {
 		t.Fatalf("shutdown left resolver registered: access key %q, %v", accessKey, err)
+	}
+}
+
+func TestExternalPluginManagersShareResolverOwnerByCanonicalDirectoryAndName(t *testing.T) {
+	pluginsDir := t.TempDir()
+	startupServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "startup-access",
+	}
+	adminServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "admin-access",
+	}
+	differentServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "different-access",
+	}
+
+	startupManager := NewExternalPluginManager(pluginsDir, nil)
+	startupManager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, startupServer, true)}, nil
+	}
+	t.Cleanup(startupManager.Shutdown)
+	adminManager := NewExternalPluginManager(pluginsDir+string(filepath.Separator)+".", nil)
+	adminManager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, adminServer, true)}, nil
+	}
+	t.Cleanup(adminManager.Shutdown)
+	differentManager := NewExternalPluginManager(pluginsDir, nil)
+	differentManager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, differentServer, true)}, nil
+	}
+	t.Cleanup(differentManager.Shutdown)
+
+	if _, err := startupManager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("startup LoadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "startup-access" {
+		t.Fatalf("startup resolver = %q, %v", accessKey, err)
+	}
+	if _, err := adminManager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("admin LoadPlugin same identity: %v", err)
+	}
+
+	const callers = 32
+	results := make(chan string, callers)
+	var wait sync.WaitGroup
+	for range callers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			accessKey, err := managerCloudAccountAccessKey(t)
+			if err != nil {
+				results <- "error:" + err.Error()
+				return
+			}
+			results <- accessKey
+		}()
+	}
+	wait.Wait()
+	close(results)
+	for result := range results {
+		if result != "admin-access" {
+			t.Fatalf("same-owner concurrent resolution = %q", result)
+		}
+	}
+
+	if err := adminManager.UnloadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("admin UnloadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "startup-access" {
+		t.Fatalf("startup resolver after admin unload = %q, %v", accessKey, err)
+	}
+
+	if _, err := differentManager.LoadPlugin("different-fixture"); err != nil {
+		t.Fatalf("different identity LoadPlugin: %v", err)
+	}
+	if _, err := managerCloudAccountAccessKey(t); err == nil || !strings.Contains(err.Error(), "multiple external credential resolvers") {
+		t.Fatalf("different owner resolution = %q, %v; want collision", "", err)
+	}
+	if err := differentManager.UnloadPlugin("different-fixture"); err != nil {
+		t.Fatalf("different identity UnloadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "startup-access" {
+		t.Fatalf("startup resolver after different owner unload = %q, %v", accessKey, err)
+	}
+}
+
+func TestExternalPluginManagerCredentialResolverOwnerIsCanonicalAndUnambiguous(t *testing.T) {
+	baseDir := t.TempDir()
+	canonicalManager := NewExternalPluginManager(baseDir, nil)
+	equivalentManager := NewExternalPluginManager(filepath.Join(baseDir, "."), nil)
+	canonicalOwner, err := canonicalManager.credentialResolverOwner("resolver-fixture")
+	if err != nil {
+		t.Fatalf("canonical owner: %v", err)
+	}
+	equivalentOwner, err := equivalentManager.credentialResolverOwner("resolver-fixture")
+	if err != nil {
+		t.Fatalf("equivalent owner: %v", err)
+	}
+	if canonicalOwner != equivalentOwner {
+		t.Fatalf("equivalent plugin paths produced different owners: %q != %q", canonicalOwner, equivalentOwner)
+	}
+
+	leftManager := NewExternalPluginManager(filepath.Join(baseDir, "a"), nil)
+	rightManager := NewExternalPluginManager(filepath.Join(baseDir, "a", "b"), nil)
+	leftOwner, err := leftManager.credentialResolverOwner("b/c")
+	if err != nil {
+		t.Fatalf("left owner: %v", err)
+	}
+	rightOwner, err := rightManager.credentialResolverOwner("c")
+	if err != nil {
+		t.Fatalf("right owner: %v", err)
+	}
+	if leftOwner == rightOwner {
+		t.Fatalf("owner encoding is ambiguous: %q", leftOwner)
 	}
 }

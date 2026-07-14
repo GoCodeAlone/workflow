@@ -96,6 +96,71 @@ type externalPluginEngineLoader interface {
 	LoadPlugin(plugin.EnginePlugin) error
 }
 
+const (
+	externalPluginManagerLifecycleModuleName = "internal-external-plugin-manager-lifecycle"
+	externalPluginManagerServiceName         = "internal-external-plugin-manager"
+)
+
+type externalPluginManagerLifecycleModule struct {
+	manager  *pluginexternal.ExternalPluginManager
+	shutdown func()
+}
+
+func newExternalPluginManagerLifecycleModule(manager *pluginexternal.ExternalPluginManager) *externalPluginManagerLifecycleModule {
+	lifecycle := &externalPluginManagerLifecycleModule{manager: manager}
+	if manager != nil {
+		lifecycle.shutdown = manager.Shutdown
+	}
+	return lifecycle
+}
+
+func (m *externalPluginManagerLifecycleModule) Name() string {
+	return externalPluginManagerLifecycleModuleName
+}
+
+func (m *externalPluginManagerLifecycleModule) Init(app modular.Application) error {
+	if m == nil || m.manager == nil {
+		return fmt.Errorf("external plugin manager lifecycle: manager is nil")
+	}
+	if err := app.RegisterService(externalPluginManagerServiceName, m.manager); err != nil {
+		return fmt.Errorf("register external plugin manager service: %w", err)
+	}
+	return nil
+}
+
+func (m *externalPluginManagerLifecycleModule) Stop(context.Context) error {
+	if m != nil && m.shutdown != nil {
+		m.shutdown()
+	}
+	return nil
+}
+
+func externalPluginManagerFromApplication(app modular.Application) (*pluginexternal.ExternalPluginManager, error) {
+	if app == nil {
+		return nil, fmt.Errorf("external plugin manager application is nil")
+	}
+	service, exists := app.SvcRegistry()[externalPluginManagerServiceName]
+	if !exists {
+		return nil, fmt.Errorf("external plugin manager service is unavailable")
+	}
+	manager, ok := service.(*pluginexternal.ExternalPluginManager)
+	if !ok || manager == nil {
+		return nil, fmt.Errorf("external plugin manager service has unexpected type %T", service)
+	}
+	return manager, nil
+}
+
+func newExternalPluginAdminMux(app modular.Application) (http.Handler, error) {
+	manager, err := externalPluginManagerFromApplication(app)
+	if err != nil {
+		return nil, err
+	}
+	handler := pluginexternal.NewPluginHandler(manager)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	return mux, nil
+}
+
 func loadExternalPluginIntoEngine(manager externalPluginLifecycleManager, engine externalPluginEngineLoader, name string) (*pluginexternal.ExternalPluginAdapter, error) {
 	adapter, err := manager.LoadPlugin(name)
 	if err != nil {
@@ -144,6 +209,7 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// Failures are non-fatal — the engine works fine with only builtin plugins.
 	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
 	extMgr.SetCallbackServer(newExternalCallbackServer(engine))
+	app.RegisterModule(newExternalPluginManagerLifecycleModule(extMgr))
 	discovered, discoverErr := extMgr.DiscoverPlugins()
 	if discoverErr != nil {
 		logger.Warn("Failed to discover external plugins", "error", discoverErr)
@@ -180,11 +246,31 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.SetPluginInstaller(installer)
 
 	// Build engine from config
-	if err := engine.BuildFromConfig(cfg); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
+	if err := buildEngineFromConfig(engine, cfg, extMgr.Shutdown); err != nil {
+		return nil, nil, nil, err
 	}
 
 	return engine, loader, registry, nil
+}
+
+type engineConfigBuildLifecycle interface {
+	BuildFromConfig(*config.WorkflowConfig) error
+	Stop(context.Context) error
+}
+
+func buildEngineFromConfig(engine engineConfigBuildLifecycle, cfg *config.WorkflowConfig, cleanup func()) error {
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		buildErr := fmt.Errorf("failed to build workflow: %w", err)
+		stopErr := engine.Stop(context.Background())
+		if cleanup != nil {
+			cleanup()
+		}
+		if stopErr != nil {
+			return errors.Join(buildErr, fmt.Errorf("clean up failed workflow build: %w", stopErr))
+		}
+		return buildErr
+	}
+	return nil
 }
 
 func newExternalCallbackServer(engine *workflow.StdEngine) *pluginexternal.CallbackServer {
@@ -307,21 +393,22 @@ type mgmtComponents struct {
 // execution subsystem. These are registered with each new Application
 // instance after an engine reload.
 type serviceComponents struct {
-	v1Handler        http.Handler          // V1 API handler (dashboard)
-	executionTracker executionTrackerIface // CQRS execution tracking
-	runtimeManager   runtimeLifecycle      // filesystem-loaded workflow instances
-	reporter         observabilityReporter // background observability reporter
-	timelineMux      http.Handler          // timeline handler mux
-	replayMux        http.Handler          // replay handler mux
-	backfillMux      http.Handler          // backfill/mock/diff handler mux
-	dlqMux           http.Handler          // DLQ handler mux
-	billingMux       http.Handler          // billing handler mux
-	nativeHandler    http.Handler          // native plugin handler
-	envMux           http.Handler          // environment management mux
-	cloudMux         http.Handler          // cloud providers mux
-	pluginRegMux     http.Handler          // plugin registry mux
-	runtimeMux       http.Handler          // runtime instances API
-	ingestMux        http.Handler          // ingest API for remote workers
+	v1Handler         http.Handler          // V1 API handler (dashboard)
+	executionTracker  executionTrackerIface // CQRS execution tracking
+	runtimeManager    runtimeLifecycle      // filesystem-loaded workflow instances
+	reporter          observabilityReporter // background observability reporter
+	timelineMux       http.Handler          // timeline handler mux
+	replayMux         http.Handler          // replay handler mux
+	backfillMux       http.Handler          // backfill/mock/diff handler mux
+	dlqMux            http.Handler          // DLQ handler mux
+	billingMux        http.Handler          // billing handler mux
+	nativeHandler     http.Handler          // native plugin handler
+	envMux            http.Handler          // environment management mux
+	cloudMux          http.Handler          // cloud providers mux
+	externalPluginMux http.Handler          // current engine's external plugin manager mux
+	pluginRegMux      http.Handler          // plugin registry mux
+	runtimeMux        http.Handler          // runtime instances API
+	ingestMux         http.Handler          // ingest API for remote workers
 }
 
 // serverApp holds all components needed to run the server. Persistent resources
@@ -854,23 +941,6 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	}
 
 	// -----------------------------------------------------------------------
-	// External plugin management handler
-	// -----------------------------------------------------------------------
-
-	extPluginDir2 := filepath.Join(*dataDir, "plugins")
-	extPluginMgr := pluginexternal.NewExternalPluginManager(extPluginDir2, log.Default())
-	extPluginMgr.SetCallbackServer(newExternalCallbackServer(engine))
-	extPluginHandler := pluginexternal.NewPluginHandler(extPluginMgr)
-	extPluginMux := http.NewServeMux()
-	extPluginHandler.RegisterRoutes(extPluginMux)
-
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-external-plugins", extPluginMux))
-	if regErr := engine.GetApp().RegisterService("admin-external-plugins", extPluginMux); regErr != nil {
-		logger.Warn("Failed to register external plugin service", "error", regErr)
-	}
-	logger.Info("Registered external plugin management API")
-
-	// -----------------------------------------------------------------------
 	// Plugin composite registry
 	// -----------------------------------------------------------------------
 
@@ -974,6 +1044,11 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 // only the Application's service registry is re-populated.
 func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 	engine := app.engine
+	externalPluginMux, err := newExternalPluginAdminMux(engine.GetApp())
+	if err != nil {
+		return fmt.Errorf("create external plugin management API: %w", err)
+	}
+	app.services.externalPluginMux = externalPluginMux
 
 	// Wire EventRecorder adapter to the pipeline handler so pipeline
 	// executions emit events to the event store. The handler is discovered
@@ -1001,17 +1076,18 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 
 	// Register all delegate service modules with the new Application
 	delegateServices := map[string]http.Handler{
-		"admin-timeline-mgmt":   app.services.timelineMux,
-		"admin-replay-mgmt":     app.services.replayMux,
-		"admin-backfill-mgmt":   app.services.backfillMux,
-		"admin-dlq-mgmt":        app.services.dlqMux,
-		"admin-billing-mgmt":    app.services.billingMux,
-		"admin-native-plugins":  app.services.nativeHandler,
-		"admin-env-mgmt":        app.services.envMux,
-		"admin-cloud-providers": app.services.cloudMux,
-		"admin-plugin-registry": app.services.pluginRegMux,
-		"admin-ingest-mgmt":     app.services.ingestMux,
-		"admin-runtime-mgmt":    app.services.runtimeMux,
+		"admin-timeline-mgmt":    app.services.timelineMux,
+		"admin-replay-mgmt":      app.services.replayMux,
+		"admin-backfill-mgmt":    app.services.backfillMux,
+		"admin-dlq-mgmt":         app.services.dlqMux,
+		"admin-billing-mgmt":     app.services.billingMux,
+		"admin-native-plugins":   app.services.nativeHandler,
+		"admin-env-mgmt":         app.services.envMux,
+		"admin-cloud-providers":  app.services.cloudMux,
+		"admin-external-plugins": app.services.externalPluginMux,
+		"admin-plugin-registry":  app.services.pluginRegMux,
+		"admin-ingest-mgmt":      app.services.ingestMux,
+		"admin-runtime-mgmt":     app.services.runtimeMux,
 	}
 	for name, handler := range delegateServices {
 		if handler == nil {
@@ -1159,12 +1235,25 @@ func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.Try
 		}, buildErr
 	}
 
-	// Collect registered module/step/trigger type names from the candidate.
+	return inspectAndStopCandidateEngine(candidateEngine)
+}
+
+type inspectableCandidateEngine interface {
+	RegisteredModuleTypes() []string
+	RegisteredStepTypes() []string
+	RegisteredTriggerTypes() []string
+	Stop(context.Context) error
+}
+
+func inspectAndStopCandidateEngine(candidate inspectableCandidateEngine) (*module.TryActivateResult, error) {
 	result := &module.TryActivateResult{
 		Status:       "build_ok",
-		ModuleTypes:  candidateEngine.RegisteredModuleTypes(),
-		StepTypes:    candidateEngine.RegisteredStepTypes(),
-		TriggerTypes: candidateEngine.RegisteredTriggerTypes(),
+		ModuleTypes:  candidate.RegisteredModuleTypes(),
+		StepTypes:    candidate.RegisteredStepTypes(),
+		TriggerTypes: candidate.RegisteredTriggerTypes(),
+	}
+	if err := candidate.Stop(context.Background()); err != nil {
+		return result, fmt.Errorf("clean up inspected candidate engine: %w", err)
 	}
 	return result, nil
 }

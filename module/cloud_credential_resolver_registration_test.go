@@ -119,11 +119,67 @@ func TestExternalCredentialResolverReplacementIsAtomic(t *testing.T) {
 	assertNoResolverErrorContains(t, "multiple external credential resolvers")
 }
 
+func TestOwnedExternalCredentialResolverSelectsLatestAndRestoresPrevious(t *testing.T) {
+	prepare := func(accessKey string) *ExternalCredentialResolverRegistration {
+		t.Helper()
+		registration, err := PrepareOwnedExternalCredentialResolver(
+			context.Background(),
+			"plugin-owner:resolver-fixture",
+			&preparedCredentialResolverClient{accessKey: accessKey},
+		)
+		if err != nil {
+			t.Fatalf("PrepareOwnedExternalCredentialResolver(%q): %v", accessKey, err)
+		}
+		if err := registration.Activate(); err != nil {
+			t.Fatalf("Activate(%q): %v", accessKey, err)
+		}
+		t.Cleanup(registration.Close)
+		return registration
+	}
+
+	oldRegistration := prepare("old")
+	nonLatestRegistration := prepare("middle")
+	latestRegistration := prepare("latest")
+	assertPreparedCredentialResolverAccessKey(t, "latest")
+
+	nonLatestRegistration.Close()
+	assertPreparedCredentialResolverAccessKey(t, "latest")
+
+	latestRegistration.Close()
+	assertPreparedCredentialResolverAccessKey(t, "old")
+
+	oldRegistration.Close()
+	assertNoPreparedCredentialResolver(t)
+}
+
+func TestOwnedExternalCredentialResolverRejectsAmbiguousOwner(t *testing.T) {
+	for _, owner := range []string{"", " ", " owner", "owner ", "owner\x00other"} {
+		t.Run(owner, func(t *testing.T) {
+			registration, err := PrepareOwnedExternalCredentialResolver(
+				context.Background(),
+				owner,
+				&preparedCredentialResolverClient{accessKey: "unused"},
+			)
+			if err == nil || registration != nil {
+				t.Fatalf("PrepareOwnedExternalCredentialResolver(%q) = %+v, %v; want rejection", owner, registration, err)
+			}
+		})
+	}
+}
+
 func assertNoPreparedCredentialResolver(t *testing.T) {
 	t.Helper()
 	_, err := ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "install a plugin") {
 		t.Fatalf("expected no active external resolver, got %v", err)
+	}
+}
+
+func assertPreparedCredentialResolverAccessKey(t *testing.T, want string) {
+	t.Helper()
+	credentials, err := ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+	if err != nil || credentials.AccessKey != want {
+		t.Fatalf("resolved access key = %q, %v; want %q", credentials.AccessKey, err, want)
 	}
 }
 

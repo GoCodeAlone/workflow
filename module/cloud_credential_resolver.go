@@ -31,13 +31,18 @@ type contextCloudCredentialResolver interface {
 type credentialResolverRegistry struct {
 	sync.RWMutex
 	builtins map[string]map[string]CloudCredentialResolver
-	external map[string]map[string]map[uint64]CloudCredentialResolver
+	external map[string]map[string]map[uint64]externalCredentialResolverEntry
 	nextID   uint64
+}
+
+type externalCredentialResolverEntry struct {
+	owner    string
+	resolver CloudCredentialResolver
 }
 
 var credentialResolvers = credentialResolverRegistry{
 	builtins: make(map[string]map[string]CloudCredentialResolver),
-	external: make(map[string]map[string]map[uint64]CloudCredentialResolver),
+	external: make(map[string]map[string]map[uint64]externalCredentialResolverEntry),
 }
 
 var externalCredentialResolverTypes = map[string]map[string]struct{}{
@@ -76,6 +81,7 @@ func RegisterCredentialResolver(resolver CloudCredentialResolver) {
 type ExternalCredentialResolverRegistration struct {
 	pairs     []credentialResolverPair
 	resolvers map[credentialResolverPair]CloudCredentialResolver
+	owner     string
 	id        uint64
 	active    bool
 	closed    bool
@@ -84,6 +90,21 @@ type ExternalCredentialResolverRegistration struct {
 // PrepareExternalCredentialResolver discovers and validates every exact
 // provider/type pair advertised by client without changing the live registry.
 func PrepareExternalCredentialResolver(ctx context.Context, client pb.CredentialResolverClient) (*ExternalCredentialResolverRegistration, error) {
+	return prepareExternalCredentialResolver(ctx, "", client)
+}
+
+// PrepareOwnedExternalCredentialResolver discovers and validates a resolver
+// registration associated with a stable process-wide plugin identity. Active
+// registrations with the same non-empty owner are treated as generations of
+// one logical plugin; the latest generation is selected deterministically.
+func PrepareOwnedExternalCredentialResolver(ctx context.Context, owner string, client pb.CredentialResolverClient) (*ExternalCredentialResolverRegistration, error) {
+	if strings.TrimSpace(owner) == "" || owner != strings.TrimSpace(owner) || strings.ContainsRune(owner, '\x00') {
+		return nil, fmt.Errorf("register external credential resolver: owner is invalid")
+	}
+	return prepareExternalCredentialResolver(ctx, owner, client)
+}
+
+func prepareExternalCredentialResolver(ctx context.Context, owner string, client pb.CredentialResolverClient) (*ExternalCredentialResolverRegistration, error) {
 	if client == nil {
 		return nil, fmt.Errorf("register external credential resolver: client is nil")
 	}
@@ -107,6 +128,7 @@ func PrepareExternalCredentialResolver(ctx context.Context, client pb.Credential
 	registration := &ExternalCredentialResolverRegistration{
 		pairs:     pairs,
 		resolvers: make(map[credentialResolverPair]CloudCredentialResolver, len(pairs)),
+		owner:     owner,
 	}
 	for _, pair := range pairs {
 		registration.resolvers[pair] = &externalCloudCredentialResolver{
@@ -174,12 +196,15 @@ func activateExternalCredentialResolverRegistrationLocked(registration *External
 	registration.id = credentialResolvers.nextID
 	for _, pair := range registration.pairs {
 		if credentialResolvers.external[pair.provider] == nil {
-			credentialResolvers.external[pair.provider] = make(map[string]map[uint64]CloudCredentialResolver)
+			credentialResolvers.external[pair.provider] = make(map[string]map[uint64]externalCredentialResolverEntry)
 		}
 		if credentialResolvers.external[pair.provider][pair.credentialType] == nil {
-			credentialResolvers.external[pair.provider][pair.credentialType] = make(map[uint64]CloudCredentialResolver)
+			credentialResolvers.external[pair.provider][pair.credentialType] = make(map[uint64]externalCredentialResolverEntry)
 		}
-		credentialResolvers.external[pair.provider][pair.credentialType][registration.id] = registration.resolvers[pair]
+		credentialResolvers.external[pair.provider][pair.credentialType][registration.id] = externalCredentialResolverEntry{
+			owner:    registration.owner,
+			resolver: registration.resolvers[pair],
+		}
 	}
 	registration.active = true
 	return nil
@@ -276,11 +301,30 @@ func validateExternalCredentialResolverDeclarations(declarations []*pb.Credentia
 func selectCredentialResolver(provider, credentialType string, externalOnly bool) (CloudCredentialResolver, error) {
 	credentialResolvers.RLock()
 	external := credentialResolvers.external[provider][credentialType]
-	var externalResolver CloudCredentialResolver
-	for _, resolver := range external {
-		externalResolver = resolver
+	type ownerKey struct {
+		name        string
+		anonymousID uint64
 	}
-	externalCount := len(external)
+	type ownedResolver struct {
+		id       uint64
+		resolver CloudCredentialResolver
+	}
+	selectedByOwner := make(map[ownerKey]ownedResolver, len(external))
+	for id, entry := range external {
+		key := ownerKey{name: entry.owner}
+		if entry.owner == "" {
+			key.anonymousID = id
+		}
+		selected, exists := selectedByOwner[key]
+		if !exists || id > selected.id {
+			selectedByOwner[key] = ownedResolver{id: id, resolver: entry.resolver}
+		}
+	}
+	var externalResolver CloudCredentialResolver
+	for _, selected := range selectedByOwner {
+		externalResolver = selected.resolver
+	}
+	externalCount := len(selectedByOwner)
 	var builtin CloudCredentialResolver
 	if byType := credentialResolvers.builtins[provider]; byType != nil {
 		builtin = byType[credentialType]

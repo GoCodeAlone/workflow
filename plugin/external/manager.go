@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -119,7 +120,7 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		discardPluginLaunch(launch)
 		return nil, err
 	}
-	resolverRegistration, err := prepareLaunchCredentialResolver(name, launch)
+	resolverRegistration, err := m.prepareLaunchCredentialResolver(name, launch)
 	if err != nil {
 		discardPluginLaunch(launch)
 		return nil, err
@@ -320,7 +321,7 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 			discardPluginLaunch(launch)
 			return nil, err
 		}
-		resolverRegistration, err := prepareLaunchCredentialResolver(name, launch)
+		resolverRegistration, err := m.prepareLaunchCredentialResolver(name, launch)
 		if err != nil {
 			discardPluginLaunch(launch)
 			return nil, err
@@ -352,7 +353,7 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
 	}
-	resolverRegistration, err := prepareLaunchCredentialResolver(name, launch)
+	resolverRegistration, err := m.prepareLaunchCredentialResolver(name, launch)
 	if err != nil {
 		discardPluginLaunch(launch)
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
@@ -399,18 +400,34 @@ func discardPluginLaunch(launch *pluginLaunch) {
 	}
 }
 
-func prepareLaunchCredentialResolver(name string, launch *pluginLaunch) (*module.ExternalCredentialResolverRegistration, error) {
+func (m *ExternalPluginManager) prepareLaunchCredentialResolver(name string, launch *pluginLaunch) (*module.ExternalCredentialResolverRegistration, error) {
 	if launch == nil || launch.adapter == nil || !contractRegistryAdvertisesCredentialResolver(launch.adapter.ContractRegistry()) {
 		return nil, nil
 	}
 	if launch.adapter.client == nil {
 		return nil, fmt.Errorf("plugin %q advertises CredentialResolver without a shared plugin client", name)
 	}
-	registration, err := module.PrepareExternalCredentialResolver(context.Background(), launch.adapter.client.CredentialResolverClient())
+	owner, err := m.credentialResolverOwner(name)
+	if err != nil {
+		return nil, fmt.Errorf("plugin %q credential resolver owner failed: %w", name, err)
+	}
+	registration, err := module.PrepareOwnedExternalCredentialResolver(context.Background(), owner, launch.adapter.client.CredentialResolverClient())
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q credential resolver registration failed: %w", name, err)
 	}
 	return registration, nil
+}
+
+func (m *ExternalPluginManager) credentialResolverOwner(name string) (string, error) {
+	pluginsDir, err := filepath.Abs(m.pluginsDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve plugins directory: %w", err)
+	}
+	pluginsDir = filepath.Clean(pluginsDir)
+	if evaluated, evalErr := filepath.EvalSymlinks(pluginsDir); evalErr == nil {
+		pluginsDir = evaluated
+	}
+	return "external-plugin:" + base64.RawURLEncoding.EncodeToString([]byte(pluginsDir)) + ":" + base64.RawURLEncoding.EncodeToString([]byte(name)), nil
 }
 
 func contractRegistryAdvertisesCredentialResolver(registry *pb.ContractRegistry) bool {
