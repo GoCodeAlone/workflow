@@ -175,7 +175,7 @@ func prepareExternalCredentialResolver(ctx context.Context, owner string, client
 	}
 	response, err := client.DescribeResolvers(ctx, &pb.CredentialResolverDeclarationsRequest{})
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := externalCredentialResolverContextError(ctx, err); ctxErr != nil {
 			return nil, ctxErr
 		}
 		if status.Code(err) == codes.Unimplemented {
@@ -566,6 +566,17 @@ func selectCredentialResolverFromRegistrations(registrations []*ExternalCredenti
 	latestByOwner := make(map[string]*ExternalCredentialResolverRegistration)
 	var anonymous []*ExternalCredentialResolverRegistration
 	for _, registration := range registrations {
+		if registration == nil {
+			continue
+		}
+		// A manager snapshot can race an owned registration transition: the
+		// snapshot contains the old handle, then reload atomically closes it and
+		// publishes its same-owner successor before selection takes the registry
+		// lock. Follow only that owner's active lineage. Open prepared candidates
+		// remain application-scoped and never import another manager's live owner.
+		if registration.closed && registration.owner != "" {
+			registration = latestActiveExternalCredentialResolverOwnerLocked(registration.owner)
+		}
 		if registration == nil || registration.closed {
 			continue
 		}
@@ -616,6 +627,20 @@ func selectCredentialResolverFromRegistrations(registrations []*ExternalCredenti
 	return nil, fmt.Errorf("no external credential resolver matches provider %q and credential type %q; install a plugin that declares this credentialResolvers capability", provider, credentialType)
 }
 
+func latestActiveExternalCredentialResolverOwnerLocked(owner string) *ExternalCredentialResolverRegistration {
+	var (
+		latestID           uint64
+		latestRegistration *ExternalCredentialResolverRegistration
+	)
+	for id, registration := range credentialResolvers.owners[owner] {
+		if id > latestID && registration.active && !registration.closed {
+			latestID = id
+			latestRegistration = registration
+		}
+	}
+	return latestRegistration
+}
+
 type externalCloudCredentialResolver struct {
 	provider       string
 	credentialType string
@@ -655,7 +680,7 @@ func (r *externalCloudCredentialResolver) ResolveContext(ctx context.Context, ac
 		ConfigJson:     configJSON,
 	})
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := externalCredentialResolverContextError(ctx, err); ctxErr != nil {
 			return ctxErr
 		}
 		return fmt.Errorf("external credential resolver failed (transport_%s)", status.Code(err).String())
@@ -678,6 +703,22 @@ func (r *externalCloudCredentialResolver) ResolveContext(ctx context.Context, ac
 		account.creds.Region = account.region
 	}
 	return nil
+}
+
+func externalCredentialResolverContextError(ctx context.Context, transportErr error) error {
+	if ctx != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+	}
+	switch status.Code(transportErr) {
+	case codes.Canceled:
+		return context.Canceled
+	case codes.DeadlineExceeded:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
 }
 
 var credentialResolutionCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)

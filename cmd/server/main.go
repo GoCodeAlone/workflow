@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -99,6 +100,8 @@ type externalPluginEngineLoader interface {
 const (
 	externalPluginManagerLifecycleModuleName = "internal-external-plugin-manager-lifecycle"
 	externalPluginManagerServiceName         = "internal-external-plugin-manager"
+	engineCleanupTimeout                     = 30 * time.Second
+	engineOperationTimeout                   = 2 * time.Minute
 )
 
 type externalPluginManagerLifecycleModule struct {
@@ -191,14 +194,14 @@ func loadExternalPluginIntoEngine(manager externalPluginLifecycleManager, engine
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
 func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
-	return buildEngineWithResolverMode(cfg, logger, false)
+	return buildEngineWithResolverMode(context.Background(), cfg, logger, false)
 }
 
-func buildCandidateEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
-	return buildEngineWithResolverMode(cfg, logger, true)
+func buildCandidateEngineContext(ctx context.Context, cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+	return buildEngineWithResolverMode(ctx, cfg, logger, true)
 }
 
-func buildEngineWithResolverMode(cfg *config.WorkflowConfig, logger *slog.Logger, stageCredentialResolvers bool) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+func buildEngineWithResolverMode(ctx context.Context, cfg *config.WorkflowConfig, logger *slog.Logger, stageCredentialResolvers bool) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
@@ -277,7 +280,7 @@ func buildEngineWithResolverMode(cfg *config.WorkflowConfig, logger *slog.Logger
 	engine.SetPluginInstaller(installer)
 
 	// Build engine from config
-	if err := buildEngineFromConfig(engine, cfg, extMgr.Shutdown); err != nil {
+	if err := buildEngineFromConfig(ctx, engine, cfg, extMgr.Shutdown); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -309,8 +312,39 @@ type engineStopLifecycle interface {
 	Stop(context.Context) error
 }
 
-func cleanupEngineAfterFailure(engine engineStopLifecycle, cause error, cleanupLabel string) error {
-	if stopErr := engine.Stop(context.Background()); stopErr != nil {
+func contextWithFiniteDeadline(parent context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if deadline, ok := parent.Deadline(); ok && time.Until(deadline) <= maximum {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, maximum)
+}
+
+func detachedCleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	deadline, hasDeadline := parent.Deadline()
+	detached := context.WithoutCancel(parent)
+	if hasDeadline && time.Until(deadline) > 0 && time.Until(deadline) <= engineCleanupTimeout {
+		return context.WithDeadline(detached, deadline)
+	}
+	return context.WithTimeout(detached, engineCleanupTimeout)
+}
+
+func detachedOperationContext(parent context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), maximum)
+}
+
+func cleanupEngineAfterFailure(ctx context.Context, engine engineStopLifecycle, cause error, cleanupLabel string) error {
+	cleanupCtx, cancel := detachedCleanupContext(ctx)
+	defer cancel()
+	if stopErr := engine.Stop(cleanupCtx); stopErr != nil {
 		return errors.Join(cause, fmt.Errorf("%s: %w", cleanupLabel, stopErr))
 	}
 	return cause
@@ -318,15 +352,15 @@ func cleanupEngineAfterFailure(engine engineStopLifecycle, cause error, cleanupL
 
 func startEngineWithCleanup(ctx context.Context, engine engineStartStopLifecycle, failureLabel string) error {
 	if err := engine.Start(ctx); err != nil {
-		return cleanupEngineAfterFailure(engine, fmt.Errorf("%s: %w", failureLabel, err), "clean up failed engine start")
+		return cleanupEngineAfterFailure(ctx, engine, fmt.Errorf("%s: %w", failureLabel, err), "clean up failed engine start")
 	}
 	return nil
 }
 
-func runPostStartHooksWithCleanup(engine engineStopLifecycle, hooks []func() error) error {
+func runPostStartHooksWithCleanup(ctx context.Context, engine engineStopLifecycle, hooks []func() error) error {
 	for _, hook := range hooks {
 		if err := hook(); err != nil {
-			return cleanupEngineAfterFailure(engine, fmt.Errorf("post-start hook failed: %w", err), "clean up failed post-start hook")
+			return cleanupEngineAfterFailure(ctx, engine, fmt.Errorf("post-start hook failed: %w", err), "clean up failed post-start hook")
 		}
 	}
 	return nil
@@ -349,10 +383,10 @@ type candidateCommitError struct {
 func (e *candidateCommitError) Error() string { return e.err.Error() }
 func (e *candidateCommitError) Unwrap() error { return e.err }
 
-func cleanupCandidateCommitFailure(phase candidateCommitPhase, candidate engineStopLifecycle, cause error, cleanupLabel string) error {
+func cleanupCandidateCommitFailure(ctx context.Context, phase candidateCommitPhase, candidate engineStopLifecycle, cause error, cleanupLabel string) error {
 	return &candidateCommitError{
 		phase: phase,
-		err:   cleanupEngineAfterFailure(candidate, cause, cleanupLabel),
+		err:   cleanupEngineAfterFailure(ctx, candidate, cause, cleanupLabel),
 	}
 }
 
@@ -385,9 +419,12 @@ func commitCandidateEngine(
 	afterStart func() error,
 	activateCredentialResolvers func() error,
 ) error {
+	lifecycleCtx, cancel := contextWithFiniteDeadline(ctx, engineOperationTimeout)
+	defer cancel()
 	if oldEngine != nil {
-		if err := oldEngine.Stop(ctx); err != nil {
+		if err := oldEngine.Stop(lifecycleCtx); err != nil {
 			return cleanupCandidateCommitFailure(
+				lifecycleCtx,
 				candidateCommitPhaseRetire,
 				candidate,
 				fmt.Errorf("retire current engine before candidate acceptance: %w", err),
@@ -395,8 +432,9 @@ func commitCandidateEngine(
 			)
 		}
 	}
-	if err := candidate.Start(ctx); err != nil {
+	if err := candidate.Start(lifecycleCtx); err != nil {
 		return cleanupCandidateCommitFailure(
+			lifecycleCtx,
 			candidateCommitPhaseStart,
 			candidate,
 			fmt.Errorf("candidate engine start failed: %w", err),
@@ -406,6 +444,7 @@ func commitCandidateEngine(
 	if afterStart != nil {
 		if err := afterStart(); err != nil {
 			return cleanupCandidateCommitFailure(
+				lifecycleCtx,
 				candidateCommitPhasePostStart,
 				candidate,
 				fmt.Errorf("candidate post-start acceptance failed: %w", err),
@@ -416,6 +455,7 @@ func commitCandidateEngine(
 	if activateCredentialResolvers != nil {
 		if err := activateCredentialResolvers(); err != nil {
 			return cleanupCandidateCommitFailure(
+				lifecycleCtx,
 				candidateCommitPhaseActivate,
 				candidate,
 				fmt.Errorf("candidate credential resolver activation failed: %w", err),
@@ -426,10 +466,12 @@ func commitCandidateEngine(
 	return nil
 }
 
-func buildEngineFromConfig(engine engineConfigBuildLifecycle, cfg *config.WorkflowConfig, cleanup func()) error {
+func buildEngineFromConfig(ctx context.Context, engine engineConfigBuildLifecycle, cfg *config.WorkflowConfig, cleanup func()) error {
 	if err := engine.BuildFromConfig(cfg); err != nil {
 		buildErr := fmt.Errorf("failed to build workflow: %w", err)
-		stopErr := engine.Stop(context.Background())
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
+		stopErr := engine.Stop(cleanupCtx)
+		cancel()
 		if cleanup != nil {
 			cleanup()
 		}
@@ -583,6 +625,7 @@ type serviceComponents struct {
 // (stores, handlers, muxes) are stored here so they survive engine reloads.
 // Only the engine itself (modules, handlers, triggers) is recreated on reload.
 type serverApp struct {
+	reloadMu       sync.Mutex
 	engine         *workflow.StdEngine
 	engineManager  *workflow.WorkflowEngineManager
 	pgStore        *evstore.PGStore // multi-workflow mode PG connection
@@ -594,6 +637,12 @@ type serverApp struct {
 	mgmt           mgmtComponents
 	services       serviceComponents
 	currentConfig  *config.WorkflowConfig // last loaded config, used by dynamic config watcher
+}
+
+func (app *serverApp) withReloadTransaction(operation func() error) error {
+	app.reloadMu.Lock()
+	defer app.reloadMu.Unlock()
+	return operation()
 }
 
 // ReconfigureModules delegates to the current engine, ensuring the reloader
@@ -1330,18 +1379,26 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 // Stores, handlers, and database connections stored on serverApp survive
 // every reload cycle.
 func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
+	return app.withReloadTransaction(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), engineOperationTimeout)
+		defer cancel()
+		return app.reloadEngineContext(ctx, newCfg)
+	})
+}
+
+func (app *serverApp) reloadEngineContext(ctx context.Context, newCfg *config.WorkflowConfig) error {
 	logger := app.logger
 
 	// Stage 1: Build candidate. Current engine is still live; if this fails
 	// the old engine continues serving without interruption.
-	newEngine, _, _, buildErr := buildCandidateEngine(newCfg, logger)
+	newEngine, _, _, buildErr := buildCandidateEngineContext(ctx, newCfg, logger)
 	if buildErr != nil {
 		return fmt.Errorf("failed to build candidate engine (current engine unchanged): %w", buildErr)
 	}
 	oldEngine := app.engine
 	oldConfig := app.currentConfig
 	candidateFailure := commitCandidateEngine(
-		context.Background(),
+		ctx,
 		oldEngine,
 		newEngine,
 		func() error {
@@ -1363,7 +1420,9 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	}
 
 	logger.Error("Candidate engine commit failed; attempting rollback to previous config", "error", candidateFailure)
-	rollbackEngine, _, _, rollbackBuildErr := buildCandidateEngine(oldConfig, logger)
+	rollbackCtx, rollbackCancel := detachedOperationContext(ctx, engineOperationTimeout)
+	defer rollbackCancel()
+	rollbackEngine, _, _, rollbackBuildErr := buildCandidateEngineContext(rollbackCtx, oldConfig, logger)
 	if rollbackBuildErr != nil {
 		app.engine = oldEngine
 		app.currentConfig = oldConfig
@@ -1371,7 +1430,7 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 		return errors.Join(candidateFailure, fmt.Errorf("rollback build failed — process is degraded: %w", rollbackBuildErr))
 	}
 	rollbackFailure := commitCandidateEngine(
-		context.Background(),
+		rollbackCtx,
 		nil,
 		rollbackEngine,
 		func() error {
@@ -1397,7 +1456,9 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 // that returns a structured result describing what the candidate would expose.
 // If the build fails, the current engine is completely unaffected.
 func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.TryActivateResult, error) {
-	candidateEngine, _, _, buildErr := buildCandidateEngine(cfg, app.logger)
+	ctx, cancel := context.WithTimeout(context.Background(), engineOperationTimeout)
+	defer cancel()
+	candidateEngine, _, _, buildErr := buildCandidateEngineContext(ctx, cfg, app.logger)
 	if buildErr != nil {
 		return &module.TryActivateResult{
 			Status: "build_failed",
@@ -1405,7 +1466,7 @@ func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.Try
 		}, buildErr
 	}
 
-	return inspectAndStopCandidateEngine(candidateEngine)
+	return inspectAndStopCandidateEngine(ctx, candidateEngine)
 }
 
 type inspectableCandidateEngine interface {
@@ -1415,14 +1476,16 @@ type inspectableCandidateEngine interface {
 	Stop(context.Context) error
 }
 
-func inspectAndStopCandidateEngine(candidate inspectableCandidateEngine) (*module.TryActivateResult, error) {
+func inspectAndStopCandidateEngine(ctx context.Context, candidate inspectableCandidateEngine) (*module.TryActivateResult, error) {
 	result := &module.TryActivateResult{
 		Status:       "build_ok",
 		ModuleTypes:  candidate.RegisteredModuleTypes(),
 		StepTypes:    candidate.RegisteredStepTypes(),
 		TriggerTypes: candidate.RegisteredTriggerTypes(),
 	}
-	if err := candidate.Stop(context.Background()); err != nil {
+	cleanupCtx, cancel := detachedCleanupContext(ctx)
+	defer cancel()
+	if err := candidate.Stop(cleanupCtx); err != nil {
 		return result, fmt.Errorf("clean up inspected candidate engine: %w", err)
 	}
 	return result, nil
@@ -1545,7 +1608,7 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 
 	// Run post-start hooks (e.g., wiring handlers that depend on started modules)
 	if app.engine != nil {
-		if err := runPostStartHooksWithCleanup(app.engine, app.postStartFuncs); err != nil {
+		if err := runPostStartHooksWithCleanup(ctx, app.engine, app.postStartFuncs); err != nil {
 			return err
 		}
 	}
@@ -1627,18 +1690,20 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		app.logger.Info("Stopped observability reporter")
 	}
 
+	shutdownCtx, shutdownCancel := detachedCleanupContext(ctx)
+	defer shutdownCancel()
 	if app.services.runtimeManager != nil {
-		if err := app.services.runtimeManager.StopAll(context.Background()); err != nil {
+		if err := app.services.runtimeManager.StopAll(shutdownCtx); err != nil {
 			app.logger.Error("Runtime manager shutdown error", "error", err)
 		}
 	}
 	if app.engineManager != nil {
-		if err := app.engineManager.StopAll(context.Background()); err != nil {
+		if err := app.engineManager.StopAll(shutdownCtx); err != nil {
 			app.logger.Error("Engine manager shutdown error", "error", err)
 		}
 	}
 	if app.engine != nil {
-		if err := app.engine.Stop(context.Background()); err != nil {
+		if err := app.engine.Stop(shutdownCtx); err != nil {
 			app.logger.Error("Engine shutdown error", "error", err)
 		}
 	}
@@ -1984,7 +2049,7 @@ func runMultiWorkflow(logger *slog.Logger) error {
 		}
 	}
 	if app.engine != nil {
-		if err := runPostStartHooksWithCleanup(app.engine, app.postStartFuncs); err != nil {
+		if err := runPostStartHooksWithCleanup(ctx, app.engine, app.postStartFuncs); err != nil {
 			return err
 		}
 	}

@@ -22,15 +22,28 @@ import (
 
 type managerCredentialResolverServer struct {
 	pb.UnimplementedCredentialResolverServer
-	declarations   []*pb.CredentialResolverDeclaration
-	accessKey      string
-	calls          atomic.Int32
-	resolveStarted chan struct{}
-	resolveRelease <-chan struct{}
-	startOnce      sync.Once
+	declarations    []*pb.CredentialResolverDeclaration
+	accessKey       string
+	calls           atomic.Int32
+	resolveStarted  chan struct{}
+	resolveRelease  <-chan struct{}
+	startOnce       sync.Once
+	describeStarted chan struct{}
+	describeRelease <-chan struct{}
+	describeOnce    sync.Once
 }
 
-func (s *managerCredentialResolverServer) DescribeResolvers(context.Context, *pb.CredentialResolverDeclarationsRequest) (*pb.CredentialResolverDeclarationsResponse, error) {
+func (s *managerCredentialResolverServer) DescribeResolvers(ctx context.Context, _ *pb.CredentialResolverDeclarationsRequest) (*pb.CredentialResolverDeclarationsResponse, error) {
+	if s.describeStarted != nil {
+		s.describeOnce.Do(func() { close(s.describeStarted) })
+	}
+	if s.describeRelease != nil {
+		select {
+		case <-s.describeRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return &pb.CredentialResolverDeclarationsResponse{Resolvers: s.declarations}, nil
 }
 
@@ -672,6 +685,82 @@ func TestExternalPluginManagerUnloadAndShutdownContextDoNotHangOnLeakedLease(t *
 	}
 }
 
+func TestExternalPluginManagerShutdownRejectsQueuedLoadWithoutOrphaningResolver(t *testing.T) {
+	resolveStarted := make(chan struct{})
+	resolveRelease := make(chan struct{})
+	server := &managerCredentialResolverServer{
+		declarations:   []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:      "retiring",
+		resolveStarted: resolveStarted,
+		resolveRelease: resolveRelease,
+	}
+	manager := NewExternalPluginManager(t.TempDir(), nil)
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, server, true)}, nil
+	}
+	if _, err := manager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+	resolveDone := make(chan error, 1)
+	go func() {
+		_, err := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+		resolveDone <- err
+	}()
+	<-resolveStarted
+
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- manager.ShutdownContext(context.Background()) }()
+	deadline := time.Now().Add(time.Second)
+	for manager.IsLoaded("resolver-fixture") {
+		if time.Now().After(deadline) {
+			close(resolveRelease)
+			t.Fatal("shutdown did not retire plugin before draining")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	var queuedStartCalls atomic.Int32
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		queuedStartCalls.Add(1)
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: &ExternalPluginAdapter{}}, nil
+	}
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := manager.LoadPluginContext(context.Background(), "orphan")
+		loadDone <- err
+	}()
+	select {
+	case err := <-loadDone:
+		close(resolveRelease)
+		t.Fatalf("queued load escaped shutdown operation lock: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if calls := queuedStartCalls.Load(); calls != 0 {
+		close(resolveRelease)
+		t.Fatalf("queued load started %d candidates during shutdown", calls)
+	}
+
+	close(resolveRelease)
+	if err := <-resolveDone; err != nil {
+		t.Fatalf("retired resolution after release: %v", err)
+	}
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("ShutdownContext: %v", err)
+	}
+	if err := <-loadDone; err == nil || !strings.Contains(err.Error(), "shut down") {
+		t.Fatalf("queued load error = %v, want terminal shutdown error", err)
+	}
+	if calls := queuedStartCalls.Load(); calls != 0 {
+		t.Fatalf("queued load started %d candidates after shutdown", calls)
+	}
+	if manager.IsLoaded("orphan") || len(manager.CredentialResolverRegistrations()) != 0 {
+		t.Fatal("queued load published orphaned plugin or resolver state")
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "builtin-access" {
+		t.Fatalf("shutdown retained stale resolver: %q, %v", accessKey, err)
+	}
+}
+
 func TestPluginHandlerUnloadUsesRequestContextForResolverDrain(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -710,5 +799,78 @@ func TestPluginHandlerUnloadUsesRequestContextForResolverDrain(t *testing.T) {
 	close(release)
 	if err := <-resolveDone; err != nil {
 		t.Fatalf("blocked resolution after release: %v", err)
+	}
+}
+
+func TestExternalPluginManagerLoadContextCancelsResolverDiscoveryAndReleasesOperation(t *testing.T) {
+	describeStarted := make(chan struct{})
+	blockingServer := &managerCredentialResolverServer{
+		declarations:    []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		describeStarted: describeStarted,
+		describeRelease: make(chan struct{}),
+	}
+	manager := NewExternalPluginManager(t.TempDir(), nil)
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, blockingServer, true)}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	loadDone := make(chan error, 1)
+	go func() {
+		_, err := manager.LoadPluginContext(ctx, "blocked-fixture")
+		loadDone <- err
+	}()
+	<-describeStarted
+	if err := <-loadDone; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LoadPluginContext error = %v, want deadline exceeded", err)
+	}
+	if manager.IsLoaded("blocked-fixture") {
+		t.Fatal("canceled resolver discovery left plugin loaded")
+	}
+
+	nextServer := &managerCredentialResolverServer{}
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, nextServer, false)}, nil
+	}
+	if _, err := manager.LoadPlugin("next-fixture"); err != nil {
+		t.Fatalf("next LoadPlugin after cancellation: %v", err)
+	}
+	if err := manager.UnloadPlugin("next-fixture"); err != nil {
+		t.Fatalf("UnloadPlugin next fixture: %v", err)
+	}
+}
+
+func TestPluginHandlerLoadUsesRequestContextForResolverDiscovery(t *testing.T) {
+	describeStarted := make(chan struct{})
+	server := &managerCredentialResolverServer{
+		declarations:    []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		describeStarted: describeStarted,
+		describeRelease: make(chan struct{}),
+	}
+	manager := NewExternalPluginManager(t.TempDir(), nil)
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, server, true)}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	request := httptest.NewRequest("POST", "/api/v1/plugins/external/blocked-fixture/load", nil).WithContext(ctx)
+	request.SetPathValue("name", "blocked-fixture")
+	response := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		NewPluginHandler(manager).handleLoad(response, request)
+		close(done)
+	}()
+	<-describeStarted
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("load handler ignored request cancellation")
+	}
+	if response.Code != 500 {
+		t.Fatalf("load response status = %d, want 500 deadline response", response.Code)
+	}
+	if manager.IsLoaded("blocked-fixture") {
+		t.Fatal("canceled load request left plugin loaded")
 	}
 }

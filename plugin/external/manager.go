@@ -27,6 +27,7 @@ type ExternalPluginManager struct {
 	logger     *log.Logger
 
 	opsMu   sync.Mutex
+	closed  bool
 	mu      sync.RWMutex
 	clients map[string]*goplugin.Client
 	// credentialResolverRegistrations tracks optional resolver registrations owned
@@ -47,6 +48,10 @@ type pluginLaunch struct {
 
 const externalPluginDefaultDrainTimeout = 30 * time.Second
 
+// ErrExternalPluginManagerClosed is returned when a lifecycle mutation is
+// attempted after the manager has begun terminal shutdown.
+var ErrExternalPluginManagerClosed = errors.New("external plugin manager is shut down")
+
 // NewExternalPluginManager creates a new manager that scans the given directory for plugins.
 func NewExternalPluginManager(pluginsDir string, logger *log.Logger) *ExternalPluginManager {
 	if logger == nil {
@@ -64,6 +69,11 @@ func NewExternalPluginManager(pluginsDir string, logger *log.Logger) *ExternalPl
 // SetCallbackServer configures the host callback server used by plugins that
 // expose triggers or host callback features.
 func (m *ExternalPluginManager) SetCallbackServer(server *CallbackServer) {
+	m.opsMu.Lock()
+	defer m.opsMu.Unlock()
+	if m.closed {
+		return
+	}
 	m.mu.Lock()
 	m.callbackServer = server
 	m.mu.Unlock()
@@ -108,8 +118,29 @@ func (m *ExternalPluginManager) DiscoverPlugins() ([]string, error) {
 // creates an ExternalPluginAdapter. The plugin must have been previously
 // discovered via DiscoverPlugins.
 func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), externalPluginDefaultDrainTimeout)
+	defer cancel()
+	return m.LoadPluginContext(ctx, name)
+}
+
+// LoadPluginContext loads a plugin within ctx. Resolver discovery receives the
+// same context; cancellation discards the candidate without publishing manager
+// or resolver state.
+func (m *ExternalPluginManager) LoadPluginContext(ctx context.Context, name string) (*ExternalPluginAdapter, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m.opsMu.Lock()
 	defer m.opsMu.Unlock()
+	if err := m.requireOpenLocked("load plugin"); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	m.mu.RLock()
 	if _, exists := m.clients[name]; exists {
@@ -126,8 +157,17 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		discardPluginLaunch(launch)
 		return nil, err
 	}
-	resolverRegistration, err := m.prepareLaunchCredentialResolver(context.Background(), name, launch)
+	if err := ctx.Err(); err != nil {
+		discardPluginLaunch(launch)
+		return nil, err
+	}
+	resolverRegistration, err := m.prepareLaunchCredentialResolver(ctx, name, launch)
 	if err != nil {
+		discardPluginLaunch(launch)
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		resolverRegistration.Close()
 		discardPluginLaunch(launch)
 		return nil, err
 	}
@@ -298,6 +338,9 @@ func (m *ExternalPluginManager) UnloadPluginContext(ctx context.Context, name st
 	}
 	m.opsMu.Lock()
 	defer m.opsMu.Unlock()
+	if err := m.requireOpenLocked("unload plugin"); err != nil {
+		return err
+	}
 
 	m.mu.Lock()
 	client, exists := m.clients[name]
@@ -346,6 +389,12 @@ func (m *ExternalPluginManager) ReloadPluginContext(ctx context.Context, name st
 	}
 	m.opsMu.Lock()
 	defer m.opsMu.Unlock()
+	if err := m.requireOpenLocked("reload plugin"); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	m.mu.RLock()
 	oldClient, wasLoaded := m.clients[name]
@@ -448,6 +497,9 @@ func (m *ExternalPluginManager) ReloadPluginContext(ctx context.Context, name st
 func (m *ExternalPluginManager) StageCredentialResolvers() error {
 	m.opsMu.Lock()
 	defer m.opsMu.Unlock()
+	if err := m.requireOpenLocked("stage credential resolvers"); err != nil {
+		return err
+	}
 	m.mu.RLock()
 	loaded := len(m.clients)
 	m.mu.RUnlock()
@@ -463,6 +515,9 @@ func (m *ExternalPluginManager) StageCredentialResolvers() error {
 func (m *ExternalPluginManager) ActivateCredentialResolvers() error {
 	m.opsMu.Lock()
 	defer m.opsMu.Unlock()
+	if err := m.requireOpenLocked("activate credential resolvers"); err != nil {
+		return err
+	}
 	if m.credentialResolversActive {
 		return nil
 	}
@@ -488,6 +543,13 @@ func (m *ExternalPluginManager) credentialResolverRegistrationsSnapshot() []*mod
 		registrations = append(registrations, registration)
 	}
 	return registrations
+}
+
+func (m *ExternalPluginManager) requireOpenLocked(operation string) error {
+	if m.closed {
+		return fmt.Errorf("%s: %w", operation, ErrExternalPluginManagerClosed)
+	}
+	return nil
 }
 
 func validatePluginLaunch(name string, launch *pluginLaunch) error {
@@ -593,7 +655,10 @@ func (m *ExternalPluginManager) ShutdownContext(ctx context.Context) error {
 	}
 	m.opsMu.Lock()
 	defer m.opsMu.Unlock()
-
+	if m.closed {
+		return nil
+	}
+	m.closed = true
 	m.mu.Lock()
 	clients := m.clients
 	m.clients = make(map[string]*goplugin.Client)

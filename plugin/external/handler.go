@@ -92,7 +92,7 @@ func (h *PluginHandler) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.manager.LoadPlugin(name)
+	_, err := h.manager.LoadPluginContext(r.Context(), name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

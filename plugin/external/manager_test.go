@@ -2,6 +2,7 @@ package external
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"os"
@@ -12,6 +13,68 @@ import (
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 )
+
+func TestExternalPluginManagerRejectsLifecycleMutationsAfterShutdown(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ExternalPluginManager) error
+	}{
+		{
+			name: "load",
+			mutate: func(manager *ExternalPluginManager) error {
+				_, err := manager.LoadPluginContext(context.Background(), "orphan")
+				return err
+			},
+		},
+		{
+			name: "reload",
+			mutate: func(manager *ExternalPluginManager) error {
+				_, err := manager.ReloadPluginContext(context.Background(), "orphan")
+				return err
+			},
+		},
+		{name: "unload", mutate: func(manager *ExternalPluginManager) error {
+			return manager.UnloadPluginContext(context.Background(), "orphan")
+		}},
+		{name: "stage resolvers", mutate: func(manager *ExternalPluginManager) error {
+			return manager.StageCredentialResolvers()
+		}},
+		{name: "activate resolvers", mutate: func(manager *ExternalPluginManager) error {
+			return manager.ActivateCredentialResolvers()
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := NewExternalPluginManager(t.TempDir(), log.Default())
+			if err := manager.ShutdownContext(context.Background()); err != nil {
+				t.Fatalf("initial ShutdownContext: %v", err)
+			}
+			startCalls := 0
+			manager.startPlugin = func(string) (*pluginLaunch, error) {
+				startCalls++
+				return &pluginLaunch{client: &goplugin.Client{}, adapter: &ExternalPluginAdapter{}}, nil
+			}
+
+			err := test.mutate(manager)
+			if !errors.Is(err, ErrExternalPluginManagerClosed) {
+				t.Fatalf("mutation after shutdown error = %v, want terminal shutdown error", err)
+			}
+			if startCalls != 0 {
+				t.Fatalf("mutation after shutdown started %d plugin candidates", startCalls)
+			}
+			if manager.IsLoaded("orphan") || len(manager.LoadedPlugins()) != 0 {
+				t.Fatal("mutation after shutdown published plugin state")
+			}
+			if _, err := manager.DiscoverPlugins(); err != nil {
+				t.Fatalf("read-only discovery after shutdown: %v", err)
+			}
+			if err := manager.ShutdownContext(context.Background()); err != nil {
+				t.Fatalf("idempotent ShutdownContext: %v", err)
+			}
+		})
+	}
+}
 
 func TestPluginStderrForwarderPrefixesPluginLines(t *testing.T) {
 	var out bytes.Buffer

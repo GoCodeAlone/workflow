@@ -5,16 +5,21 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type preparedCredentialResolverClient struct {
 	accessKey       string
 	credentialTypes []string
+	describeErr     error
+	resolveErr      error
 	resolveStarted  chan struct{}
 	resolveRelease  <-chan struct{}
 	startOnce       sync.Once
@@ -29,6 +34,9 @@ func (p preparedCredentialResolverProvider) CredentialResolverRegistrations() []
 }
 
 func (c *preparedCredentialResolverClient) DescribeResolvers(context.Context, *pb.CredentialResolverDeclarationsRequest, ...grpc.CallOption) (*pb.CredentialResolverDeclarationsResponse, error) {
+	if c.describeErr != nil {
+		return nil, c.describeErr
+	}
 	credentialTypes := c.credentialTypes
 	if len(credentialTypes) == 0 {
 		credentialTypes = []string{"static"}
@@ -39,6 +47,9 @@ func (c *preparedCredentialResolverClient) DescribeResolvers(context.Context, *p
 }
 
 func (c *preparedCredentialResolverClient) Resolve(_ context.Context, request *pb.CredentialResolveRequest, _ ...grpc.CallOption) (*pb.CredentialResolveResponse, error) {
+	if c.resolveErr != nil {
+		return nil, c.resolveErr
+	}
 	if c.resolveStarted != nil {
 		c.startOnce.Do(func() { close(c.resolveStarted) })
 	}
@@ -48,6 +59,82 @@ func (c *preparedCredentialResolverClient) Resolve(_ context.Context, request *p
 	return &pb.CredentialResolveResponse{Credentials: &pb.ResolvedCloudCredentials{
 		Provider: request.GetProvider(), AccessKey: c.accessKey,
 	}}, nil
+}
+
+// laggingContextError models the ordering where gRPC has already translated a
+// caller cancellation into a status error while ctx.Err has not yet become
+// observable to the calling goroutine.
+type laggingContextError struct {
+	context.Context
+	err   error
+	calls atomic.Int32
+}
+
+func (ctx *laggingContextError) Err() error {
+	if ctx.calls.Add(1) == 1 {
+		return nil
+	}
+	return ctx.err
+}
+
+func TestExternalCredentialResolverRPCsPreserveCallerCancellationFromGRPCStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		contextErr error
+		statusCode codes.Code
+		call       func(context.Context, error) error
+	}{
+		{
+			name:       "describe canceled",
+			contextErr: context.Canceled,
+			statusCode: codes.Canceled,
+			call: func(ctx context.Context, transportErr error) error {
+				_, err := PrepareExternalCredentialResolver(ctx, &preparedCredentialResolverClient{describeErr: transportErr})
+				return err
+			},
+		},
+		{
+			name:       "describe deadline exceeded",
+			contextErr: context.DeadlineExceeded,
+			statusCode: codes.DeadlineExceeded,
+			call: func(ctx context.Context, transportErr error) error {
+				_, err := PrepareExternalCredentialResolver(ctx, &preparedCredentialResolverClient{describeErr: transportErr})
+				return err
+			},
+		},
+		{
+			name:       "resolve canceled",
+			contextErr: context.Canceled,
+			statusCode: codes.Canceled,
+			call: func(ctx context.Context, transportErr error) error {
+				resolver := &externalCloudCredentialResolver{provider: "aws", credentialType: "static", client: &preparedCredentialResolverClient{resolveErr: transportErr}}
+				return resolver.ResolveContext(ctx, &CloudAccount{config: map[string]any{}})
+			},
+		},
+		{
+			name:       "resolve deadline exceeded",
+			contextErr: context.DeadlineExceeded,
+			statusCode: codes.DeadlineExceeded,
+			call: func(ctx context.Context, transportErr error) error {
+				resolver := &externalCloudCredentialResolver{provider: "aws", credentialType: "static", client: &preparedCredentialResolverClient{resolveErr: transportErr}}
+				return resolver.ResolveContext(ctx, &CloudAccount{config: map[string]any{}})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const sensitiveDetail = "provider-secret-detail"
+			ctx := &laggingContextError{Context: context.Background(), err: test.contextErr}
+			err := test.call(ctx, status.Error(test.statusCode, sensitiveDetail))
+			if !errors.Is(err, test.contextErr) {
+				t.Fatalf("RPC error = %v, want errors.Is(_, %v)", err, test.contextErr)
+			}
+			if strings.Contains(err.Error(), sensitiveDetail) {
+				t.Fatalf("RPC error exposed transport detail: %v", err)
+			}
+		})
+	}
 }
 
 func TestPreparedExternalCredentialResolverActivationAndClose(t *testing.T) {
@@ -172,6 +259,114 @@ func TestExternalCredentialResolverTransitionFailureKeepsOldRegistrationActive(t
 	credentials, err := ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
 	if err != nil || credentials.AccessKey != "old" {
 		t.Fatalf("failed transition retired old resolver: %+v, %v", credentials, err)
+	}
+}
+
+func TestScopedResolverSnapshotFollowsActiveOwnerTransition(t *testing.T) {
+	oldRegistration, err := PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"plugin-owner:stale-snapshot",
+		&preparedCredentialResolverClient{accessKey: "old"},
+	)
+	if err != nil {
+		t.Fatalf("prepare old: %v", err)
+	}
+	if err := oldRegistration.Activate(); err != nil {
+		t.Fatalf("activate old: %v", err)
+	}
+	defer oldRegistration.Close()
+	snapshot := []*ExternalCredentialResolverRegistration{oldRegistration}
+
+	newRegistration, err := PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"plugin-owner:stale-snapshot",
+		&preparedCredentialResolverClient{accessKey: "new"},
+	)
+	if err != nil {
+		t.Fatalf("prepare new: %v", err)
+	}
+	defer newRegistration.Close()
+	swapEntered := make(chan struct{})
+	releaseSwap := make(chan struct{})
+	transitionDone := make(chan error, 1)
+	go func() {
+		drain, transitionErr := transitionExternalCredentialResolverRegistration(oldRegistration, newRegistration, func() {
+			close(swapEntered)
+			<-releaseSwap
+		})
+		if transitionErr == nil {
+			transitionErr = drain.Wait(context.Background())
+		}
+		transitionDone <- transitionErr
+	}()
+	<-swapEntered
+	type selectionResult struct {
+		lease *credentialResolverLease
+		err   error
+	}
+	selectionStarted := make(chan struct{})
+	selectionDone := make(chan selectionResult, 1)
+	go func() {
+		close(selectionStarted)
+		lease, selectErr := selectCredentialResolverFromRegistrations(snapshot, "aws", "static", true)
+		selectionDone <- selectionResult{lease: lease, err: selectErr}
+	}()
+	<-selectionStarted
+	select {
+	case result := <-selectionDone:
+		close(releaseSwap)
+		t.Fatalf("selection escaped in-progress transition: %+v", result)
+	default:
+	}
+	close(releaseSwap)
+	if err := <-transitionDone; err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	result := <-selectionDone
+	if result.err != nil {
+		t.Fatalf("select from stale snapshot: %v", result.err)
+	}
+	lease := result.lease
+	defer lease.Release()
+	account := &CloudAccount{provider: "aws", credType: "static", creds: &CloudCredentials{Provider: "aws"}}
+	if contextual, ok := lease.resolver.(contextCloudCredentialResolver); ok {
+		err = contextual.ResolveContext(context.Background(), account)
+	} else {
+		err = lease.resolver.Resolve(account)
+	}
+	if err != nil || account.creds.AccessKey != "new" {
+		t.Fatalf("stale snapshot resolved credentials = %+v, %v", account.creds, err)
+	}
+}
+
+func TestScopedResolverSnapshotFollowsOwnerTombstoneForDroppedPair(t *testing.T) {
+	oldRegistration, err := PrepareOwnedExternalCredentialResolver(
+		context.Background(),
+		"plugin-owner:stale-tombstone",
+		&preparedCredentialResolverClient{accessKey: "old", credentialTypes: []string{"static", "env"}},
+	)
+	if err != nil {
+		t.Fatalf("prepare old: %v", err)
+	}
+	if err := oldRegistration.Activate(); err != nil {
+		t.Fatalf("activate old: %v", err)
+	}
+	defer oldRegistration.Close()
+	snapshot := []*ExternalCredentialResolverRegistration{oldRegistration}
+	tombstone, err := PrepareExternalCredentialResolverOwner("plugin-owner:stale-tombstone")
+	if err != nil {
+		t.Fatalf("prepare tombstone: %v", err)
+	}
+	defer tombstone.Close()
+	drain, err := TransitionExternalCredentialResolverRegistration(oldRegistration, tombstone)
+	if err != nil {
+		t.Fatalf("transition tombstone: %v", err)
+	}
+	if err := drain.Wait(context.Background()); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if _, err := selectCredentialResolverFromRegistrations(snapshot, "aws", "env", true); err == nil || !strings.Contains(err.Error(), "no external credential resolver") {
+		t.Fatalf("stale snapshot restored dropped pair: %v", err)
 	}
 }
 
