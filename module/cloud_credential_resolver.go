@@ -70,12 +70,20 @@ func RegisterCredentialResolver(resolver CloudCredentialResolver) {
 	credentialResolvers.builtins[provider][credentialType] = resolver
 }
 
-// RegisterExternalCredentialResolver discovers and registers every exact
-// provider/type pair advertised by client. The returned cleanup removes only
-// this registration, making the process-global registry safe for test-scoped
-// and plugin-lifecycle use. Multiple plugins may advertise the same pair, but
-// dispatch fails closed before invoking either one.
-func RegisterExternalCredentialResolver(ctx context.Context, client pb.CredentialResolverClient) (func(), error) {
+// ExternalCredentialResolverRegistration is a validated provider/type set that
+// can be activated independently from discovery. Separating preparation from
+// activation lets plugin managers atomically replace live registrations.
+type ExternalCredentialResolverRegistration struct {
+	pairs     []credentialResolverPair
+	resolvers map[credentialResolverPair]CloudCredentialResolver
+	id        uint64
+	active    bool
+	closed    bool
+}
+
+// PrepareExternalCredentialResolver discovers and validates every exact
+// provider/type pair advertised by client without changing the live registry.
+func PrepareExternalCredentialResolver(ctx context.Context, client pb.CredentialResolverClient) (*ExternalCredentialResolverRegistration, error) {
 	if client == nil {
 		return nil, fmt.Errorf("register external credential resolver: client is nil")
 	}
@@ -96,41 +104,123 @@ func RegisterExternalCredentialResolver(ctx context.Context, client pb.Credentia
 	if err != nil {
 		return nil, err
 	}
-
-	credentialResolvers.Lock()
-	credentialResolvers.nextID++
-	id := credentialResolvers.nextID
+	registration := &ExternalCredentialResolverRegistration{
+		pairs:     pairs,
+		resolvers: make(map[credentialResolverPair]CloudCredentialResolver, len(pairs)),
+	}
 	for _, pair := range pairs {
+		registration.resolvers[pair] = &externalCloudCredentialResolver{
+			provider: pair.provider, credentialType: pair.credentialType, client: client,
+		}
+	}
+	return registration, nil
+}
+
+// Activate publishes a prepared registration. It may be called once.
+func (registration *ExternalCredentialResolverRegistration) Activate() error {
+	credentialResolvers.Lock()
+	defer credentialResolvers.Unlock()
+	return activateExternalCredentialResolverRegistrationLocked(registration)
+}
+
+// Close removes an active registration and permanently closes the handle. It
+// is idempotent and also safely closes a prepared-but-never-activated handle.
+func (registration *ExternalCredentialResolverRegistration) Close() {
+	if registration == nil {
+		return
+	}
+	credentialResolvers.Lock()
+	deactivateExternalCredentialResolverRegistrationLocked(registration, true)
+	credentialResolvers.Unlock()
+}
+
+// ReplaceExternalCredentialResolverRegistration atomically swaps the old live
+// registration for the prepared replacement. Either argument may be nil for
+// advertised-to-unadvertised and unadvertised-to-advertised transitions.
+func ReplaceExternalCredentialResolverRegistration(oldRegistration, newRegistration *ExternalCredentialResolverRegistration) error {
+	return replaceExternalCredentialResolverRegistration(oldRegistration, newRegistration, nil)
+}
+
+func replaceExternalCredentialResolverRegistration(oldRegistration, newRegistration *ExternalCredentialResolverRegistration, whileLocked func()) error {
+	credentialResolvers.Lock()
+	defer credentialResolvers.Unlock()
+	if oldRegistration != nil && (oldRegistration.closed || !oldRegistration.active) {
+		return fmt.Errorf("replace external credential resolver: old registration is not active")
+	}
+	if newRegistration != nil && (newRegistration.closed || newRegistration.active) {
+		return fmt.Errorf("replace external credential resolver: new registration is not prepared")
+	}
+	deactivateExternalCredentialResolverRegistrationLocked(oldRegistration, true)
+	if whileLocked != nil {
+		whileLocked()
+	}
+	if newRegistration != nil {
+		return activateExternalCredentialResolverRegistrationLocked(newRegistration)
+	}
+	return nil
+}
+
+func activateExternalCredentialResolverRegistrationLocked(registration *ExternalCredentialResolverRegistration) error {
+	if registration == nil {
+		return fmt.Errorf("activate external credential resolver: registration is nil")
+	}
+	if registration.closed {
+		return fmt.Errorf("activate external credential resolver: registration is closed")
+	}
+	if registration.active {
+		return fmt.Errorf("activate external credential resolver: registration is already active")
+	}
+	credentialResolvers.nextID++
+	registration.id = credentialResolvers.nextID
+	for _, pair := range registration.pairs {
 		if credentialResolvers.external[pair.provider] == nil {
 			credentialResolvers.external[pair.provider] = make(map[string]map[uint64]CloudCredentialResolver)
 		}
 		if credentialResolvers.external[pair.provider][pair.credentialType] == nil {
 			credentialResolvers.external[pair.provider][pair.credentialType] = make(map[uint64]CloudCredentialResolver)
 		}
-		credentialResolvers.external[pair.provider][pair.credentialType][id] = &externalCloudCredentialResolver{
-			provider: pair.provider, credentialType: pair.credentialType, client: client,
-		}
+		credentialResolvers.external[pair.provider][pair.credentialType][registration.id] = registration.resolvers[pair]
 	}
-	credentialResolvers.Unlock()
+	registration.active = true
+	return nil
+}
 
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			credentialResolvers.Lock()
-			defer credentialResolvers.Unlock()
-			for _, pair := range pairs {
-				byType := credentialResolvers.external[pair.provider]
-				registrations := byType[pair.credentialType]
-				delete(registrations, id)
-				if len(registrations) == 0 {
-					delete(byType, pair.credentialType)
-				}
-				if len(byType) == 0 {
-					delete(credentialResolvers.external, pair.provider)
-				}
+func deactivateExternalCredentialResolverRegistrationLocked(registration *ExternalCredentialResolverRegistration, closeRegistration bool) {
+	if registration == nil {
+		return
+	}
+	if registration.active {
+		for _, pair := range registration.pairs {
+			byType := credentialResolvers.external[pair.provider]
+			registrations := byType[pair.credentialType]
+			delete(registrations, registration.id)
+			if len(registrations) == 0 {
+				delete(byType, pair.credentialType)
 			}
-		})
-	}, nil
+			if len(byType) == 0 {
+				delete(credentialResolvers.external, pair.provider)
+			}
+		}
+		registration.active = false
+		registration.id = 0
+	}
+	if closeRegistration {
+		registration.closed = true
+	}
+}
+
+// RegisterExternalCredentialResolver preserves the original one-step API as a
+// compatibility wrapper around preparation and activation.
+func RegisterExternalCredentialResolver(ctx context.Context, client pb.CredentialResolverClient) (func(), error) {
+	registration, err := PrepareExternalCredentialResolver(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	if err := registration.Activate(); err != nil {
+		registration.Close()
+		return nil, err
+	}
+	return registration.Close, nil
 }
 
 type credentialResolverPair struct {

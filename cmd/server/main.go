@@ -87,6 +87,30 @@ func defaultEnginePlugins() []plugin.EnginePlugin {
 	return allplugins.DefaultPlugins()
 }
 
+type externalPluginLifecycleManager interface {
+	LoadPlugin(string) (*pluginexternal.ExternalPluginAdapter, error)
+	UnloadPlugin(string) error
+}
+
+type externalPluginEngineLoader interface {
+	LoadPlugin(plugin.EnginePlugin) error
+}
+
+func loadExternalPluginIntoEngine(manager externalPluginLifecycleManager, engine externalPluginEngineLoader, name string) (*pluginexternal.ExternalPluginAdapter, error) {
+	adapter, err := manager.LoadPlugin(name)
+	if err != nil {
+		return nil, fmt.Errorf("load external plugin %q: %w", name, err)
+	}
+	if err := engine.LoadPlugin(adapter); err != nil {
+		registrationErr := fmt.Errorf("register external plugin %q: %w", name, err)
+		if rollbackErr := manager.UnloadPlugin(name); rollbackErr != nil {
+			return nil, errors.Join(registrationErr, fmt.Errorf("rollback external plugin %q: %w", name, rollbackErr))
+		}
+		return nil, registrationErr
+	}
+	return adapter, nil
+}
+
 // buildEngine creates the workflow engine with all handlers registered and built from config.
 func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
 	app := modular.NewStdApplication(nil, logger)
@@ -127,13 +151,9 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	if len(discovered) > 0 {
 		logger.Info("Discovered external plugins", "count", len(discovered), "plugins", discovered)
 		for _, name := range discovered {
-			adapter, loadErr := extMgr.LoadPlugin(name)
+			_, loadErr := loadExternalPluginIntoEngine(extMgr, engine, name)
 			if loadErr != nil {
 				logger.Warn("Failed to load external plugin", "plugin", name, "error", loadErr)
-				continue
-			}
-			if err := engine.LoadPlugin(adapter); err != nil {
-				logger.Warn("Failed to register external plugin", "plugin", name, "error", err)
 				continue
 			}
 			logger.Info("Loaded external plugin", "plugin", name)

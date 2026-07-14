@@ -26,10 +26,10 @@ type ExternalPluginManager struct {
 	opsMu   sync.Mutex
 	mu      sync.RWMutex
 	clients map[string]*goplugin.Client
-	// credentialResolverCleanups tracks optional resolver registrations owned
+	// credentialResolverRegistrations tracks optional resolver registrations owned
 	// by each loaded plugin so reload/unload/shutdown cannot leave stale clients
 	// in the module registry.
-	credentialResolverCleanups map[string]func()
+	credentialResolverRegistrations map[string]*module.ExternalCredentialResolverRegistration
 
 	callbackServer *CallbackServer
 
@@ -47,10 +47,10 @@ func NewExternalPluginManager(pluginsDir string, logger *log.Logger) *ExternalPl
 		logger = log.New(os.Stderr, "[external-plugins] ", log.LstdFlags)
 	}
 	return &ExternalPluginManager{
-		pluginsDir:                 pluginsDir,
-		logger:                     logger,
-		clients:                    make(map[string]*goplugin.Client),
-		credentialResolverCleanups: make(map[string]func()),
+		pluginsDir:                      pluginsDir,
+		logger:                          logger,
+		clients:                         make(map[string]*goplugin.Client),
+		credentialResolverRegistrations: make(map[string]*module.ExternalCredentialResolverRegistration),
 	}
 }
 
@@ -119,24 +119,31 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		discardPluginLaunch(launch)
 		return nil, err
 	}
-	resolverCleanup, err := registerLaunchCredentialResolver(name, launch)
+	resolverRegistration, err := prepareLaunchCredentialResolver(name, launch)
 	if err != nil {
 		discardPluginLaunch(launch)
 		return nil, err
+	}
+	if resolverRegistration != nil {
+		if err := resolverRegistration.Activate(); err != nil {
+			resolverRegistration.Close()
+			discardPluginLaunch(launch)
+			return nil, fmt.Errorf("plugin %q credential resolver activation failed: %w", name, err)
+		}
 	}
 
 	m.mu.Lock()
 	if _, exists := m.clients[name]; exists {
 		m.mu.Unlock()
-		if resolverCleanup != nil {
-			resolverCleanup()
+		if resolverRegistration != nil {
+			resolverRegistration.Close()
 		}
 		launch.client.Kill()
 		return nil, fmt.Errorf("plugin %q is already loaded", name)
 	}
 	m.clients[name] = launch.client
-	if resolverCleanup != nil {
-		m.credentialResolverCleanups[name] = resolverCleanup
+	if resolverRegistration != nil {
+		m.credentialResolverRegistrations[name] = resolverRegistration
 	}
 	m.mu.Unlock()
 	m.logger.Printf("plugin %q loaded successfully", name)
@@ -280,13 +287,13 @@ func (m *ExternalPluginManager) UnloadPlugin(name string) error {
 		return fmt.Errorf("plugin %q is not loaded", name)
 	}
 	delete(m.clients, name)
-	resolverCleanup := m.credentialResolverCleanups[name]
-	delete(m.credentialResolverCleanups, name)
+	resolverRegistration := m.credentialResolverRegistrations[name]
+	delete(m.credentialResolverRegistrations, name)
 	m.mu.Unlock()
 
 	m.logger.Printf("unloading plugin %q", name)
-	if resolverCleanup != nil {
-		resolverCleanup()
+	if resolverRegistration != nil {
+		resolverRegistration.Close()
 	}
 	client.Kill()
 	m.logger.Printf("plugin %q unloaded", name)
@@ -302,7 +309,7 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 
 	m.mu.RLock()
 	oldClient, wasLoaded := m.clients[name]
-	oldResolverCleanup := m.credentialResolverCleanups[name]
+	oldResolverRegistration := m.credentialResolverRegistrations[name]
 	m.mu.RUnlock()
 	if !wasLoaded {
 		launch, err := m.startPluginUnlocked(name)
@@ -313,15 +320,22 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 			discardPluginLaunch(launch)
 			return nil, err
 		}
-		resolverCleanup, err := registerLaunchCredentialResolver(name, launch)
+		resolverRegistration, err := prepareLaunchCredentialResolver(name, launch)
 		if err != nil {
 			discardPluginLaunch(launch)
 			return nil, err
 		}
+		if resolverRegistration != nil {
+			if err := resolverRegistration.Activate(); err != nil {
+				resolverRegistration.Close()
+				discardPluginLaunch(launch)
+				return nil, fmt.Errorf("plugin %q credential resolver activation failed: %w", name, err)
+			}
+		}
 		m.mu.Lock()
 		m.clients[name] = launch.client
-		if resolverCleanup != nil {
-			m.credentialResolverCleanups[name] = resolverCleanup
+		if resolverRegistration != nil {
+			m.credentialResolverRegistrations[name] = resolverRegistration
 		}
 		m.mu.Unlock()
 		m.logger.Printf("plugin %q loaded successfully", name)
@@ -338,24 +352,29 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
 	}
-	resolverCleanup, err := registerLaunchCredentialResolver(name, launch)
+	resolverRegistration, err := prepareLaunchCredentialResolver(name, launch)
 	if err != nil {
 		discardPluginLaunch(launch)
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
 	}
+	if err := module.ReplaceExternalCredentialResolverRegistration(oldResolverRegistration, resolverRegistration); err != nil {
+		if resolverRegistration != nil {
+			resolverRegistration.Close()
+		}
+		discardPluginLaunch(launch)
+		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
+		return nil, fmt.Errorf("reload plugin %q: credential resolver replacement failed: %w", name, err)
+	}
 
 	m.mu.Lock()
 	m.clients[name] = launch.client
-	if resolverCleanup != nil {
-		m.credentialResolverCleanups[name] = resolverCleanup
+	if resolverRegistration != nil {
+		m.credentialResolverRegistrations[name] = resolverRegistration
 	} else {
-		delete(m.credentialResolverCleanups, name)
+		delete(m.credentialResolverRegistrations, name)
 	}
 	m.mu.Unlock()
-	if oldResolverCleanup != nil {
-		oldResolverCleanup()
-	}
 	oldClient.Kill()
 	m.logger.Printf("plugin %q reloaded successfully", name)
 	return launch.adapter, nil
@@ -380,18 +399,18 @@ func discardPluginLaunch(launch *pluginLaunch) {
 	}
 }
 
-func registerLaunchCredentialResolver(name string, launch *pluginLaunch) (func(), error) {
+func prepareLaunchCredentialResolver(name string, launch *pluginLaunch) (*module.ExternalCredentialResolverRegistration, error) {
 	if launch == nil || launch.adapter == nil || !contractRegistryAdvertisesCredentialResolver(launch.adapter.ContractRegistry()) {
 		return nil, nil
 	}
 	if launch.adapter.client == nil {
 		return nil, fmt.Errorf("plugin %q advertises CredentialResolver without a shared plugin client", name)
 	}
-	cleanup, err := module.RegisterExternalCredentialResolver(context.Background(), launch.adapter.client.CredentialResolverClient())
+	registration, err := module.PrepareExternalCredentialResolver(context.Background(), launch.adapter.client.CredentialResolverClient())
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q credential resolver registration failed: %w", name, err)
 	}
-	return cleanup, nil
+	return registration, nil
 }
 
 func contractRegistryAdvertisesCredentialResolver(registry *pb.ContractRegistry) bool {
@@ -434,14 +453,14 @@ func (m *ExternalPluginManager) Shutdown() {
 	m.mu.Lock()
 	clients := m.clients
 	m.clients = make(map[string]*goplugin.Client)
-	resolverCleanups := m.credentialResolverCleanups
-	m.credentialResolverCleanups = make(map[string]func())
+	resolverRegistrations := m.credentialResolverRegistrations
+	m.credentialResolverRegistrations = make(map[string]*module.ExternalCredentialResolverRegistration)
 	m.mu.Unlock()
 
 	for name, client := range clients {
 		m.logger.Printf("shutting down plugin %q", name)
-		if resolverCleanup := resolverCleanups[name]; resolverCleanup != nil {
-			resolverCleanup()
+		if resolverRegistration := resolverRegistrations[name]; resolverRegistration != nil {
+			resolverRegistration.Close()
 		}
 		client.Kill()
 	}

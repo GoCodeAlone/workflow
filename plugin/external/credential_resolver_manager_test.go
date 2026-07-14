@@ -162,6 +162,10 @@ func TestExternalPluginManagerCredentialResolverReloadLifecycle(t *testing.T) {
 	if _, err := manager.LoadPlugin("reload-fixture"); err != nil {
 		t.Fatalf("initial LoadPlugin: %v", err)
 	}
+	oldRegistration := manager.credentialResolverRegistrations["reload-fixture"]
+	if oldRegistration == nil {
+		t.Fatal("manager did not retain the prepared resolver registration")
+	}
 	t.Cleanup(manager.Shutdown)
 
 	invalidServer := &managerCredentialResolverServer{
@@ -176,6 +180,9 @@ func TestExternalPluginManagerCredentialResolverReloadLifecycle(t *testing.T) {
 	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "old-access" {
 		t.Fatalf("failed reload did not preserve old resolver: access key %q, %v", accessKey, err)
 	}
+	if manager.credentialResolverRegistrations["reload-fixture"] != oldRegistration {
+		t.Fatal("failed reload replaced the old resolver registration")
+	}
 
 	newServer := &managerCredentialResolverServer{
 		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
@@ -189,6 +196,32 @@ func TestExternalPluginManagerCredentialResolverReloadLifecycle(t *testing.T) {
 	}
 	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "new-access" {
 		t.Fatalf("successful reload left stale resolver: access key %q, %v", accessKey, err)
+	}
+	if manager.credentialResolverRegistrations["reload-fixture"] == oldRegistration {
+		t.Fatal("successful reload retained the old resolver registration")
+	}
+
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, newServer, false)}, nil
+	}
+	if _, err := manager.ReloadPlugin("reload-fixture"); err != nil {
+		t.Fatalf("advertised-to-unadvertised ReloadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "builtin-access" {
+		t.Fatalf("unadvertised reload retained resolver: access key %q, %v", accessKey, err)
+	}
+	if manager.credentialResolverRegistrations["reload-fixture"] != nil {
+		t.Fatal("unadvertised reload retained a resolver registration handle")
+	}
+
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, newServer, true)}, nil
+	}
+	if _, err := manager.ReloadPlugin("reload-fixture"); err != nil {
+		t.Fatalf("unadvertised-to-advertised ReloadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "new-access" {
+		t.Fatalf("advertised reload did not activate resolver: access key %q, %v", accessKey, err)
 	}
 }
 
