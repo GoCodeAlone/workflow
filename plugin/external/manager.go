@@ -31,6 +31,7 @@ type ExternalPluginManager struct {
 	// by each loaded plugin so reload/unload/shutdown cannot leave stale clients
 	// in the module registry.
 	credentialResolverRegistrations map[string]*module.ExternalCredentialResolverRegistration
+	credentialResolversActive       bool
 
 	callbackServer *CallbackServer
 
@@ -52,6 +53,7 @@ func NewExternalPluginManager(pluginsDir string, logger *log.Logger) *ExternalPl
 		logger:                          logger,
 		clients:                         make(map[string]*goplugin.Client),
 		credentialResolverRegistrations: make(map[string]*module.ExternalCredentialResolverRegistration),
+		credentialResolversActive:       true,
 	}
 }
 
@@ -125,7 +127,7 @@ func (m *ExternalPluginManager) LoadPlugin(name string) (*ExternalPluginAdapter,
 		discardPluginLaunch(launch)
 		return nil, err
 	}
-	if resolverRegistration != nil {
+	if resolverRegistration != nil && m.credentialResolversActive {
 		if err := resolverRegistration.Activate(); err != nil {
 			resolverRegistration.Close()
 			discardPluginLaunch(launch)
@@ -326,7 +328,7 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 			discardPluginLaunch(launch)
 			return nil, err
 		}
-		if resolverRegistration != nil {
+		if resolverRegistration != nil && m.credentialResolversActive {
 			if err := resolverRegistration.Activate(); err != nil {
 				resolverRegistration.Close()
 				discardPluginLaunch(launch)
@@ -359,13 +361,15 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)
 	}
-	if err := module.ReplaceExternalCredentialResolverRegistration(oldResolverRegistration, resolverRegistration); err != nil {
-		if resolverRegistration != nil {
-			resolverRegistration.Close()
+	if m.credentialResolversActive {
+		if err := module.ReplaceExternalCredentialResolverRegistration(oldResolverRegistration, resolverRegistration); err != nil {
+			if resolverRegistration != nil {
+				resolverRegistration.Close()
+			}
+			discardPluginLaunch(launch)
+			m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
+			return nil, fmt.Errorf("reload plugin %q: credential resolver replacement failed: %w", name, err)
 		}
-		discardPluginLaunch(launch)
-		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
-		return nil, fmt.Errorf("reload plugin %q: credential resolver replacement failed: %w", name, err)
 	}
 
 	m.mu.Lock()
@@ -376,9 +380,59 @@ func (m *ExternalPluginManager) ReloadPlugin(name string) (*ExternalPluginAdapte
 		delete(m.credentialResolverRegistrations, name)
 	}
 	m.mu.Unlock()
+	if !m.credentialResolversActive && oldResolverRegistration != nil {
+		oldResolverRegistration.Close()
+	}
 	oldClient.Kill()
 	m.logger.Printf("plugin %q reloaded successfully", name)
 	return launch.adapter, nil
+}
+
+// StageCredentialResolvers keeps subsequently loaded resolver registrations
+// application-scoped until ActivateCredentialResolvers is called.
+func (m *ExternalPluginManager) StageCredentialResolvers() error {
+	m.opsMu.Lock()
+	defer m.opsMu.Unlock()
+	m.mu.RLock()
+	loaded := len(m.clients)
+	m.mu.RUnlock()
+	if loaded != 0 {
+		return fmt.Errorf("stage credential resolvers: plugins are already loaded")
+	}
+	m.credentialResolversActive = false
+	return nil
+}
+
+// ActivateCredentialResolvers atomically publishes all staged resolver
+// registrations owned by this manager.
+func (m *ExternalPluginManager) ActivateCredentialResolvers() error {
+	m.opsMu.Lock()
+	defer m.opsMu.Unlock()
+	if m.credentialResolversActive {
+		return nil
+	}
+	registrations := m.credentialResolverRegistrationsSnapshot()
+	if err := module.ActivateExternalCredentialResolverRegistrations(registrations); err != nil {
+		return err
+	}
+	m.credentialResolversActive = true
+	return nil
+}
+
+// CredentialResolverRegistrations returns the current resolver registrations
+// for application-scoped CloudAccount initialization.
+func (m *ExternalPluginManager) CredentialResolverRegistrations() []*module.ExternalCredentialResolverRegistration {
+	return m.credentialResolverRegistrationsSnapshot()
+}
+
+func (m *ExternalPluginManager) credentialResolverRegistrationsSnapshot() []*module.ExternalCredentialResolverRegistration {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	registrations := make([]*module.ExternalCredentialResolverRegistration, 0, len(m.credentialResolverRegistrations))
+	for _, registration := range m.credentialResolverRegistrations {
+		registrations = append(registrations, registration)
+	}
+	return registrations
 }
 
 func validatePluginLaunch(name string, launch *pluginLaunch) error {
@@ -401,15 +455,22 @@ func discardPluginLaunch(launch *pluginLaunch) {
 }
 
 func (m *ExternalPluginManager) prepareLaunchCredentialResolver(name string, launch *pluginLaunch) (*module.ExternalCredentialResolverRegistration, error) {
-	if launch == nil || launch.adapter == nil || !contractRegistryAdvertisesCredentialResolver(launch.adapter.ContractRegistry()) {
+	if launch == nil || launch.adapter == nil {
 		return nil, nil
-	}
-	if launch.adapter.client == nil {
-		return nil, fmt.Errorf("plugin %q advertises CredentialResolver without a shared plugin client", name)
 	}
 	owner, err := m.credentialResolverOwner(name)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q credential resolver owner failed: %w", name, err)
+	}
+	if !contractRegistryAdvertisesCredentialResolver(launch.adapter.ContractRegistry()) {
+		registration, prepareErr := module.PrepareExternalCredentialResolverOwner(owner)
+		if prepareErr != nil {
+			return nil, fmt.Errorf("plugin %q credential resolver owner registration failed: %w", name, prepareErr)
+		}
+		return registration, nil
+	}
+	if launch.adapter.client == nil {
+		return nil, fmt.Errorf("plugin %q advertises CredentialResolver without a shared plugin client", name)
 	}
 	registration, err := module.PrepareOwnedExternalCredentialResolver(context.Background(), owner, launch.adapter.client.CredentialResolverClient())
 	if err != nil {

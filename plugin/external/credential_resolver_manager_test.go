@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"github.com/GoCodeAlone/workflow/module"
@@ -19,17 +20,30 @@ import (
 
 type managerCredentialResolverServer struct {
 	pb.UnimplementedCredentialResolverServer
-	declarations []*pb.CredentialResolverDeclaration
-	accessKey    string
-	calls        atomic.Int32
+	declarations   []*pb.CredentialResolverDeclaration
+	accessKey      string
+	calls          atomic.Int32
+	resolveStarted chan struct{}
+	resolveRelease <-chan struct{}
+	startOnce      sync.Once
 }
 
 func (s *managerCredentialResolverServer) DescribeResolvers(context.Context, *pb.CredentialResolverDeclarationsRequest) (*pb.CredentialResolverDeclarationsResponse, error) {
 	return &pb.CredentialResolverDeclarationsResponse{Resolvers: s.declarations}, nil
 }
 
-func (s *managerCredentialResolverServer) Resolve(_ context.Context, request *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error) {
+func (s *managerCredentialResolverServer) Resolve(ctx context.Context, request *pb.CredentialResolveRequest) (*pb.CredentialResolveResponse, error) {
 	s.calls.Add(1)
+	if s.resolveStarted != nil {
+		s.startOnce.Do(func() { close(s.resolveStarted) })
+	}
+	if s.resolveRelease != nil {
+		select {
+		case <-s.resolveRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return &pb.CredentialResolveResponse{Credentials: &pb.ResolvedCloudCredentials{
 		Provider: request.GetProvider(), AccessKey: s.accessKey,
 	}}, nil
@@ -212,8 +226,8 @@ func TestExternalPluginManagerCredentialResolverReloadLifecycle(t *testing.T) {
 	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "builtin-access" {
 		t.Fatalf("unadvertised reload retained resolver: access key %q, %v", accessKey, err)
 	}
-	if manager.credentialResolverRegistrations["reload-fixture"] != nil {
-		t.Fatal("unadvertised reload retained a resolver registration handle")
+	if manager.credentialResolverRegistrations["reload-fixture"] == nil {
+		t.Fatal("unadvertised reload did not retain an owner tombstone")
 	}
 
 	manager.startPlugin = func(string) (*pluginLaunch, error) {
@@ -358,5 +372,145 @@ func TestExternalPluginManagerCredentialResolverOwnerIsCanonicalAndUnambiguous(t
 	}
 	if leftOwner == rightOwner {
 		t.Fatalf("owner encoding is ambiguous: %q", leftOwner)
+	}
+}
+
+func TestExternalPluginManagerStagesCandidateResolversUntilActivation(t *testing.T) {
+	pluginsDir := t.TempDir()
+	liveServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "live-access",
+	}
+	candidateServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "candidate-access",
+	}
+	liveManager := NewExternalPluginManager(pluginsDir, nil)
+	liveManager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, liveServer, true)}, nil
+	}
+	t.Cleanup(liveManager.Shutdown)
+	if _, err := liveManager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("live LoadPlugin: %v", err)
+	}
+
+	candidateManager := NewExternalPluginManager(pluginsDir, nil)
+	if err := candidateManager.StageCredentialResolvers(); err != nil {
+		t.Fatalf("StageCredentialResolvers: %v", err)
+	}
+	candidateManager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, candidateServer, true)}, nil
+	}
+	t.Cleanup(candidateManager.Shutdown)
+	if _, err := candidateManager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("candidate LoadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "live-access" {
+		t.Fatalf("staged candidate displaced live resolver: %q, %v", accessKey, err)
+	}
+
+	app := module.NewMockApplication()
+	if err := app.RegisterService(module.ExternalCredentialResolverRegistrationProviderServiceName, candidateManager); err != nil {
+		t.Fatalf("register candidate manager: %v", err)
+	}
+	account := module.NewCloudAccount("candidate-account", map[string]any{
+		"provider":    "aws",
+		"credentials": map[string]any{"type": "static"},
+	})
+	if err := account.Init(app); err != nil {
+		t.Fatalf("candidate cloud.account Init: %v", err)
+	}
+	credentials, err := account.GetCredentials(context.Background())
+	if err != nil || credentials.AccessKey != "candidate-access" {
+		t.Fatalf("candidate scoped credentials = %+v, %v", credentials, err)
+	}
+
+	if err := candidateManager.ActivateCredentialResolvers(); err != nil {
+		t.Fatalf("ActivateCredentialResolvers: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "candidate-access" {
+		t.Fatalf("activated candidate resolver = %q, %v", accessKey, err)
+	}
+	candidateManager.Shutdown()
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "live-access" {
+		t.Fatalf("live resolver after candidate cleanup = %q, %v", accessKey, err)
+	}
+}
+
+func TestExternalPluginManagerReloadDrainsInFlightResolverBeforeKillingOldClient(t *testing.T) {
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseOld:
+		default:
+			close(releaseOld)
+		}
+	})
+	oldServer := &managerCredentialResolverServer{
+		declarations:   []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:      "old-access",
+		resolveStarted: oldStarted,
+		resolveRelease: releaseOld,
+	}
+	newServer := &managerCredentialResolverServer{
+		declarations: []*pb.CredentialResolverDeclaration{{Provider: "aws", CredentialTypes: []string{"static"}}},
+		accessKey:    "new-access",
+	}
+	manager := NewExternalPluginManager(t.TempDir(), nil)
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, oldServer, true)}, nil
+	}
+	t.Cleanup(manager.Shutdown)
+	if _, err := manager.LoadPlugin("resolver-fixture"); err != nil {
+		t.Fatalf("LoadPlugin: %v", err)
+	}
+
+	oldResult := make(chan string, 1)
+	go func() {
+		credentials, resolveErr := module.ResolveExternalCloudCredentials(context.Background(), "aws", "static", map[string]any{})
+		if resolveErr != nil {
+			oldResult <- "error:" + resolveErr.Error()
+			return
+		}
+		oldResult <- credentials.AccessKey
+	}()
+	<-oldStarted
+
+	manager.startPlugin = func(string) (*pluginLaunch, error) {
+		return &pluginLaunch{client: &goplugin.Client{}, adapter: newManagerCredentialResolverAdapter(t, newServer, true)}, nil
+	}
+	reloadDone := make(chan error, 1)
+	go func() {
+		_, reloadErr := manager.ReloadPlugin("resolver-fixture")
+		reloadDone <- reloadErr
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		credentials, resolveErr := module.ResolveExternalCloudCredentials(ctx, "aws", "static", map[string]any{})
+		cancel()
+		if resolveErr == nil && credentials.AccessKey == "new-access" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("new resolver did not become selectable during old drain: %+v, %v", credentials, resolveErr)
+		}
+	}
+	select {
+	case err := <-reloadDone:
+		t.Fatalf("ReloadPlugin returned before old resolution drained: %v", err)
+	default:
+	}
+	close(releaseOld)
+	if result := <-oldResult; result != "old-access" {
+		t.Fatalf("in-flight old resolution = %q", result)
+	}
+	if err := <-reloadDone; err != nil {
+		t.Fatalf("ReloadPlugin: %v", err)
+	}
+	if accessKey, err := managerCloudAccountAccessKey(t); err != nil || accessKey != "new-access" {
+		t.Fatalf("post-reload resolver = %q, %v", accessKey, err)
 	}
 }

@@ -13,9 +13,11 @@ import (
 )
 
 type candidateEngineLifecycleFixture struct {
-	buildErr  error
-	stopErr   error
-	stopCalls int
+	buildErr   error
+	startErr   error
+	stopErr    error
+	startCalls int
+	stopCalls  int
 }
 
 func (f *candidateEngineLifecycleFixture) BuildFromConfig(*config.WorkflowConfig) error {
@@ -25,6 +27,11 @@ func (f *candidateEngineLifecycleFixture) BuildFromConfig(*config.WorkflowConfig
 func (f *candidateEngineLifecycleFixture) Stop(context.Context) error {
 	f.stopCalls++
 	return f.stopErr
+}
+
+func (f *candidateEngineLifecycleFixture) Start(context.Context) error {
+	f.startCalls++
+	return f.startErr
 }
 
 func (f *candidateEngineLifecycleFixture) RegisteredModuleTypes() []string {
@@ -43,6 +50,9 @@ func TestExternalPluginManagerLifecycleExposesStartupManagerAndStopsIt(t *testin
 	app := modular.NewStdApplication(nil, slog.Default())
 	if err := lifecycle.Init(app); err != nil {
 		t.Fatalf("lifecycle Init: %v", err)
+	}
+	if err := lifecycle.Init(app); err != nil {
+		t.Fatalf("idempotent lifecycle Init: %v", err)
 	}
 	resolved, err := externalPluginManagerFromApplication(app)
 	if err != nil {
@@ -133,5 +143,33 @@ func TestRegisterPostStartServicesReplacesExternalPluginAdminMuxForNewEngine(t *
 	}
 	if app.services.externalPluginMux == nil || app.services.externalPluginMux == firstMux {
 		t.Fatal("engine replacement retained the stopped manager's external plugin admin mux")
+	}
+}
+
+func TestStartEngineWithCleanupJoinsStartAndStopFailures(t *testing.T) {
+	startErr := errors.New("start failed")
+	stopErr := errors.New("stop failed")
+	engine := &candidateEngineLifecycleFixture{startErr: startErr, stopErr: stopErr}
+	err := startEngineWithCleanup(context.Background(), engine, "start fixture")
+	if !errors.Is(err, startErr) || !errors.Is(err, stopErr) {
+		t.Fatalf("startEngineWithCleanup error = %v", err)
+	}
+	if engine.startCalls != 1 || engine.stopCalls != 1 {
+		t.Fatalf("lifecycle calls = start %d, stop %d; want 1 each", engine.startCalls, engine.stopCalls)
+	}
+}
+
+func TestRunPostStartHooksWithCleanupStopsEngine(t *testing.T) {
+	hookErr := errors.New("hook failed")
+	stopErr := errors.New("stop failed")
+	engine := &candidateEngineLifecycleFixture{stopErr: stopErr}
+	err := runPostStartHooksWithCleanup(engine, []func() error{
+		func() error { return hookErr },
+	})
+	if !errors.Is(err, hookErr) || !errors.Is(err, stopErr) {
+		t.Fatalf("runPostStartHooksWithCleanup error = %v", err)
+	}
+	if engine.stopCalls != 1 {
+		t.Fatalf("stop calls = %d, want 1", engine.stopCalls)
 	}
 }

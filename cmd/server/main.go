@@ -122,10 +122,23 @@ func (m *externalPluginManagerLifecycleModule) Init(app modular.Application) err
 	if m == nil || m.manager == nil {
 		return fmt.Errorf("external plugin manager lifecycle: manager is nil")
 	}
-	if err := app.RegisterService(externalPluginManagerServiceName, m.manager); err != nil {
+	if err := registerExternalPluginManagerService(app, externalPluginManagerServiceName, m.manager); err != nil {
 		return fmt.Errorf("register external plugin manager service: %w", err)
 	}
+	if err := registerExternalPluginManagerService(app, module.ExternalCredentialResolverRegistrationProviderServiceName, m.manager); err != nil {
+		return fmt.Errorf("register application-scoped credential resolver service: %w", err)
+	}
 	return nil
+}
+
+func registerExternalPluginManagerService(app modular.Application, name string, manager *pluginexternal.ExternalPluginManager) error {
+	if existing, exists := app.SvcRegistry()[name]; exists {
+		if existing != manager {
+			return fmt.Errorf("service %q is already registered with %T", name, existing)
+		}
+		return nil
+	}
+	return app.RegisterService(name, manager)
 }
 
 func (m *externalPluginManagerLifecycleModule) Stop(context.Context) error {
@@ -178,6 +191,14 @@ func loadExternalPluginIntoEngine(manager externalPluginLifecycleManager, engine
 
 // buildEngine creates the workflow engine with all handlers registered and built from config.
 func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+	return buildEngineWithResolverMode(cfg, logger, false)
+}
+
+func buildCandidateEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+	return buildEngineWithResolverMode(cfg, logger, true)
+}
+
+func buildEngineWithResolverMode(cfg *config.WorkflowConfig, logger *slog.Logger, stageCredentialResolvers bool) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
@@ -208,8 +229,18 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// External plugins run as separate processes communicating over gRPC.
 	// Failures are non-fatal — the engine works fine with only builtin plugins.
 	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
+	if stageCredentialResolvers {
+		if err := extMgr.StageCredentialResolvers(); err != nil {
+			return nil, nil, nil, fmt.Errorf("stage external plugin credential resolvers: %w", err)
+		}
+	}
 	extMgr.SetCallbackServer(newExternalCallbackServer(engine))
-	app.RegisterModule(newExternalPluginManagerLifecycleModule(extMgr))
+	extLifecycle := newExternalPluginManagerLifecycleModule(extMgr)
+	if err := extLifecycle.Init(app); err != nil {
+		extMgr.Shutdown()
+		return nil, nil, nil, fmt.Errorf("initialize external plugin manager lifecycle: %w", err)
+	}
+	app.RegisterModule(extLifecycle)
 	discovered, discoverErr := extMgr.DiscoverPlugins()
 	if discoverErr != nil {
 		logger.Warn("Failed to discover external plugins", "error", discoverErr)
@@ -253,9 +284,52 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	return engine, loader, registry, nil
 }
 
+func activateEngineCredentialResolvers(engine *workflow.StdEngine) error {
+	manager, err := externalPluginManagerFromApplication(engine.GetApp())
+	if err != nil {
+		return err
+	}
+	if err := manager.ActivateCredentialResolvers(); err != nil {
+		return fmt.Errorf("activate candidate credential resolvers: %w", err)
+	}
+	return nil
+}
+
 type engineConfigBuildLifecycle interface {
 	BuildFromConfig(*config.WorkflowConfig) error
 	Stop(context.Context) error
+}
+
+type engineStartStopLifecycle interface {
+	Start(context.Context) error
+	Stop(context.Context) error
+}
+
+type engineStopLifecycle interface {
+	Stop(context.Context) error
+}
+
+func cleanupEngineAfterFailure(engine engineStopLifecycle, cause error, cleanupLabel string) error {
+	if stopErr := engine.Stop(context.Background()); stopErr != nil {
+		return errors.Join(cause, fmt.Errorf("%s: %w", cleanupLabel, stopErr))
+	}
+	return cause
+}
+
+func startEngineWithCleanup(ctx context.Context, engine engineStartStopLifecycle, failureLabel string) error {
+	if err := engine.Start(ctx); err != nil {
+		return cleanupEngineAfterFailure(engine, fmt.Errorf("%s: %w", failureLabel, err), "clean up failed engine start")
+	}
+	return nil
+}
+
+func runPostStartHooksWithCleanup(engine engineStopLifecycle, hooks []func() error) error {
+	for _, hook := range hooks {
+		if err := hook(); err != nil {
+			return cleanupEngineAfterFailure(engine, fmt.Errorf("post-start hook failed: %w", err), "clean up failed post-start hook")
+		}
+	}
+	return nil
 }
 
 func buildEngineFromConfig(engine engineConfigBuildLifecycle, cfg *config.WorkflowConfig, cleanup func()) error {
@@ -1000,7 +1074,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		if startErr := eng.Start(context.Background()); startErr != nil {
+		if startErr := startEngineWithCleanup(context.Background(), eng, "start runtime workflow engine"); startErr != nil {
 			return nil, startErr
 		}
 		return func(ctx context.Context) error {
@@ -1164,9 +1238,12 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 
 	// Stage 1: Build candidate. Current engine is still live; if this fails
 	// the old engine continues serving without interruption.
-	newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+	newEngine, _, _, buildErr := buildCandidateEngine(newCfg, logger)
 	if buildErr != nil {
 		return fmt.Errorf("failed to build candidate engine (current engine unchanged): %w", buildErr)
+	}
+	if activationErr := activateEngineCredentialResolvers(newEngine); activationErr != nil {
+		return cleanupEngineAfterFailure(newEngine, activationErr, "clean up rejected candidate engine")
 	}
 
 	// Stage 2: Stop the current engine now that a viable candidate exists.
@@ -1185,36 +1262,47 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 	// Stage 3: Activate candidate.
 	if startErr := newEngine.Start(context.Background()); startErr != nil {
 		logger.Error("Candidate engine failed to start; attempting rollback to previous config", "error", startErr)
-		if stopErr := newEngine.Stop(context.Background()); stopErr != nil {
-			logger.Warn("Failed to stop candidate engine after failed reload start", "error", stopErr)
-		}
+		candidateFailure := cleanupEngineAfterFailure(
+			newEngine,
+			fmt.Errorf("candidate engine start failed: %w", startErr),
+			"clean up candidate after failed reload start",
+		)
 
 		// Rollback: rebuild from previous config and restart.
 		rollbackEngine, _, _, rollbackBuildErr := buildEngine(oldConfig, logger)
 		if rollbackBuildErr != nil {
 			app.currentConfig = oldConfig // keep old config pointer for diagnostics
-			return fmt.Errorf("reload failed AND rollback build failed — process is degraded: candidate=%w, rollback=%v", startErr, rollbackBuildErr)
+			return errors.Join(candidateFailure, fmt.Errorf("rollback build failed — process is degraded: %w", rollbackBuildErr))
 		}
 		app.engine = rollbackEngine
 		app.currentConfig = oldConfig
 		registerManagementServices(logger, app)
-		if rollbackStartErr := rollbackEngine.Start(context.Background()); rollbackStartErr != nil {
-			return fmt.Errorf("reload failed AND rollback start failed — process is degraded: candidate=%w, rollback=%v", startErr, rollbackStartErr)
+		if rollbackStartErr := startEngineWithCleanup(context.Background(), rollbackEngine, "rollback start failed"); rollbackStartErr != nil {
+			return errors.Join(candidateFailure, fmt.Errorf("rollback start failed — process is degraded: %w", rollbackStartErr))
 		}
 		if app.stores.v1Store != nil {
 			if regErr := app.registerPostStartServices(logger); regErr != nil {
-				logger.Warn("Failed to re-register post-start services during rollback", "error", regErr)
+				rollbackFailure := cleanupEngineAfterFailure(
+					rollbackEngine,
+					fmt.Errorf("rollback post-start registration failed: %w", regErr),
+					"clean up rollback engine after post-start registration failure",
+				)
+				return errors.Join(candidateFailure, rollbackFailure)
 			}
 		}
 		logger.Info("Engine reload rolled back to previous config")
-		return fmt.Errorf("reload failed (rolled back to previous config): %w", startErr)
+		return fmt.Errorf("reload failed (rolled back to previous config): %w", candidateFailure)
 	}
 
 	// Stage 4: Re-register post-start services with the new Application's
 	// service registry (stores are already initialized, just need re-wiring).
 	if app.stores.v1Store != nil {
 		if regErr := app.registerPostStartServices(logger); regErr != nil {
-			return fmt.Errorf("failed to re-register post-start services: %w", regErr)
+			return cleanupEngineAfterFailure(
+				newEngine,
+				fmt.Errorf("failed to re-register post-start services: %w", regErr),
+				"clean up candidate after post-start registration failure",
+			)
 		}
 	}
 
@@ -1227,7 +1315,7 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 // that returns a structured result describing what the candidate would expose.
 // If the build fails, the current engine is completely unaffected.
 func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.TryActivateResult, error) {
-	candidateEngine, _, _, buildErr := buildEngine(cfg, app.logger)
+	candidateEngine, _, _, buildErr := buildCandidateEngine(cfg, app.logger)
 	if buildErr != nil {
 		return &module.TryActivateResult{
 			Status: "build_failed",
@@ -1368,15 +1456,15 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	// configured address. The management mux (AI, dynamic components, workflow UI)
 	// listens on a separate management port to avoid conflicts.
 	if app.engine != nil {
-		if err := app.engine.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start workflow engine: %w", err)
+		if err := startEngineWithCleanup(ctx, app.engine, "failed to start workflow engine"); err != nil {
+			return err
 		}
 	}
 
 	// Run post-start hooks (e.g., wiring handlers that depend on started modules)
-	for _, fn := range app.postStartFuncs {
-		if err := fn(); err != nil {
-			return fmt.Errorf("post-start hook failed: %w", err)
+	if app.engine != nil {
+		if err := runPostStartHooksWithCleanup(app.engine, app.postStartFuncs); err != nil {
+			return err
 		}
 	}
 
@@ -1809,13 +1897,13 @@ func runMultiWorkflow(logger *slog.Logger) error {
 
 	// Start admin engine (background — handles admin UI on :8081)
 	if app.engine != nil {
-		if err := app.engine.Start(ctx); err != nil {
-			return fmt.Errorf("start admin engine: %w", err)
+		if err := startEngineWithCleanup(ctx, app.engine, "start admin engine"); err != nil {
+			return err
 		}
 	}
-	for _, fn := range app.postStartFuncs {
-		if err := fn(); err != nil {
-			logger.Warn("Post-start hook failed", "error", err)
+	if app.engine != nil {
+		if err := runPostStartHooksWithCleanup(app.engine, app.postStartFuncs); err != nil {
+			return err
 		}
 	}
 

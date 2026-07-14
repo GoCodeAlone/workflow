@@ -66,8 +66,20 @@ func (m *CloudAccount) Init(app modular.Application) error {
 	}
 	m.region, _ = m.config["region"].(string)
 
-	var err error
-	m.creds, err = m.resolveCredentials()
+	var (
+		err           error
+		registrations []*ExternalCredentialResolverRegistration
+		scoped        bool
+	)
+	if service, exists := app.SvcRegistry()[ExternalCredentialResolverRegistrationProviderServiceName]; exists {
+		provider, ok := service.(ExternalCredentialResolverRegistrationProvider)
+		if !ok {
+			return fmt.Errorf("cloud.account %q: external credential resolver provider has unexpected type %T", m.name, service)
+		}
+		registrations = provider.CredentialResolverRegistrations()
+		scoped = true
+	}
+	m.creds, err = m.resolveCredentialsContextFromRegistrations(context.Background(), false, registrations, scoped)
 	if err != nil {
 		return fmt.Errorf("cloud.account %q: failed to resolve credentials: %w", m.name, err)
 	}
@@ -105,13 +117,7 @@ func (m *CloudAccount) GetCredentials(_ context.Context) (*CloudCredentials, err
 	return m.creds, nil
 }
 
-// resolveCredentials resolves credentials based on provider and credential type config.
-// It dispatches to registered CloudCredentialResolvers via the global registry.
-func (m *CloudAccount) resolveCredentials() (*CloudCredentials, error) {
-	return m.resolveCredentialsContext(context.Background(), false)
-}
-
-func (m *CloudAccount) resolveCredentialsContext(ctx context.Context, externalOnly bool) (*CloudCredentials, error) {
+func (m *CloudAccount) resolveCredentialsContextFromRegistrations(ctx context.Context, externalOnly bool, registrations []*ExternalCredentialResolverRegistration, scoped bool) (*CloudCredentials, error) {
 	creds := &CloudCredentials{
 		Provider: m.provider,
 		Region:   m.region,
@@ -138,10 +144,18 @@ func (m *CloudAccount) resolveCredentialsContext(ctx context.Context, externalOn
 	// Store creds on m so resolvers can write into it directly.
 	m.creds = creds
 
-	resolver, err := selectCredentialResolver(m.provider, m.credType, externalOnly)
+	var lease *credentialResolverLease
+	var err error
+	if scoped {
+		lease, err = selectCredentialResolverFromRegistrations(registrations, m.provider, m.credType, externalOnly)
+	} else {
+		lease, err = selectCredentialResolver(m.provider, m.credType, externalOnly)
+	}
 	if err != nil {
 		return nil, err
 	}
+	defer lease.Release()
+	resolver := lease.resolver
 	// Preserve the additive v0.86 built-in behavior while keeping the external
 	// adapter provider-neutral. Provider-shaped top-level fields are never
 	// interpreted on the external path; the plugin receives the opaque config.
@@ -183,10 +197,12 @@ func ResolveExternalCloudCredentials(ctx context.Context, provider, credentialTy
 		account.region = region
 		account.creds.Region = region
 	}
-	resolver, err := selectCredentialResolver(provider, credentialType, true)
+	lease, err := selectCredentialResolver(provider, credentialType, true)
 	if err != nil {
 		return nil, err
 	}
+	defer lease.Release()
+	resolver := lease.resolver
 	if contextual, ok := resolver.(contextCloudCredentialResolver); ok {
 		err = contextual.ResolveContext(ctx, account)
 	} else {
