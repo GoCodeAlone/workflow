@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/modular"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
 // KubernetesClusterState holds the current state of a managed Kubernetes cluster.
@@ -53,6 +54,10 @@ type kubernetesBackend interface {
 // KubernetesBackendFactory creates a kubernetesBackend for a given cluster type config.
 type KubernetesBackendFactory func(cfg map[string]any) (kubernetesBackend, error)
 
+type kubernetesBackendResolver interface {
+	ResolveKubernetesBackend(string) (pb.ResourceDriverClient, string, bool)
+}
+
 // kubernetesBackendRegistry maps cluster type name to its factory.
 var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
 
@@ -89,9 +94,8 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 		clusterType = "kind"
 	}
 
-	if _, isCore := reservedKubernetesBackendTypes[clusterType]; isCore {
-		// SDK-free in-core backend (kind/k3s/eks/aks) — use the in-process
-		// factory map unchanged.
+	// kind/k3s are deliberately core-local and never consult plugin state.
+	if _, coreLocal := reservedKubernetesBackendTypes[clusterType]; coreLocal {
 		factory, ok := kubernetesBackendRegistry[clusterType]
 		if !ok {
 			return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
@@ -102,19 +106,32 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 		}
 		m.backend = backend
 	} else {
-		// Not an in-core cluster type — consult the plugin-backend registry.
-		// The engine populates kubernetesBackendClientRegistryInstance at
-		// plugin-load time; a resolved type (e.g. gke) is served over gRPC via
-		// the ResourceDriver contract, wrapped in grpcKubernetesBackend. Per
-		// ADR 0037.
-		client, ok := kubernetesBackendClientRegistryInstance.resolve(clusterType)
-		if !ok {
+		client, scoped, err := resolveApplicationKubernetesBackend(app, clusterType)
+		if err != nil {
+			return fmt.Errorf("platform.kubernetes %q: %w", m.name, err)
+		}
+		if !scoped {
+			// Compatibility for callers that initialize modules without a
+			// StdEngine. Engine-built applications always publish a scoped
+			// registry and never consult this singleton.
+			client, _ = kubernetesBackendClientRegistryInstance.resolve(clusterType)
+		}
+		if client != nil {
+			m.backend = newGRPCKubernetesBackend(client)
+		} else if factory, ok := kubernetesBackendRegistry[clusterType]; ok {
+			// Retained aks/eks compatibility backends apply only when the
+			// current engine has no provider declaration for the exact name.
+			backend, createErr := factory(m.config)
+			if createErr != nil {
+				return fmt.Errorf("platform.kubernetes %q: creating backend: %w", m.name, createErr)
+			}
+			m.backend = backend
+		} else {
 			return fmt.Errorf("platform.kubernetes %q: cluster type %q is not built into workflow core "+
-				"(in-core types: 'kind', 'k3s', 'eks', 'aks'). If %q is a plugin-provided backend "+
-				"(e.g. 'gke' via workflow-plugin-gcp), install and load that plugin",
+				"(in-core types: 'kind', 'k3s'; compatibility fallbacks: 'eks', 'aks'). If %q is a "+
+				"plugin-provided backend, install and load the plugin that declares it",
 				m.name, clusterType, clusterType)
 		}
-		m.backend = newGRPCKubernetesBackend(client)
 	}
 
 	version, _ := m.config["version"].(string)
@@ -126,6 +143,22 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 	}
 
 	return app.RegisterService(m.name, m)
+}
+
+func resolveApplicationKubernetesBackend(app modular.Application, name string) (pb.ResourceDriverClient, bool, error) {
+	service, scoped := app.SvcRegistry()[KubernetesBackendRegistryServiceName]
+	if !scoped {
+		return nil, false, nil
+	}
+	resolver, ok := service.(kubernetesBackendResolver)
+	if !ok {
+		return nil, true, fmt.Errorf("service %q has incompatible type %T", KubernetesBackendRegistryServiceName, service)
+	}
+	client, _, found := resolver.ResolveKubernetesBackend(name)
+	if !found {
+		return nil, true, nil
+	}
+	return client, true, nil
 }
 
 // ProvidesServices declares the service this module provides.

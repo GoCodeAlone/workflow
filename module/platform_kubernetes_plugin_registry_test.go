@@ -3,7 +3,20 @@ package module
 import (
 	"strings"
 	"testing"
+
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
+
+const testKubernetesBackendRegistryServiceName = "workflow.internal.kubernetes-backend-registry"
+
+type testScopedKubernetesBackendRegistry struct {
+	clients map[string]pb.ResourceDriverClient
+}
+
+func (r *testScopedKubernetesBackendRegistry) ResolveKubernetesBackend(name string) (pb.ResourceDriverClient, string, bool) {
+	client, ok := r.clients[name]
+	return client, "test-provider", ok
+}
 
 // TestKubernetesBackendClientRegistry exercises the engine-side registry that
 // maps a plugin-served platform.kubernetes cluster type to a ResourceDriver
@@ -21,10 +34,16 @@ func TestKubernetesBackendClientRegistry(t *testing.T) {
 	if !ok || got != fake {
 		t.Fatalf("resolve gke: ok=%v got=%v", ok, got)
 	}
-	// Reserved in-core cluster types cannot be claimed by a plugin.
-	for _, reserved := range []string{"kind", "k3s", "eks", "aks"} {
+	// Only core-local cluster types cannot be claimed by a plugin.
+	for _, reserved := range []string{"kind", "k3s"} {
 		if err := reg.register(reserved, fake); err == nil {
 			t.Fatalf("register(%q) must fail — reserved in-core cluster type", reserved)
+		}
+	}
+	// Retained provider compatibility backends are plugin-overridable.
+	for _, providerOwned := range []string{"aks", "eks"} {
+		if err := reg.register(providerOwned, fake); err != nil {
+			t.Fatalf("register(%q) must allow provider ownership: %v", providerOwned, err)
 		}
 	}
 	// Empty / whitespace-only names are rejected.
@@ -47,9 +66,37 @@ func TestKubernetesBackendClientRegistry(t *testing.T) {
 	}
 }
 
-// TestRegisterKubernetesBackendClient exercises the exported wrapper the engine
-// calls at plugin-load: a non-reserved name registers into the package-level
-// singleton and resolves; a reserved in-core type name is rejected.
+func TestKubernetesBackendRegistrySameOwnerReplacementDropsStaleNames(t *testing.T) {
+	reg := NewKubernetesBackendRegistry()
+	first := &fakeResourceDriverClient{}
+	replacement := &fakeResourceDriverClient{}
+	if err := reg.Register("provider-a", map[string]pb.ResourceDriverClient{
+		"dropped":  first,
+		"retained": first,
+	}); err != nil {
+		t.Fatalf("Register(initial): %v", err)
+	}
+	if err := reg.Register("provider-a", map[string]pb.ResourceDriverClient{
+		"retained": replacement,
+		"added":    replacement,
+	}); err != nil {
+		t.Fatalf("Register(replacement): %v", err)
+	}
+
+	if client, owner, ok := reg.ResolveKubernetesBackend("dropped"); ok {
+		t.Fatalf("dropped name survived replacement: (%v, %q, %v)", client, owner, ok)
+	}
+	for _, name := range []string{"retained", "added"} {
+		client, owner, ok := reg.ResolveKubernetesBackend(name)
+		if !ok || owner != "provider-a" || client != replacement {
+			t.Fatalf("%s = (%v, %q, %v), want provider-a replacement", name, client, owner, ok)
+		}
+	}
+}
+
+// TestRegisterKubernetesBackendClient exercises the legacy exported wrapper: a
+// non-reserved name registers into the package-level compatibility singleton
+// and resolves; a reserved in-core type name is rejected.
 func TestRegisterKubernetesBackendClient(t *testing.T) {
 	const backend = "gke_wrapper_test"
 	fake := &fakeResourceDriverClient{}
@@ -59,6 +106,7 @@ func TestRegisterKubernetesBackendClient(t *testing.T) {
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
 		delete(kubernetesBackendClientRegistryInstance.clients, backend)
+		delete(kubernetesBackendClientRegistryInstance.owners, backend)
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
 	}()
 	if got, ok := kubernetesBackendClientRegistryInstance.resolve(backend); !ok || got != fake {
@@ -82,6 +130,7 @@ func TestPlatformKubernetes_GKEDispatchToPluginClient(t *testing.T) {
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
 		delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+		delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
 	}()
 
@@ -95,8 +144,7 @@ func TestPlatformKubernetes_GKEDispatchToPluginClient(t *testing.T) {
 }
 
 // TestPlatformKubernetes_GKEWithoutPluginErrors verifies that `type: gke` with
-// no plugin client registered fails Init with a clean error pointing the
-// operator at workflow-plugin-gcp.
+// no plugin client registered fails Init with provider-neutral guidance.
 func TestPlatformKubernetes_GKEWithoutPluginErrors(t *testing.T) {
 	const clusterType = "gke"
 	// Clear any registration left by a sibling test (Go test order within a
@@ -105,14 +153,18 @@ func TestPlatformKubernetes_GKEWithoutPluginErrors(t *testing.T) {
 	// skipping when a concurrent registration is present.
 	kubernetesBackendClientRegistryInstance.mu.Lock()
 	prev, hadPrev := kubernetesBackendClientRegistryInstance.clients[clusterType]
+	prevOwner := kubernetesBackendClientRegistryInstance.owners[clusterType]
 	delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+	delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 	kubernetesBackendClientRegistryInstance.mu.Unlock()
 	defer func() {
 		kubernetesBackendClientRegistryInstance.mu.Lock()
 		if hadPrev {
 			kubernetesBackendClientRegistryInstance.clients[clusterType] = prev
+			kubernetesBackendClientRegistryInstance.owners[clusterType] = prevOwner
 		} else {
 			delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+			delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
 		}
 		kubernetesBackendClientRegistryInstance.mu.Unlock()
 	}()
@@ -122,7 +174,115 @@ func TestPlatformKubernetes_GKEWithoutPluginErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("Init must fail when no gke plugin client is registered")
 	}
-	if !strings.Contains(err.Error(), "workflow-plugin-gcp") {
-		t.Fatalf("error must point the operator to workflow-plugin-gcp, got: %v", err)
+	if !strings.Contains(err.Error(), "plugin-provided backend") {
+		t.Fatalf("error must explain generic plugin ownership, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "workflow-plugin-gcp") {
+		t.Fatalf("error must not hardcode a provider plugin, got: %v", err)
+	}
+}
+
+func TestPlatformKubernetes_ScopedRegistryDoesNotFallBackToGlobal(t *testing.T) {
+	const clusterType = "scoped-miss"
+	globalClient := &fakeResourceDriverClient{}
+	if err := kubernetesBackendClientRegistryInstance.register(clusterType, globalClient); err != nil {
+		t.Fatalf("register legacy global: %v", err)
+	}
+	defer func() {
+		kubernetesBackendClientRegistryInstance.mu.Lock()
+		delete(kubernetesBackendClientRegistryInstance.clients, clusterType)
+		delete(kubernetesBackendClientRegistryInstance.owners, clusterType)
+		kubernetesBackendClientRegistryInstance.mu.Unlock()
+	}()
+
+	app := NewMockApplication()
+	if err := app.RegisterService(testKubernetesBackendRegistryServiceName, &testScopedKubernetesBackendRegistry{
+		clients: map[string]pb.ResourceDriverClient{},
+	}); err != nil {
+		t.Fatalf("RegisterService: %v", err)
+	}
+	m := NewPlatformKubernetes("scoped-miss-cluster", map[string]any{"type": clusterType})
+	err := m.Init(app)
+	if err == nil {
+		t.Fatal("Init must fail instead of resolving a package-global backend when a scoped registry exists")
+	}
+	if !strings.Contains(err.Error(), "install and load the plugin") {
+		t.Fatalf("Init error = %v, want scoped missing-provider guidance", err)
+	}
+}
+
+func TestPlatformKubernetes_PrefersScopedProviderForCompatibilityBackends(t *testing.T) {
+	for _, clusterType := range []string{"aks", "eks"} {
+		t.Run(clusterType, func(t *testing.T) {
+			app := NewMockApplication()
+			if err := app.RegisterService(testKubernetesBackendRegistryServiceName, &testScopedKubernetesBackendRegistry{
+				clients: map[string]pb.ResourceDriverClient{clusterType: &fakeResourceDriverClient{}},
+			}); err != nil {
+				t.Fatalf("RegisterService: %v", err)
+			}
+
+			m := NewPlatformKubernetes(clusterType+"-cluster", map[string]any{"type": clusterType})
+			if err := m.Init(app); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			if _, ok := m.backend.(*grpcKubernetesBackend); !ok {
+				t.Fatalf("m.backend = %T, want provider-owned *grpcKubernetesBackend", m.backend)
+			}
+		})
+	}
+}
+
+func TestPlatformKubernetes_NoProviderKeepsCompatibilityFallbacks(t *testing.T) {
+	tests := []struct {
+		clusterType string
+		assert      func(t *testing.T, backend kubernetesBackend)
+	}{
+		{"aks", func(t *testing.T, backend kubernetesBackend) {
+			if _, ok := backend.(*aksBackend); !ok {
+				t.Fatalf("backend = %T, want *aksBackend", backend)
+			}
+		}},
+		{"eks", func(t *testing.T, backend kubernetesBackend) {
+			if _, ok := backend.(*eksErrorBackend); !ok {
+				t.Fatalf("backend = %T, want *eksErrorBackend", backend)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.clusterType, func(t *testing.T) {
+			app := NewMockApplication()
+			if err := app.RegisterService(testKubernetesBackendRegistryServiceName, &testScopedKubernetesBackendRegistry{
+				clients: map[string]pb.ResourceDriverClient{},
+			}); err != nil {
+				t.Fatalf("RegisterService: %v", err)
+			}
+
+			m := NewPlatformKubernetes(tt.clusterType+"-cluster", map[string]any{"type": tt.clusterType})
+			if err := m.Init(app); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			tt.assert(t, m.backend)
+		})
+	}
+}
+
+func TestPlatformKubernetes_CoreLocalBackendsCannotBeClaimed(t *testing.T) {
+	for _, clusterType := range []string{"kind", "k3s"} {
+		t.Run(clusterType, func(t *testing.T) {
+			app := NewMockApplication()
+			if err := app.RegisterService(testKubernetesBackendRegistryServiceName, &testScopedKubernetesBackendRegistry{
+				clients: map[string]pb.ResourceDriverClient{clusterType: &fakeResourceDriverClient{}},
+			}); err != nil {
+				t.Fatalf("RegisterService: %v", err)
+			}
+
+			m := NewPlatformKubernetes(clusterType+"-cluster", map[string]any{"type": clusterType})
+			if err := m.Init(app); err != nil {
+				t.Fatalf("Init: %v", err)
+			}
+			if _, ok := m.backend.(*kindBackend); !ok {
+				t.Fatalf("m.backend = %T, want unclaimable core-local *kindBackend", m.backend)
+			}
+		})
 	}
 }

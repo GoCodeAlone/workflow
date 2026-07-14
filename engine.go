@@ -94,6 +94,10 @@ type StdEngine struct {
 	// block is declared in the config. Nil when no infrastructure is declared.
 	provisioner *infra.Provisioner
 
+	// kubernetesBackends is scoped to this engine and published to its
+	// modular.Application before module initialization.
+	kubernetesBackends *module.KubernetesBackendRegistry
+
 	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
 	configHash string
@@ -160,6 +164,7 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		triggerTypeMap:        make(map[string]string),
 		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
 		pipelineRegistry:      make(map[string]*module.Pipeline),
+		kubernetesBackends:    module.NewKubernetesBackendRegistry(),
 	}
 	// Register the step.workflow_call factory with a closure that looks up
 	// pipelines from this engine's registry at execution time.
@@ -374,20 +379,16 @@ func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool
 			}
 		}
 	}
-	// Register any platform.kubernetes backends the plugin serves into module's
-	// package-level registry, so `platform.kubernetes` configs with a
-	// plugin-provided `type:` (e.g. gke) dispatch to the plugin-served
-	// ResourceDriver-backed backend. Per ADR 0037 — folds into the existing
-	// ResourceDriver contract, no new proto surface.
+	// Register every declared platform.kubernetes backend as one owner-scoped,
+	// atomic batch. The registry belongs to this engine, so concurrent candidate
+	// engines cannot overwrite one another's selections.
 	if kb, ok := p.(plugin.KubernetesBackendProvider); ok {
 		clients, err := kb.KubernetesBackendClients()
 		if err != nil {
 			return fmt.Errorf("load plugin %q: kubernetes backends: %w", p.EngineManifest().Name, err)
 		}
-		for name, client := range clients {
-			if err := module.RegisterKubernetesBackendClient(name, client); err != nil {
-				return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
-			}
+		if err := e.kubernetesBackends.Register(p.EngineManifest().Name, clients); err != nil {
+			return fmt.Errorf("load plugin %q: kubernetes backends: %w", p.EngineManifest().Name, err)
 		}
 	}
 	e.enginePlugins = append(e.enginePlugins, p)
@@ -663,6 +664,14 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				return fmt.Errorf("pre-init wiring hook %q failed: %w", hook.Name, err)
 			}
 		}
+	}
+	if existing, exists := e.app.SvcRegistry()[module.KubernetesBackendRegistryServiceName]; exists {
+		registry, ok := existing.(*module.KubernetesBackendRegistry)
+		if !ok || registry != e.kubernetesBackends {
+			return fmt.Errorf("application service %q is already registered by another owner", module.KubernetesBackendRegistryServiceName)
+		}
+	} else if err := e.app.RegisterService(module.KubernetesBackendRegistryServiceName, e.kubernetesBackends); err != nil {
+		return fmt.Errorf("register engine kubernetes backend registry: %w", err)
 	}
 	if err := e.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize modules: %w", err)
