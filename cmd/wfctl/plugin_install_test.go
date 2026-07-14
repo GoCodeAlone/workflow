@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 // captureTransport is a test http.RoundTripper that:
@@ -1515,5 +1517,54 @@ func TestRegistryManifest_UnmarshalPreservesRequiredConfig(t *testing.T) {
 	}
 	if len(m.ConfigTargets) != 1 || m.ConfigTargets[0].Provider != "github" {
 		t.Fatalf("config_targets = %+v", m.ConfigTargets)
+	}
+}
+
+func TestProviderManifestRoundTripInstalledRegistry(t *testing.T) {
+	_ = RegistryManifest{CredentialSources: []config.CredentialSourceDecl{{Source: "literal-api"}}}
+	raw := []byte(`{
+		"name":"provider-plugin","version":"1.0.0","author":"Test","description":"provider declarations","type":"external","tier":"community","license":"Apache-2.0",
+		"credentialSources":[{"source":"digitalocean.spaces","concurrencyMode":"provider_idempotent","outputs":[{"key":"accessKeyId","sensitive":false},{"key":"secretAccessKey"}],"identifierKey":"accessKeyId"}],
+		"credentialResolvers":[{"provider":"aws","credentialTypes":["static","env"]}],
+		"kubernetesBackends":[{"name":"gke","resourceType":"infra.gke_cluster"}],
+		"containerRegistries":[{"type":"ghcr","operations":["login","logout","push","prune"]}],
+		"secretStores":[{"type":"aws-secrets-manager","operations":["get","list","stat_all","check_access"],"scopes":["account","region"]}],
+		"consumesContracts":[{"id":"workflow.provider.credential-issuer","protocol":{"min":1,"max":2}}]
+	}`)
+	var manifest RegistryManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal registry manifest: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "plugin.json")
+	if err := writeInstalledManifest(path, &manifest); err != nil {
+		t.Fatalf("write installed manifest: %v", err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read installed manifest: %v", err)
+	}
+	assertProviderManifestFieldsPreserved(t, raw, out)
+}
+
+func assertProviderManifestFieldsPreserved(t *testing.T, wantJSON, gotJSON []byte) {
+	t.Helper()
+	var want, got map[string]json.RawMessage
+	if err := json.Unmarshal(wantJSON, &want); err != nil {
+		t.Fatalf("decode expected manifest: %v", err)
+	}
+	if err := json.Unmarshal(gotJSON, &got); err != nil {
+		t.Fatalf("decode round-trip manifest: %v", err)
+	}
+	for _, field := range []string{"credentialSources", "credentialResolvers", "kubernetesBackends", "containerRegistries", "secretStores", "consumesContracts"} {
+		var wantValue, gotValue any
+		if err := json.Unmarshal(want[field], &wantValue); err != nil {
+			t.Fatalf("decode expected %s: %v", field, err)
+		}
+		if err := json.Unmarshal(got[field], &gotValue); err != nil {
+			t.Fatalf("decode round-trip %s: %v", field, err)
+		}
+		if !reflect.DeepEqual(gotValue, wantValue) {
+			t.Errorf("%s not preserved: got %s, want %s", field, got[field], want[field])
+		}
 	}
 }

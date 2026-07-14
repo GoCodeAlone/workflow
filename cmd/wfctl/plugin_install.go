@@ -1731,7 +1731,13 @@ type installedPluginJSON struct {
 	// `wfctl vars setup --plugin <name>` can configure provider variables.
 	RequiredConfig []PluginRequiredConfig `json:"required_config,omitempty"`
 	// ConfigTargets carries through non-secret variable/config target metadata.
-	ConfigTargets []PluginConfigTarget `json:"config_targets,omitempty"`
+	ConfigTargets       []PluginConfigTarget            `json:"config_targets,omitempty"`
+	CredentialSources   []config.CredentialSourceDecl   `json:"credentialSources,omitempty"`
+	CredentialResolvers []config.CredentialResolverDecl `json:"credentialResolvers,omitempty"`
+	KubernetesBackends  []config.KubernetesBackendDecl  `json:"kubernetesBackends,omitempty"`
+	ContainerRegistries []config.ContainerRegistryDecl  `json:"containerRegistries,omitempty"`
+	SecretStores        []config.SecretStoreDecl        `json:"secretStores,omitempty"`
+	ConsumesContracts   []config.ConsumedContractDecl   `json:"consumesContracts,omitempty"`
 }
 
 type installedPluginCapabilities struct {
@@ -1757,20 +1763,26 @@ type installedPluginCapabilities struct {
 // plugin.PluginManifest so that ExternalPluginManager.LoadPlugin() can validate it.
 func writeInstalledManifest(path string, m *RegistryManifest) error {
 	pj := installedPluginJSON{
-		Name:            m.Name,
-		Version:         m.Version,
-		Author:          m.Author,
-		Description:     m.Description,
-		License:         m.License,
-		Repository:      m.Repository,
-		Tier:            m.Tier,
-		Tags:            m.Keywords,
-		Type:            m.Type,
-		IaCProvider:     m.IaCProvider,
-		RequiredSecrets: m.RequiredSecrets,
-		SecretTargets:   m.SecretTargets,
-		RequiredConfig:  m.RequiredConfig,
-		ConfigTargets:   m.ConfigTargets,
+		Name:                m.Name,
+		Version:             m.Version,
+		Author:              m.Author,
+		Description:         m.Description,
+		License:             m.License,
+		Repository:          m.Repository,
+		Tier:                m.Tier,
+		Tags:                m.Keywords,
+		Type:                m.Type,
+		IaCProvider:         m.IaCProvider,
+		RequiredSecrets:     m.RequiredSecrets,
+		SecretTargets:       m.SecretTargets,
+		RequiredConfig:      m.RequiredConfig,
+		ConfigTargets:       m.ConfigTargets,
+		CredentialSources:   m.CredentialSources,
+		CredentialResolvers: m.CredentialResolvers,
+		KubernetesBackends:  m.KubernetesBackends,
+		ContainerRegistries: m.ContainerRegistries,
+		SecretStores:        m.SecretStores,
+		ConsumesContracts:   m.ConsumesContracts,
 	}
 	if m.Capabilities != nil {
 		pj.Capabilities = &installedPluginCapabilities{

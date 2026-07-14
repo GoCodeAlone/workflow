@@ -1,7 +1,9 @@
 package sdk
 
 import (
+	"encoding/json"
 	"errors"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -10,6 +12,84 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
+
+func TestProviderManifestRoundTripSDK(t *testing.T) {
+	_ = Manifest{CredentialSources: []CredentialSourceDecl{{Source: "literal-api"}}}
+	raw := []byte(`{
+		"name":"provider-plugin",
+		"credentialSources":[{"source":"digitalocean.spaces","concurrencyMode":"provider_idempotent","outputs":[{"key":"accessKeyId","sensitive":false},{"key":"secretAccessKey"}],"identifierKey":"accessKeyId"}],
+		"credentialResolvers":[{"provider":"aws","credentialTypes":["static","env"]}],
+		"kubernetesBackends":[{"name":"gke","resourceType":"infra.gke_cluster"}],
+		"containerRegistries":[{"type":"ghcr","operations":["login","logout","push","prune"]}],
+		"secretStores":[{"type":"aws-secrets-manager","operations":["get","list","stat_all","check_access"],"scopes":["account","region"]}],
+		"consumesContracts":[{"id":"workflow.provider.credential-issuer","protocol":{"min":1,"max":2}}]
+	}`)
+	manifest, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("parse provider manifest: %v", err)
+	}
+	out, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal provider manifest: %v", err)
+	}
+	assertProviderManifestFieldsPreserved(t, raw, out)
+}
+
+func TestManifestProviderDeclarationsRejectUnknownFields(t *testing.T) {
+	tests := map[string]string{
+		"credential source":   `{"name":"x","credentialSources":[{"source":"s","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"}],"identifierKey":"id","unknown":true}]}`,
+		"credential resolver": `{"name":"x","credentialResolvers":[{"provider":"aws","credentialTypes":["env"],"unknown":true}]}`,
+		"kubernetes backend":  `{"name":"x","kubernetesBackends":[{"name":"gke","resourceType":"infra.gke_cluster","unknown":true}]}`,
+		"container registry":  `{"name":"x","containerRegistries":[{"type":"ghcr","operations":["login"],"unknown":true}]}`,
+		"secret store":        `{"name":"x","secretStores":[{"type":"aws-secrets-manager","operations":["get"],"scopes":["account"],"unknown":true}]}`,
+		"consumed contract":   `{"name":"x","consumesContracts":[{"id":"contract","protocol":{"min":1,"max":1},"unknown":true}]}`,
+	}
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseManifest([]byte(input)); err == nil {
+				t.Fatal("ParseManifest() accepted unknown declaration field")
+			}
+		})
+	}
+}
+
+func TestManifestProviderDeclarationsRejectSemanticViolations(t *testing.T) {
+	tests := map[string]string{
+		"duplicate source": `{"name":"x","credentialSources":[{"source":"s","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"}],"identifierKey":"id"},{"source":"s","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"}],"identifierKey":"id"}]}`,
+		"resolver type":    `{"name":"x","credentialResolvers":[{"provider":"aws","credentialTypes":["application_default"]}]}`,
+		"protocol range":   `{"name":"x","consumesContracts":[{"id":"contract","protocol":{"min":2,"max":1}}]}`,
+	}
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseManifest([]byte(input)); err == nil {
+				t.Fatal("ParseManifest() accepted invalid provider declarations")
+			}
+		})
+	}
+}
+
+func assertProviderManifestFieldsPreserved(t *testing.T, wantJSON, gotJSON []byte) {
+	t.Helper()
+	var want, got map[string]json.RawMessage
+	if err := json.Unmarshal(wantJSON, &want); err != nil {
+		t.Fatalf("decode expected manifest: %v", err)
+	}
+	if err := json.Unmarshal(gotJSON, &got); err != nil {
+		t.Fatalf("decode round-trip manifest: %v", err)
+	}
+	for _, field := range []string{"credentialSources", "credentialResolvers", "kubernetesBackends", "containerRegistries", "secretStores", "consumesContracts"} {
+		var wantValue, gotValue any
+		if err := json.Unmarshal(want[field], &wantValue); err != nil {
+			t.Fatalf("decode expected %s: %v", field, err)
+		}
+		if err := json.Unmarshal(got[field], &gotValue); err != nil {
+			t.Fatalf("decode round-trip %s: %v", field, err)
+		}
+		if !reflect.DeepEqual(gotValue, wantValue) {
+			t.Errorf("%s not preserved: got %s, want %s", field, got[field], want[field])
+		}
+	}
+}
 
 // TestManifest_IaCProvider_ComputePlanVersion exercises the
 // iacProvider.computePlanVersion field at the schema layer. Per

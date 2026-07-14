@@ -70,6 +70,15 @@ func New() *Plugin {
 					"step.deploy_rollback",
 					"step.container_build",
 				},
+				OverridableTypes: []string{
+					"aws.codebuild",
+					"step.codebuild_create_project",
+					"step.codebuild_start",
+					"step.codebuild_status",
+					"step.codebuild_logs",
+					"step.codebuild_delete_project",
+					"step.codebuild_list_builds",
+				},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "cicd-pipeline", Role: "provider", Priority: 50},
 				},

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/GoCodeAlone/workflow/config"
 )
 
 const (
@@ -24,26 +26,32 @@ type PluginDependency struct {
 
 // RegistryManifest is the manifest format for the GoCodeAlone/workflow-registry.
 type RegistryManifest struct {
-	Name             string                     `json:"name"`
-	Version          string                     `json:"version"`
-	Author           string                     `json:"author"`
-	Description      string                     `json:"description"`
-	Source           string                     `json:"source,omitempty"`
-	Type             string                     `json:"type"`
-	Tier             string                     `json:"tier"`
-	Status           string                     `json:"status,omitempty"`  // verified | experimental | deprecated
-	Private          bool                       `json:"private,omitempty"` // mirrors manifest.json `private` field
-	License          string                     `json:"license"`
-	MinEngineVersion string                     `json:"minEngineVersion,omitempty"`
-	Repository       string                     `json:"repository,omitempty"`
-	Keywords         []string                   `json:"keywords,omitempty"`
-	Homepage         string                     `json:"homepage,omitempty"`
-	Capabilities     *RegistryCapabilities      `json:"capabilities,omitempty"`
-	IaCProvider      *RegistryIaCProvider       `json:"iacProvider,omitempty"`
-	Contracts        []pluginContractDescriptor `json:"contracts,omitempty"`
-	Downloads        []PluginDownload           `json:"downloads,omitempty"`
-	Assets           *PluginAssets              `json:"assets,omitempty"`
-	Dependencies     []PluginDependency         `json:"dependencies,omitempty"`
+	Name                string                          `json:"name"`
+	Version             string                          `json:"version"`
+	Author              string                          `json:"author"`
+	Description         string                          `json:"description"`
+	Source              string                          `json:"source,omitempty"`
+	Type                string                          `json:"type"`
+	Tier                string                          `json:"tier"`
+	Status              string                          `json:"status,omitempty"`  // verified | experimental | deprecated
+	Private             bool                            `json:"private,omitempty"` // mirrors manifest.json `private` field
+	License             string                          `json:"license"`
+	MinEngineVersion    string                          `json:"minEngineVersion,omitempty"`
+	Repository          string                          `json:"repository,omitempty"`
+	Keywords            []string                        `json:"keywords,omitempty"`
+	Homepage            string                          `json:"homepage,omitempty"`
+	Capabilities        *RegistryCapabilities           `json:"capabilities,omitempty"`
+	IaCProvider         *RegistryIaCProvider            `json:"iacProvider,omitempty"`
+	Contracts           []pluginContractDescriptor      `json:"contracts,omitempty"`
+	Downloads           []PluginDownload                `json:"downloads,omitempty"`
+	Assets              *PluginAssets                   `json:"assets,omitempty"`
+	Dependencies        []PluginDependency              `json:"dependencies,omitempty"`
+	CredentialSources   []config.CredentialSourceDecl   `json:"credentialSources,omitempty"`
+	CredentialResolvers []config.CredentialResolverDecl `json:"credentialResolvers,omitempty"`
+	KubernetesBackends  []config.KubernetesBackendDecl  `json:"kubernetesBackends,omitempty"`
+	ContainerRegistries []config.ContainerRegistryDecl  `json:"containerRegistries,omitempty"`
+	SecretStores        []config.SecretStoreDecl        `json:"secretStores,omitempty"`
+	ConsumesContracts   []config.ConsumedContractDecl   `json:"consumesContracts,omitempty"`
 	// RequiredSecrets mirrors the plugin.json `required_secrets[]`
 	// block. Consumed by `wfctl secrets setup --plugin <name>` to
 	// prompt for + write each secret to the chosen GitHub scope.

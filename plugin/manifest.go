@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/dynamic"
 	"github.com/GoCodeAlone/workflow/modernize"
 	"github.com/GoCodeAlone/workflow/schema"
@@ -37,6 +38,13 @@ type PluginManifest struct {
 	Tags         []string               `json:"tags,omitempty" yaml:"tags,omitempty"`
 	Repository   string                 `json:"repository,omitempty" yaml:"repository,omitempty"`
 	Tier         PluginTier             `json:"tier,omitempty" yaml:"tier,omitempty"`
+
+	CredentialSources   []CredentialSourceDecl   `json:"credentialSources,omitempty" yaml:"credentialSources,omitempty"`
+	CredentialResolvers []CredentialResolverDecl `json:"credentialResolvers,omitempty" yaml:"credentialResolvers,omitempty"`
+	KubernetesBackends  []KubernetesBackendDecl  `json:"kubernetesBackends,omitempty" yaml:"kubernetesBackends,omitempty"`
+	ContainerRegistries []ContainerRegistryDecl  `json:"containerRegistries,omitempty" yaml:"containerRegistries,omitempty"`
+	SecretStores        []SecretStoreDecl        `json:"secretStores,omitempty" yaml:"secretStores,omitempty"`
+	ConsumesContracts   []ConsumedContractDecl   `json:"consumesContracts,omitempty" yaml:"consumesContracts,omitempty"`
 
 	// Engine plugin declarations
 	Capabilities  []CapabilityDecl `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
@@ -112,6 +120,24 @@ type PluginManifest struct {
 	// GitHub Actions repository, environment, or organization variables.
 	ConfigTargets []PluginConfigTarget `json:"config_targets,omitempty" yaml:"config_targets,omitempty"`
 }
+
+// Provider declaration aliases keep plugin authors on the full-manifest API
+// while sharing one cycle-safe representation with config, the SDK, and wfctl.
+type CredentialConcurrencyMode = config.CredentialConcurrencyMode
+type ProviderDeclarations = config.ProviderDeclarations
+type CredentialSourceDecl = config.CredentialSourceDecl
+type CredentialOutputDecl = config.CredentialOutputDecl
+type CredentialResolverDecl = config.CredentialResolverDecl
+type KubernetesBackendDecl = config.KubernetesBackendDecl
+type ContainerRegistryDecl = config.ContainerRegistryDecl
+type SecretStoreDecl = config.SecretStoreDecl
+type ProtocolVersionRange = config.ProtocolVersionRange
+type ConsumedContractDecl = config.ConsumedContractDecl
+
+const (
+	CredentialConcurrencyProviderIdempotent = config.CredentialConcurrencyProviderIdempotent
+	CredentialConcurrencySingleWriter       = config.CredentialConcurrencySingleWriter
+)
 
 // PluginRequiredConfig is a non-secret setup value required by a plugin.
 type PluginRequiredConfig struct {
@@ -290,7 +316,21 @@ func (m *PluginManifest) Validate() error {
 			return fmt.Errorf("manifest: dependency %q has invalid constraint %q: %w", dep.Name, dep.Constraint, err)
 		}
 	}
+	if err := m.providerDeclarations().Validate(); err != nil {
+		return fmt.Errorf("manifest: %w", err)
+	}
 	return nil
+}
+
+func (m *PluginManifest) providerDeclarations() config.ProviderDeclarations {
+	return config.ProviderDeclarations{
+		CredentialSources:   m.CredentialSources,
+		CredentialResolvers: m.CredentialResolvers,
+		KubernetesBackends:  m.KubernetesBackends,
+		ContainerRegistries: m.ContainerRegistries,
+		SecretStores:        m.SecretStores,
+		ConsumesContracts:   m.ConsumesContracts,
+	}
 }
 
 var pluginNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
