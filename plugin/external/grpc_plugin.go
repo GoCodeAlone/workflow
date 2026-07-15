@@ -116,3 +116,13 @@ func (p *PluginClient) ContainerRegistryClient() pb.ContainerRegistryClient {
 	}
 	return pb.NewContainerRegistryClient(p.Conn())
 }
+
+// SecretStoreClient constructs the typed optional read-only secret-store
+// client over the same connection owned by the plugin manager. Hosts must also
+// require the SecretStore ContractRegistry advertisement before use.
+func (p *PluginClient) SecretStoreClient() pb.SecretStoreClient {
+	if p == nil || p.Conn() == nil {
+		return nil
+	}
+	return pb.NewSecretStoreClient(p.Conn())
+}

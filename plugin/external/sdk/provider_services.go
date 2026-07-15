@@ -17,6 +17,7 @@ type providerServices struct {
 	credentialIssuer   *credentialIssuerServer
 	credentialResolver *credentialResolverServer
 	containerRegistry  *containerRegistryServer
+	secretStore        *secretStoreServer
 }
 
 func (services *providerServices) register(server *grpc.Server) error {
@@ -40,6 +41,12 @@ func (services *providerServices) register(server *grpc.Server) error {
 			return fmt.Errorf("register container registry service: %w", err)
 		}
 		pb.RegisterContainerRegistryServer(server, services.containerRegistry)
+	}
+	if services.secretStore != nil {
+		if err := services.secretStore.validate(); err != nil {
+			return fmt.Errorf("register secret store service: %w", err)
+		}
+		pb.RegisterSecretStoreServer(server, services.secretStore)
 	}
 	return nil
 }
@@ -83,6 +90,18 @@ func (services *providerServices) contractDescriptors() []*pb.ContractDescriptor
 			MessageNames:    []string{"ContainerRegistryDeclaration", "ContainerRegistryConfig", "ContainerRegistryLoginRequest", "ContainerRegistryLogoutRequest", "ContainerRegistryPushRequest", "ContainerRegistryPruneRequest", "ContainerRegistryOperationResponse", "ContainerRegistryResult", "ContainerRegistryError"},
 			GoImportPath:    providerServicesGoImportPath,
 			ProtocolVersion: ContainerRegistryProtocolVersion,
+		})
+	}
+	if services.secretStore != nil && services.secretStore.validate() == nil {
+		descriptors = append(descriptors, &pb.ContractDescriptor{
+			Kind:            pb.ContractKind_CONTRACT_KIND_SERVICE,
+			Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			ServiceName:     pb.SecretStore_ServiceDesc.ServiceName,
+			ContractType:    SecretStoreContractID,
+			ProtoPackage:    "workflow.plugin.external.secrets",
+			MessageNames:    []string{"SecretStoreDeclaration", "SecretStoreTarget", "SecretStoreGetRequest", "SecretStoreGetResult", "SecretStoreGetResponse", "SecretStoreListRequest", "SecretStoreListResult", "SecretStoreListResponse", "SecretStoreStatAllRequest", "SecretStoreMetadata", "SecretStoreStatAllResult", "SecretStoreStatAllResponse", "SecretStoreCheckAccessRequest", "SecretStoreCheckAccessResponse", "SecretStoreError"},
+			GoImportPath:    providerServicesGoImportPath,
+			ProtocolVersion: SecretStoreProtocolVersion,
 		})
 	}
 	return descriptors
