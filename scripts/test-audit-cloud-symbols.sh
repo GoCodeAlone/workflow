@@ -6,6 +6,7 @@ TMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TMP_ROOT"' EXIT
 TEST_FAILURES=0
 K8S_AUDIT_BIN="$TMP_ROOT/kubernetes-boundary-audit"
+SYMLINK_HELPER_BIN="$TMP_ROOT/create-symlink"
 
 fail() {
   echo "test-audit-cloud-symbols: FAIL: $*" >&2
@@ -30,36 +31,174 @@ write_allowed_fixture() {
   cat >"$root/module/platform_kubernetes.go" <<'EOF'
 package module
 
-type KubernetesBackendFactory func()
+type kubernetesBackend interface{}
+
+type KubernetesBackendFactory func(map[string]any) (kubernetesBackend, error)
+
+type CloudCredentialProvider interface{}
+
+type KubernetesClusterState struct {
+	Name string
+	Provider string
+	Version string
+	Status string
+}
 
 var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
+var reservedKubernetesBackendTypes = map[string]struct{}{}
 
 func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) { kubernetesBackendRegistry[clusterType] = factory }
 
-type PlatformKubernetes struct{}
+type PlatformKubernetes struct {
+	name string
+	config map[string]any
+	provider CloudCredentialProvider
+	state *KubernetesClusterState
+	backend kubernetesBackend
+}
 
-func (*PlatformKubernetes) Init(clusterType string) {
-	_, _ = kubernetesBackendRegistry[clusterType]
-	_, _ = kubernetesBackendRegistry[clusterType]
+type KubernetesBackendBinding struct {
+	Name string
+	ResourceType string
+	Client any
+}
+
+func (m *PlatformKubernetes) Init(app any) error {
+	accountName, _ := m.config["account"].(string)
+	if accountName != "" {
+		svc, ok := app.SvcRegistry()[accountName]
+		if !ok {
+			return fmt.Errorf("account service not found")
+		}
+		provider, ok := svc.(CloudCredentialProvider)
+		if !ok {
+			return fmt.Errorf("account service has wrong type")
+		}
+		m.provider = provider
+	}
+
+	clusterType, _ := m.config["type"].(string)
+	if clusterType == "" {
+		clusterType = "kind"
+	}
+
+	if _, coreLocal := reservedKubernetesBackendTypes[clusterType]; coreLocal {
+		factory, ok := kubernetesBackendRegistry[clusterType]
+		if !ok {
+			return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
+		}
+		backend, err := factory(m.config)
+		if err != nil {
+			return err
+		}
+		m.backend = backend
+	} else {
+		binding, scoped, err := resolveApplicationKubernetesBackend(app, clusterType)
+		if err != nil {
+			return err
+		}
+		if !scoped {
+			binding, _ = kubernetesBackendClientRegistryInstance.resolve(clusterType)
+		}
+		if binding.Client != nil {
+			m.backend = newGRPCKubernetesBackend(binding.Name, binding.ResourceType, binding.Client)
+		} else if factory, ok := kubernetesBackendRegistry[clusterType]; ok {
+			backend, createErr := factory(m.config)
+			if createErr != nil {
+				return createErr
+			}
+			m.backend = backend
+		} else {
+			return fmt.Errorf("platform.kubernetes %q: cluster type %q is not built into workflow core "+
+				"(in-core types: 'kind', 'k3s'; compatibility fallbacks: 'eks', 'aks'). If %q is a "+
+				"plugin-provided backend, install and load the plugin that declares it",
+				m.name, clusterType, clusterType)
+		}
+	}
+
+	version, _ := m.config["version"].(string)
+	m.state = &KubernetesClusterState{
+		Name: m.name,
+		Provider: clusterType,
+		Version: version,
+		Status: "pending",
+	}
+	return app.RegisterService(m.name, m)
 }
 EOF
   cat >"$root/module/platform_kubernetes_core.go" <<'EOF'
 package module
 
+type kindBackend struct{}
+type eksErrorBackend struct{}
+type aksBackend struct{}
+
 func init() {
-	RegisterKubernetesBackend("kind", nil)
-	RegisterKubernetesBackend("k3s", nil)
-	RegisterKubernetesBackend("eks", nil)
-	RegisterKubernetesBackend("aks", nil)
+	RegisterKubernetesBackend("kind", func(_ map[string]any) (kubernetesBackend, error) {
+		return &kindBackend{}, nil
+	})
+	RegisterKubernetesBackend("k3s", func(_ map[string]any) (kubernetesBackend, error) {
+		return &kindBackend{}, nil
+	})
+	RegisterKubernetesBackend("eks", func(_ map[string]any) (kubernetesBackend, error) {
+		return &eksErrorBackend{}, nil
+	})
+	RegisterKubernetesBackend("aks", func(_ map[string]any) (kubernetesBackend, error) {
+		return &aksBackend{}, nil
+	})
 }
 EOF
+}
+
+make_symlink_or_skip() {
+  local target=$1
+  local link=$2
+  local label=$3
+  local helper_status
+  local error_output
+  set +e
+  error_output=$("$SYMLINK_HELPER_BIN" "$target" "$link" 2>&1)
+  helper_status=$?
+  set -e
+  case $helper_status in
+    0)
+      return 0
+      ;;
+    77)
+      echo "test-audit-cloud-symbols: SKIP: $label: $error_output" >&2
+      return 1
+      ;;
+    *)
+      fail "$label: create symlink $link -> $target: $error_output"
+      ;;
+  esac
 }
 
 remove_registration() {
   local root=$1
   local name=$2
   local file="$root/module/platform_kubernetes_core.go"
-  grep -v "RegisterKubernetesBackend(\"$name\"" "$file" >"$file.tmp"
+  awk -v name="$name" '
+    $0 ~ "RegisterKubernetesBackend\\(\\\"" name "\\\"" { skip=1; next }
+    skip && /^\t}\)$/ { skip=0; next }
+    !skip { print }
+  ' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+
+replace_kind_factory_with_expression() {
+  local root=$1
+  local expression=$2
+  local file="$root/module/platform_kubernetes_core.go"
+  awk -v expression="$expression" '
+    /RegisterKubernetesBackend\("kind"/ {
+      print "\tRegisterKubernetesBackend(\"kind\", " expression ")"
+      skip=1
+      next
+    }
+    skip && /^\t}\)$/ { skip=0; next }
+    !skip { print }
+  ' "$file" >"$file.tmp"
   mv "$file.tmp" "$file"
 }
 
@@ -116,7 +255,33 @@ expect_production_failure() {
   [[ "$AUDIT_OUTPUT" == *"kubernetes-boundary-audit: FAIL"* ]] || record_failure "$label: expected audit failure footer, got:\n$AUDIT_OUTPUT"
 }
 
+cat >"$TMP_ROOT/create-symlink.go" <<'EOF'
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "create-symlink requires target and link arguments")
+		os.Exit(2)
+	}
+	if err := os.Symlink(os.Args[1], os.Args[2]); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			fmt.Fprintf(os.Stderr, "symlink creation not permitted: %v\n", err)
+			os.Exit(77)
+		}
+		fmt.Fprintf(os.Stderr, "create symlink: %v\n", err)
+		os.Exit(1)
+	}
+}
+EOF
+
 (cd "$SCRIPT_DIR/.." && GOWORK=off go build -o "$K8S_AUDIT_BIN" ./scripts/kubernetes-boundary-audit) || fail "build Kubernetes boundary audit helper"
+GOWORK=off go build -o "$SYMLINK_HELPER_BIN" "$TMP_ROOT/create-symlink.go" || fail "build symlink test helper"
 
 for bypass in comment-separated parenthesized alias; do
   bypass_root="$TMP_ROOT/bypass-$bypass"
@@ -211,6 +376,169 @@ func mutateRegistryWithoutRegistration() {
 EOF
 expect_failure "canonical registry alias/read/write escape" "$canonical_registry_escape" "kubernetesBackendRegistry reference is only permitted in its declaration and RegisterKubernetesBackend write"
 
+factory_identifier="$TMP_ROOT/factory-identifier"
+write_allowed_fixture "$factory_identifier"
+replace_kind_factory_with_expression "$factory_identifier" "providerFactory"
+expect_failure "provider factory identifier" "$factory_identifier" 'backend "kind" factory must be the canonical kindBackend function literal'
+
+factory_nil="$TMP_ROOT/factory-nil"
+write_allowed_fixture "$factory_nil"
+replace_kind_factory_with_expression "$factory_nil" "nil"
+expect_failure "nil backend factory" "$factory_nil" 'backend "kind" factory must be the canonical kindBackend function literal'
+
+factory_wrapper="$TMP_ROOT/factory-wrapper"
+write_allowed_fixture "$factory_wrapper"
+awk '
+  /RegisterKubernetesBackend\("kind"/ { sub(/, func/, ", (func"); wrapping=1 }
+  wrapping && /^\t}\)$/ { print "\t}))"; wrapping=0; next }
+  { print }
+' "$factory_wrapper/module/platform_kubernetes_core.go" >"$factory_wrapper/module/platform_kubernetes_core.go.tmp"
+mv "$factory_wrapper/module/platform_kubernetes_core.go.tmp" "$factory_wrapper/module/platform_kubernetes_core.go"
+expect_failure "wrapped backend factory" "$factory_wrapper" 'backend "kind" factory must be the canonical kindBackend function literal'
+
+for factory_shape in parameter result body; do
+  factory_shape_root="$TMP_ROOT/factory-shape-$factory_shape"
+  write_allowed_fixture "$factory_shape_root"
+  awk -v shape="$factory_shape" '
+    /RegisterKubernetesBackend\("kind"/ { in_kind=1 }
+    in_kind && shape == "parameter" { sub(/map\[string\]any/, "map[string]string"); shape="done" }
+    in_kind && shape == "result" { sub(/\(kubernetesBackend, error\)/, "kubernetesBackend"); shape="done" }
+    in_kind && shape == "body" && /return &kindBackend{}/ { print "\t\t_ = 1"; shape="done" }
+    { print }
+    in_kind && /^\t}\)$/ { in_kind=0 }
+  ' "$factory_shape_root/module/platform_kubernetes_core.go" >"$factory_shape_root/module/platform_kubernetes_core.go.tmp"
+  mv "$factory_shape_root/module/platform_kubernetes_core.go.tmp" "$factory_shape_root/module/platform_kubernetes_core.go"
+  expect_failure "$factory_shape backend factory shape" "$factory_shape_root" 'backend "kind" factory must be the canonical kindBackend function literal'
+done
+
+factory_swap="$TMP_ROOT/factory-swap"
+write_allowed_fixture "$factory_swap"
+awk '
+  !swapped && /return &kindBackend{}/ { sub(/kindBackend/, "eksErrorBackend"); swapped=1 }
+  { print }
+' "$factory_swap/module/platform_kubernetes_core.go" >"$factory_swap/module/platform_kubernetes_core.go.tmp"
+mv "$factory_swap/module/platform_kubernetes_core.go.tmp" "$factory_swap/module/platform_kubernetes_core.go"
+expect_failure "allowed-name backend factory swap" "$factory_swap" 'backend "kind" factory must be the canonical kindBackend function literal'
+
+dummy_reads="$TMP_ROOT/dummy-reads"
+write_allowed_fixture "$dummy_reads"
+awk '
+  /^func \(m \*PlatformKubernetes\) Init/ {
+    print "func (m *PlatformKubernetes) Init(clusterType string) error {"
+    print "\t_, _ = kubernetesBackendRegistry[clusterType]"
+    print "\t_, _ = kubernetesBackendRegistry[clusterType]"
+    print "\treturn nil"
+    print "}"
+    exit
+  }
+  { print }
+' "$dummy_reads/module/platform_kubernetes.go" >"$dummy_reads/module/platform_kubernetes.go.tmp"
+mv "$dummy_reads/module/platform_kubernetes.go.tmp" "$dummy_reads/module/platform_kubernetes.go"
+expect_failure "dummy registry reads" "$dummy_reads" "must preserve the core-local Kubernetes backend lookup and initialization branch"
+
+routing_replacement="$TMP_ROOT/routing-replacement"
+write_allowed_fixture "$routing_replacement"
+sed 's/reservedKubernetesBackendTypes\[clusterType\]/providerKubernetesBackendTypes[clusterType]/' "$routing_replacement/module/platform_kubernetes.go" >"$routing_replacement/module/platform_kubernetes.go.tmp"
+mv "$routing_replacement/module/platform_kubernetes.go.tmp" "$routing_replacement/module/platform_kubernetes.go"
+expect_failure "core-local routing replacement" "$routing_replacement" "must preserve the core-local Kubernetes backend lookup and initialization branch"
+
+extra_registry_read="$TMP_ROOT/extra-registry-read"
+write_allowed_fixture "$extra_registry_read"
+awk '
+  /^\tif _, coreLocal :=/ { print "\t_, _ = kubernetesBackendRegistry[clusterType]" }
+  { print }
+' "$extra_registry_read/module/platform_kubernetes.go" >"$extra_registry_read/module/platform_kubernetes.go.tmp"
+mv "$extra_registry_read/module/platform_kubernetes.go.tmp" "$extra_registry_read/module/platform_kubernetes.go"
+expect_failure "extra registry read" "$extra_registry_read" "expected exactly two kubernetesBackendRegistry lookups in (*PlatformKubernetes).Init, found 3"
+
+moved_fallback="$TMP_ROOT/moved-fallback"
+write_allowed_fixture "$moved_fallback"
+awk '
+  /} else if factory, ok := kubernetesBackendRegistry\[clusterType\]; ok {/ {
+    print "\t\t}"
+    sub(/} else if/, "if")
+  }
+  { print }
+' "$moved_fallback/module/platform_kubernetes.go" >"$moved_fallback/module/platform_kubernetes.go.tmp"
+mv "$moved_fallback/module/platform_kubernetes.go.tmp" "$moved_fallback/module/platform_kubernetes.go"
+expect_failure "moved compatibility registry lookup" "$moved_fallback" "must preserve the provider-first compatibility fallback lookup and initialization branch"
+
+earlier_provider_route="$TMP_ROOT/earlier-provider-route"
+write_allowed_fixture "$earlier_provider_route"
+sed 's/^\tif _, coreLocal :=/\tif providerRoute { return nil }\
+\tif _, coreLocal :=/' "$earlier_provider_route/module/platform_kubernetes.go" >"$earlier_provider_route/module/platform_kubernetes.go.tmp"
+mv "$earlier_provider_route/module/platform_kubernetes.go.tmp" "$earlier_provider_route/module/platform_kubernetes.go"
+expect_failure "earlier provider route with preserved canonical branch" "$earlier_provider_route" "must remain the anchored routing decision"
+
+prefix_provider_route="$TMP_ROOT/prefix-provider-route"
+write_allowed_fixture "$prefix_provider_route"
+awk '
+  /^\tclusterType, _ :=/ { print "\tif providerRoute { return initializeProvider(m) }"; print "" }
+  { print }
+' "$prefix_provider_route/module/platform_kubernetes.go" >"$prefix_provider_route/module/platform_kubernetes.go.tmp"
+mv "$prefix_provider_route/module/platform_kubernetes.go.tmp" "$prefix_provider_route/module/platform_kubernetes.go"
+expect_failure "provider route before cluster extraction" "$prefix_provider_route" "must remain the anchored routing decision"
+
+provider_binding_source="$TMP_ROOT/provider-binding-source"
+write_allowed_fixture "$provider_binding_source"
+sed 's/resolveApplicationKubernetesBackend(app, clusterType)/resolveProviderKubernetesBackend(app, clusterType)/' "$provider_binding_source/module/platform_kubernetes.go" >"$provider_binding_source/module/platform_kubernetes.go.tmp"
+mv "$provider_binding_source/module/platform_kubernetes.go.tmp" "$provider_binding_source/module/platform_kubernetes.go"
+expect_failure "provider-specific binding source" "$provider_binding_source" "must preserve the provider-first compatibility fallback lookup and initialization branch"
+
+swallowed_factory_error="$TMP_ROOT/swallowed-factory-error"
+write_allowed_fixture "$swallowed_factory_error"
+awk '
+  !swallowed && /return err/ { sub(/return err/, "return nil"); swallowed=1 }
+  { print }
+' "$swallowed_factory_error/module/platform_kubernetes.go" >"$swallowed_factory_error/module/platform_kubernetes.go.tmp"
+mv "$swallowed_factory_error/module/platform_kubernetes.go.tmp" "$swallowed_factory_error/module/platform_kubernetes.go"
+expect_failure "swallowed core factory error" "$swallowed_factory_error" "must preserve the core-local Kubernetes backend lookup and initialization branch"
+
+swallowed_fallback_error="$TMP_ROOT/swallowed-fallback-error"
+write_allowed_fixture "$swallowed_fallback_error"
+sed 's/return createErr/return nil/' "$swallowed_fallback_error/module/platform_kubernetes.go" >"$swallowed_fallback_error/module/platform_kubernetes.go.tmp"
+mv "$swallowed_fallback_error/module/platform_kubernetes.go.tmp" "$swallowed_fallback_error/module/platform_kubernetes.go"
+expect_failure "swallowed compatibility factory error" "$swallowed_fallback_error" "must preserve the provider-first compatibility fallback lookup and initialization branch"
+
+wrapped_factory_error="$TMP_ROOT/wrapped-factory-error"
+write_allowed_fixture "$wrapped_factory_error"
+awk '
+  !wrapped && /return err/ { sub(/return err/, "return func(error) error { return nil }(err)"); wrapped=1 }
+  { print }
+' "$wrapped_factory_error/module/platform_kubernetes.go" >"$wrapped_factory_error/module/platform_kubernetes.go.tmp"
+mv "$wrapped_factory_error/module/platform_kubernetes.go.tmp" "$wrapped_factory_error/module/platform_kubernetes.go"
+expect_failure "wrapped swallowed core factory error" "$wrapped_factory_error" "must preserve the core-local Kubernetes backend lookup and initialization branch"
+
+shadowed_binding="$TMP_ROOT/shadowed-binding"
+write_allowed_fixture "$shadowed_binding"
+sed 's/if binding.Client != nil/if binding := providerBinding; binding.Client != nil/' "$shadowed_binding/module/platform_kubernetes.go" >"$shadowed_binding/module/platform_kubernetes.go.tmp"
+mv "$shadowed_binding/module/platform_kubernetes.go.tmp" "$shadowed_binding/module/platform_kubernetes.go"
+expect_failure "provider branch shadows binding" "$shadowed_binding" "must preserve the provider-first compatibility fallback lookup and initialization branch"
+
+typed_nil_lookup="$TMP_ROOT/typed-nil-lookup"
+write_allowed_fixture "$typed_nil_lookup"
+sed 's/return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)/return unsupportedError/' "$typed_nil_lookup/module/platform_kubernetes.go" >"$typed_nil_lookup/module/platform_kubernetes.go.tmp"
+mv "$typed_nil_lookup/module/platform_kubernetes.go.tmp" "$typed_nil_lookup/module/platform_kubernetes.go"
+expect_failure "typed nil core lookup rejection" "$typed_nil_lookup" "must preserve the core-local Kubernetes backend lookup and initialization branch"
+
+provider_final_fallback="$TMP_ROOT/provider-final-fallback"
+write_allowed_fixture "$provider_final_fallback"
+awk '
+  /else if factory, ok := kubernetesBackendRegistry/ { saw_fallback=1 }
+  saw_fallback && /^\t\t} else \{$/ {
+    print
+    print "\t\t\tm.backend = providerBackend"
+    print "\t\t\treturn nil"
+    replacing=1
+    next
+  }
+  replacing && /^\t\t}$/ { replacing=0; print; next }
+  replacing { next }
+  { print }
+' "$provider_final_fallback/module/platform_kubernetes.go" >"$provider_final_fallback/module/platform_kubernetes.go.tmp"
+mv "$provider_final_fallback/module/platform_kubernetes.go.tmp" "$provider_final_fallback/module/platform_kubernetes.go"
+expect_failure "provider backend in final fallback" "$provider_final_fallback" "must preserve the provider-first compatibility fallback lookup and initialization branch"
+
 lexical_noise="$TMP_ROOT/lexical-noise"
 write_allowed_fixture "$lexical_noise"
 cat >"$lexical_noise/module/lexical_noise.go" <<'EOF'
@@ -222,6 +550,39 @@ const quotedRegistration = "RegisterKubernetesBackend(\"gke\", nil)"
 const rawRegistration = `RegisterKubernetesBackend("managed-cloud", nil)`
 EOF
 expect_success "comments and strings are not registrations" "$lexical_noise"
+
+for linkname_symbol in RegisterKubernetesBackend kubernetesBackendRegistry; do
+  linkname_root="$TMP_ROOT/linkname-$linkname_symbol"
+  write_allowed_fixture "$linkname_root"
+  if [[ "$linkname_symbol" == "RegisterKubernetesBackend" ]]; then
+    cat >"$linkname_root/module/linkname_alias.go" <<'EOF'
+package module
+
+import _ "unsafe"
+
+//go:linkname hiddenRegister github.com/GoCodeAlone/workflow/module.RegisterKubernetesBackend
+func hiddenRegister(string, KubernetesBackendFactory)
+
+func init() {
+	hiddenRegister("digitalocean", nil)
+}
+EOF
+  else
+    cat >"$linkname_root/module/linkname_alias.go" <<'EOF'
+package module
+
+import _ "unsafe"
+
+//go:linkname	hiddenRegistry	github.com/GoCodeAlone/workflow/module.kubernetesBackendRegistry
+var hiddenRegistry map[string]KubernetesBackendFactory
+
+func init() {
+	hiddenRegistry["digitalocean"] = nil
+}
+EOF
+  fi
+  expect_failure "go:linkname alias for $linkname_symbol" "$linkname_root" "go:linkname must not reference Kubernetes backend boundary symbol"
+done
 
 lookalike="$TMP_ROOT/lookalike"
 write_allowed_fixture "$lookalike"
@@ -245,6 +606,53 @@ EOF
   rm "$missing_marker_root/$missing_marker"
   expect_production_failure "missing production marker $missing_marker" "$missing_marker_root" "missing committed phase marker $missing_marker"
 done
+
+symlink_root_target="$TMP_ROOT/symlink-root-target"
+write_allowed_fixture "$symlink_root_target"
+symlink_root="$TMP_ROOT/symlink-root"
+if make_symlink_or_skip "$symlink_root_target" "$symlink_root" "symlinked root"; then
+  expect_failure "symlinked fixture root" "$symlink_root" "Workflow root must not be a symlink"
+fi
+
+symlink_gomod="$TMP_ROOT/symlink-gomod"
+write_allowed_fixture "$symlink_gomod"
+cat >"$symlink_gomod/go.mod.target" <<'EOF'
+module github.com/GoCodeAlone/workflow
+
+go 1.26.5
+EOF
+touch "$symlink_gomod/.phase-b-complete" "$symlink_gomod/.phase-c-complete"
+if make_symlink_or_skip "go.mod.target" "$symlink_gomod/go.mod" "symlinked go.mod"; then
+  expect_production_failure "symlinked go.mod" "$symlink_gomod" "symlink is not permitted"
+fi
+
+symlink_marker="$TMP_ROOT/symlink-marker"
+write_allowed_fixture "$symlink_marker"
+cat >"$symlink_marker/go.mod" <<'EOF'
+module github.com/GoCodeAlone/workflow
+
+go 1.26.5
+EOF
+touch "$symlink_marker/.phase-b-complete.target" "$symlink_marker/.phase-c-complete"
+if make_symlink_or_skip ".phase-b-complete.target" "$symlink_marker/.phase-b-complete" "symlinked phase marker"; then
+  expect_production_failure "symlinked phase marker" "$symlink_marker" "symlink is not permitted"
+fi
+
+symlink_canonical="$TMP_ROOT/symlink-canonical"
+write_allowed_fixture "$symlink_canonical"
+mv "$symlink_canonical/module/platform_kubernetes.go" "$symlink_canonical/module/platform_kubernetes.go.target"
+if make_symlink_or_skip "platform_kubernetes.go.target" "$symlink_canonical/module/platform_kubernetes.go" "symlinked canonical Go file"; then
+  expect_failure "symlinked canonical Go file" "$symlink_canonical" "symlink is not permitted"
+fi
+
+symlink_candidate="$TMP_ROOT/symlink-candidate"
+write_allowed_fixture "$symlink_candidate"
+cat >"$symlink_candidate/module/provider_backend.go.target" <<'EOF'
+package module
+EOF
+if make_symlink_or_skip "provider_backend.go.target" "$symlink_candidate/module/provider_backend.go" "symlinked scanned Go candidate"; then
+  expect_failure "symlinked scanned Go candidate" "$symlink_candidate" "production Go file"
+fi
 
 wrong_root="$TMP_ROOT/wrong-root"
 mkdir -p "$wrong_root"
@@ -280,11 +688,37 @@ duplicate="$TMP_ROOT/duplicate"
 write_allowed_fixture "$duplicate"
 cat >>"$duplicate/module/platform_kubernetes_core.go" <<'EOF'
 
-func registerDuplicateBackend() {
-	RegisterKubernetesBackend("kind", nil)
+func init() {
+	RegisterKubernetesBackend("kind", func(_ map[string]any) (kubernetesBackend, error) {
+		return &kindBackend{}, nil
+	})
+	RegisterKubernetesBackend("k3s", func(_ map[string]any) (kubernetesBackend, error) {
+		return &kindBackend{}, nil
+	})
+	RegisterKubernetesBackend("eks", func(_ map[string]any) (kubernetesBackend, error) {
+		return &eksErrorBackend{}, nil
+	})
+	RegisterKubernetesBackend("aks", func(_ map[string]any) (kubernetesBackend, error) {
+		return &aksBackend{}, nil
+	})
 }
 EOF
 expect_failure "duplicate registration" "$duplicate" 'duplicate Kubernetes backend registration "kind"'
+
+dead_registration_init="$TMP_ROOT/dead-registration-init"
+write_allowed_fixture "$dead_registration_init"
+sed 's/^func init()/func registerCoreBackends()/' "$dead_registration_init/module/platform_kubernetes_core.go" >"$dead_registration_init/module/platform_kubernetes_core.go.tmp"
+mv "$dead_registration_init/module/platform_kubernetes_core.go.tmp" "$dead_registration_init/module/platform_kubernetes_core.go"
+expect_failure "registrations moved to dead helper" "$dead_registration_init" "calls must be direct statements of one top-level func init()"
+
+conditional_registration_init="$TMP_ROOT/conditional-registration-init"
+write_allowed_fixture "$conditional_registration_init"
+awk '
+  /^func init\(\) \{$/ { print; print "\tif disableCoreRegistration { return }"; next }
+  { print }
+' "$conditional_registration_init/module/platform_kubernetes_core.go" >"$conditional_registration_init/module/platform_kubernetes_core.go.tmp"
+mv "$conditional_registration_init/module/platform_kubernetes_core.go.tmp" "$conditional_registration_init/module/platform_kubernetes_core.go"
+expect_failure "conditionally skipped registrations" "$conditional_registration_init" "calls must be direct statements of one top-level func init()"
 
 gke="$TMP_ROOT/gke"
 write_allowed_fixture "$gke"
