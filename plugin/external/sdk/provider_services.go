@@ -16,6 +16,7 @@ const providerServicesGoImportPath = "github.com/GoCodeAlone/workflow/plugin/ext
 type providerServices struct {
 	credentialIssuer   *credentialIssuerServer
 	credentialResolver *credentialResolverServer
+	containerRegistry  *containerRegistryServer
 }
 
 func (services *providerServices) register(server *grpc.Server) error {
@@ -33,6 +34,12 @@ func (services *providerServices) register(server *grpc.Server) error {
 			return fmt.Errorf("register credential resolver service: %w", err)
 		}
 		pb.RegisterCredentialResolverServer(server, services.credentialResolver)
+	}
+	if services.containerRegistry != nil {
+		if err := services.containerRegistry.validate(); err != nil {
+			return fmt.Errorf("register container registry service: %w", err)
+		}
+		pb.RegisterContainerRegistryServer(server, services.containerRegistry)
 	}
 	return nil
 }
@@ -64,6 +71,18 @@ func (services *providerServices) contractDescriptors() []*pb.ContractDescriptor
 			MessageNames:    []string{"CredentialResolverDeclaration", "CredentialResolveRequest", "CredentialResolveResponse", "ResolvedCloudCredentials", "CredentialResolutionError"},
 			GoImportPath:    providerServicesGoImportPath,
 			ProtocolVersion: CredentialResolverProtocolVersion,
+		})
+	}
+	if services.containerRegistry != nil && services.containerRegistry.validate() == nil {
+		descriptors = append(descriptors, &pb.ContractDescriptor{
+			Kind:            pb.ContractKind_CONTRACT_KIND_SERVICE,
+			Mode:            pb.ContractMode_CONTRACT_MODE_STRICT_PROTO,
+			ServiceName:     pb.ContainerRegistry_ServiceDesc.ServiceName,
+			ContractType:    ContainerRegistryContractID,
+			ProtoPackage:    "workflow.plugin.external.registry",
+			MessageNames:    []string{"ContainerRegistryDeclaration", "ContainerRegistryConfig", "ContainerRegistryLoginRequest", "ContainerRegistryLogoutRequest", "ContainerRegistryPushRequest", "ContainerRegistryPruneRequest", "ContainerRegistryOperationResponse", "ContainerRegistryResult", "ContainerRegistryError"},
+			GoImportPath:    providerServicesGoImportPath,
+			ProtocolVersion: ContainerRegistryProtocolVersion,
 		})
 	}
 	return descriptors

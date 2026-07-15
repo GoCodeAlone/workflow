@@ -106,3 +106,13 @@ func (p *PluginClient) CredentialResolverClient() pb.CredentialResolverClient {
 	}
 	return pb.NewCredentialResolverClient(p.Conn())
 }
+
+// ContainerRegistryClient constructs the typed optional container-registry
+// client over the same connection owned by the plugin manager. Hosts must also
+// require the ContainerRegistry ContractRegistry advertisement before use.
+func (p *PluginClient) ContainerRegistryClient() pb.ContainerRegistryClient {
+	if p == nil || p.Conn() == nil {
+		return nil
+	}
+	return pb.NewContainerRegistryClient(p.Conn())
+}

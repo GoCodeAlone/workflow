@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package workflow.plugin.external.registry;
+
+option go_package = "github.com/GoCodeAlone/workflow/plugin/external/proto;proto";
+
+// ContainerRegistry is an optional provider-owned service for registry
+// authentication, image publication, and retention operations. Core owns the
+// typed configuration and dry-run envelope; providers own all auth and API/CLI
+// semantics.
+service ContainerRegistry {
+  // DescribeRegistries returns the authoritative registry-type/operation set
+  // used for exact-match selection and manifest/runtime parity checks.
+  rpc DescribeRegistries(ContainerRegistryDeclarationsRequest) returns (ContainerRegistryDeclarationsResponse);
+  rpc Login(ContainerRegistryLoginRequest) returns (ContainerRegistryOperationResponse);
+  rpc Logout(ContainerRegistryLogoutRequest) returns (ContainerRegistryOperationResponse);
+  rpc Push(ContainerRegistryPushRequest) returns (ContainerRegistryOperationResponse);
+  rpc Prune(ContainerRegistryPruneRequest) returns (ContainerRegistryOperationResponse);
+}
+
+message ContainerRegistryDeclaration {
+  string type = 1;
+  repeated string operations = 2;
+}
+
+message ContainerRegistryDeclarationsRequest {}
+
+message ContainerRegistryDeclarationsResponse {
+  repeated ContainerRegistryDeclaration registries = 1;
+  ContainerRegistryError error = 2;
+}
+
+// ContainerRegistryConfig preserves config.CIRegistry without interpreting
+// provider-owned authentication or retention semantics in core.
+message ContainerRegistryConfig {
+  string name = 1;
+  string type = 2;
+  string path = 3;
+  ContainerRegistryAuth auth = 4;
+  ContainerRegistryRetention retention = 5;
+  string api_base_url = 6;
+}
+
+message ContainerRegistryAuth {
+  string env = 1;
+  string file = 2;
+  string aws_profile = 3;
+  ContainerRegistryVaultAuth vault = 4;
+}
+
+message ContainerRegistryVaultAuth {
+  string address = 1;
+  string path = 2;
+}
+
+message ContainerRegistryRetention {
+  int64 keep_latest = 1;
+  string untagged_ttl = 2;
+  string schedule = 3;
+}
+
+message ContainerRegistryLoginRequest {
+  ContainerRegistryConfig registry = 1;
+  bool dry_run = 2;
+}
+
+message ContainerRegistryLogoutRequest {
+  ContainerRegistryConfig registry = 1;
+  bool dry_run = 2;
+}
+
+message ContainerRegistryPushRequest {
+  ContainerRegistryConfig registry = 1;
+  bool dry_run = 2;
+  string image_reference = 3;
+}
+
+message ContainerRegistryPruneRequest {
+  ContainerRegistryConfig registry = 1;
+  bool dry_run = 2;
+}
+
+message ContainerRegistryResult {
+  // output is provider-produced command output for core aggregation.
+  bytes output = 1;
+}
+
+message ContainerRegistryError {
+  // code is a stable, non-secret machine-readable identifier.
+  string code = 1;
+  // message is SDK-sanitized and never includes provider error text.
+  string message = 2;
+  bool retryable = 3;
+}
+
+message ContainerRegistryOperationResponse {
+  ContainerRegistryResult result = 1;
+  ContainerRegistryError error = 2;
+}
