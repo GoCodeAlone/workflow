@@ -17,13 +17,18 @@
 #   2. Which files name an SDK only in comments (false positives to ignore).
 #   3. Whether cloud_account_aws_creds.go still imports aws-sdk-go-v2
 #      (Phase B rewrite invariant: must be zero post-rewrite).
-#   4. platform_kubernetes_kind.go backend-split readiness (advisory).
+#   4. Whether production Kubernetes backend factory registrations remain
+#      limited to framework-owned kind/k3s plus temporary SDK-free eks/aks
+#      compatibility fallbacks, with the deleted GKE implementation absent.
 #
 # Exit non-zero if invoked with --check and an invariant is violated.
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WORKFLOW_ROOT=${WORKFLOW_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}
+WORKFLOW_ROOT=$(cd "$WORKFLOW_ROOT" && pwd)
+cd "$WORKFLOW_ROOT"
 
 SDK_TREES=(
   'aws-sdk-go-v2'
@@ -181,34 +186,66 @@ else
 fi
 
 echo
-echo "== Advisory: platform_kubernetes_kind.go backend split readiness =="
-KIND=module/platform_kubernetes_kind.go
-if [[ -f module/platform_kubernetes_kind.go ]]; then
-  echo "  backend types: $(grep -cE '^type .*[Bb]ackend struct' "$KIND") (expect kind/eksError/gke/aks pre-Phase-0)"
-  echo "  shared init(): $(grep -c '^func init()' "$KIND") (expect 1 pre-Phase-0; 0 here post-split — each _provider.go gets its own)"
-  echo "  real SDK imports here:"
-  for sdk in "${SDK_TREES[@]}"; do
-    real_import "$KIND" "$sdk" && echo "    REAL: $sdk"
-  done
+echo "== Invariant: Kubernetes backend boundary =="
+# Workflow owns only core-local kind/k3s factories plus temporary SDK-free
+# eks/aks compatibility fallbacks. Provider backends are manifest-declared and
+# resolved through the engine-scoped ResourceDriver binding registry; they must
+# never be added to this in-process factory registry.
+GKE_K8S=module/platform_kubernetes_gke.go
+if [[ -e "$GKE_K8S" ]]; then
+  echo "  VIOLATION: deleted $GKE_K8S exists; provider-specific GKE behavior belongs in its plugin"
+  FAIL=1
+else
+  echo "  deleted $GKE_K8S: absent — clean"
 fi
 
-echo
-echo "== Invariant: no init() mixes core-staying + plugin-bound k8s backends =="
-# Post-Phase-0, platform_kubernetes_core.go must register ONLY kind/k3s/eks/aks
-# and platform_kubernetes_gke.go must register ONLY gke. A file registering a
-# name from the other set is a partition violation.
-CORE_K8S=module/platform_kubernetes_core.go
-GKE_K8S=module/platform_kubernetes_gke.go
-if [[ -f "$CORE_K8S" && -f "$GKE_K8S" ]]; then
-  if grep -qE 'RegisterKubernetesBackend\("gke"' "$CORE_K8S"; then
-    echo "  VIOLATION: $CORE_K8S registers the plugin-bound 'gke' backend"; FAIL=1
+K8S_REGISTRATIONS=()
+while IFS= read -r match; do
+  [[ -z "$match" ]] && continue
+  location=${match%%:*}
+  remainder=${match#*:}
+  line_number=${remainder%%:*}
+  code=${remainder#*:}
+  code=${code%%//*}
+
+  # Ignore the function declaration itself; every remaining occurrence is a
+  # production registration call and must expose a literal first argument.
+  if printf '%s\n' "$code" | grep -qE 'func[[:space:]]+RegisterKubernetesBackend[[:space:]]*\('; then
+    continue
   fi
-  for n in kind k3s eks aks; do
-    if grep -qE "RegisterKubernetesBackend\\(\"$n\"" "$GKE_K8S"; then
-      echo "  VIOLATION: $GKE_K8S registers the core-staying '$n' backend"; FAIL=1
-    fi
+  name=$(printf '%s\n' "$code" | sed -nE 's/.*RegisterKubernetesBackend[[:space:]]*\([[:space:]]*"([^"]+)"[[:space:]]*,.*/\1/p')
+  if [[ -z "$name" ]]; then
+    echo "  VIOLATION: $location:$line_number registration must use an explicit string literal"
+    FAIL=1
+    continue
+  fi
+
+  duplicate=0
+  for existing in "${K8S_REGISTRATIONS[@]}"; do
+    [[ "$existing" == "$name" ]] && duplicate=1
   done
-  [[ $FAIL -eq 0 ]] && echo "  OK — init() partition clean"
+  if [[ $duplicate -eq 1 ]]; then
+    echo "  VIOLATION: $location:$line_number duplicates Kubernetes backend registration \"$name\""
+    FAIL=1
+  fi
+  K8S_REGISTRATIONS+=("$name")
+
+  case "$name" in
+    kind|k3s|eks|aks) ;;
+    *)
+      echo "  VIOLATION: $location:$line_number backend \"$name\" is not framework-owned; only kind, k3s, eks, and aks may use RegisterKubernetesBackend"
+      FAIL=1
+      ;;
+  esac
+done < <(grep -RnsE --include='*.go' --exclude='*_test.go' --exclude-dir='.git' 'RegisterKubernetesBackend[[:space:]]*\(' . 2>/dev/null || true)
+
+if [[ ${#K8S_REGISTRATIONS[@]} -eq 0 ]]; then
+  echo "  registrations: (none)"
+else
+  echo "  registrations: ${K8S_REGISTRATIONS[*]}"
+fi
+if [[ $FAIL -eq 0 ]]; then
+  echo "  OK — registrations are limited to kind/k3s and temporary eks/aks compatibility fallbacks"
 fi
 
 echo
