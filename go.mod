@@ -7,9 +7,9 @@ require (
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/GoCodeAlone/go-plugin v1.7.0
-	github.com/GoCodeAlone/modular v1.13.5
+	github.com/GoCodeAlone/modular v1.13.6
 	github.com/GoCodeAlone/modular/modules/auth v1.17.0
-	github.com/GoCodeAlone/modular/modules/cache v1.17.0
+	github.com/GoCodeAlone/modular/modules/cache v1.19.0
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0
