@@ -665,11 +665,16 @@ func canonicalNormalizationReservedGuard(function *ast.FuncDecl) (*ast.Ident, bo
 	iteration, ok := function.Body.List[3].(*ast.RangeStmt)
 	if !ok || iteration.Tok != token.DEFINE || !isIdentifier(iteration.Key, "_") ||
 		!isIdentifier(iteration.Value, "binding") || !isIdentifier(iteration.X, "bindings") ||
-		iteration.Body == nil || len(iteration.Body.List) < 3 {
+		iteration.Body == nil || len(iteration.Body.List) != 8 {
 		return nil, false
 	}
 	if !isNormalizedBackendNameAssignment(iteration.Body.List[0]) ||
-		!isCanonicalNormalizedNameEmptyGuard(iteration.Body.List[1]) {
+		!isCanonicalNormalizedNameEmptyGuard(iteration.Body.List[1]) ||
+		!isCanonicalDuplicateNormalizedNameGuard(iteration.Body.List[3]) ||
+		!isNormalizedBackendResourceTypeAssignment(iteration.Body.List[4]) ||
+		!isCanonicalResourceTypeEmptyGuard(iteration.Body.List[5]) ||
+		!isCanonicalBindingClientNilGuard(iteration.Body.List[6]) ||
+		!isCanonicalNormalizedBindingWrite(iteration.Body.List[7]) {
 		return nil, false
 	}
 	return isCanonicalReservedNormalizationGuard(iteration.Body.List[2])
@@ -738,8 +743,8 @@ func isCanonicalNormalizedNameEmptyGuard(statement ast.Stmt) bool {
 	if !ok || condition.Op != token.EQL || !isIdentifier(condition.X, "name") || !isStringLiteral(condition.Y, "") {
 		return false
 	}
-	returned, ok := branch.Body.List[0].(*ast.ReturnStmt)
-	return ok && len(returned.Results) == 3
+	_, ok = canonicalRegistrationErrorReturn(branch.Body.List[0], "kubernetes backend registration: name must not be empty", 0)
+	return ok
 }
 
 func isNormalizedBackendNameAssignment(statement ast.Stmt) bool {
@@ -751,6 +756,104 @@ func isNormalizedBackendNameAssignment(statement ast.Stmt) bool {
 	call, ok := assignment.Rhs[0].(*ast.CallExpr)
 	return ok && isSelector(call.Fun, "strings", "TrimSpace") && len(call.Args) == 1 &&
 		isSelector(call.Args[0], "binding", "Name")
+}
+
+func isCanonicalDuplicateNormalizedNameGuard(statement ast.Stmt) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Else != nil || branch.Body == nil || len(branch.Body.List) != 1 || !isIdentifier(branch.Cond, "duplicate") {
+		return false
+	}
+	assignment, ok := branch.Init.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 ||
+		!isIdentifier(assignment.Lhs[0], "_") || !isIdentifier(assignment.Lhs[1], "duplicate") {
+		return false
+	}
+	index, ok := assignment.Rhs[0].(*ast.IndexExpr)
+	if !ok || !isIdentifier(index.X, "normalized") || !isIdentifier(index.Index, "name") {
+		return false
+	}
+	call, ok := canonicalRegistrationErrorReturn(branch.Body.List[0], "kubernetes backend registration has duplicate normalized name %q", 1)
+	return ok && isIdentifier(call.Args[1], "name")
+}
+
+func isNormalizedBackendResourceTypeAssignment(statement ast.Stmt) bool {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 ||
+		!isIdentifier(assignment.Lhs[0], "resourceType") {
+		return false
+	}
+	call, ok := assignment.Rhs[0].(*ast.CallExpr)
+	return ok && isSelector(call.Fun, "strings", "TrimSpace") && len(call.Args) == 1 &&
+		isSelector(call.Args[0], "binding", "ResourceType")
+}
+
+func isCanonicalResourceTypeEmptyGuard(statement ast.Stmt) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || branch.Else != nil || branch.Body == nil || len(branch.Body.List) != 1 {
+		return false
+	}
+	condition, ok := branch.Cond.(*ast.BinaryExpr)
+	if !ok || condition.Op != token.EQL || !isIdentifier(condition.X, "resourceType") || !isStringLiteral(condition.Y, "") {
+		return false
+	}
+	call, ok := canonicalRegistrationErrorReturn(branch.Body.List[0], "kubernetes backend registration %q: resource type must not be empty", 1)
+	return ok && isIdentifier(call.Args[1], "name")
+}
+
+func isCanonicalBindingClientNilGuard(statement ast.Stmt) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || branch.Else != nil || branch.Body == nil || len(branch.Body.List) != 1 {
+		return false
+	}
+	condition, ok := branch.Cond.(*ast.BinaryExpr)
+	if !ok || condition.Op != token.EQL || !isSelector(condition.X, "binding", "Client") || !isIdentifier(condition.Y, "nil") {
+		return false
+	}
+	call, ok := canonicalRegistrationErrorReturn(branch.Body.List[0], "kubernetes backend registration %q: client must not be nil", 1)
+	return ok && isIdentifier(call.Args[1], "name")
+}
+
+func isCanonicalNormalizedBindingWrite(statement ast.Stmt) bool {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.ASSIGN || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+		return false
+	}
+	index, ok := assignment.Lhs[0].(*ast.IndexExpr)
+	if !ok || !isIdentifier(index.X, "normalized") || !isIdentifier(index.Index, "name") {
+		return false
+	}
+	literal, ok := assignment.Rhs[0].(*ast.CompositeLit)
+	if !ok || !isIdentifier(literal.Type, "KubernetesBackendBinding") || len(literal.Elts) != 3 {
+		return false
+	}
+	return isCanonicalBindingField(literal.Elts[0], "Name", "name", "") &&
+		isCanonicalBindingField(literal.Elts[1], "ResourceType", "resourceType", "") &&
+		isCanonicalBindingField(literal.Elts[2], "Client", "", "Client")
+}
+
+func isCanonicalBindingField(expression ast.Expr, field, identifier, selector string) bool {
+	pair, ok := expression.(*ast.KeyValueExpr)
+	if !ok || !isIdentifier(pair.Key, field) {
+		return false
+	}
+	if identifier != "" {
+		return isIdentifier(pair.Value, identifier)
+	}
+	return isSelector(pair.Value, "binding", selector)
+}
+
+func canonicalRegistrationErrorReturn(statement ast.Stmt, format string, argumentCount int) (*ast.CallExpr, bool) {
+	returned, ok := statement.(*ast.ReturnStmt)
+	if !ok || len(returned.Results) != 3 || !isStringLiteral(returned.Results[0], "") ||
+		!isIdentifier(returned.Results[1], "nil") {
+		return nil, false
+	}
+	call, ok := returned.Results[2].(*ast.CallExpr)
+	if !ok || !isSelector(call.Fun, "fmt", "Errorf") || len(call.Args) != argumentCount+1 ||
+		!isStringLiteral(call.Args[0], format) {
+		return nil, false
+	}
+	return call, true
 }
 
 func isCanonicalReservedNormalizationGuard(statement ast.Stmt) (*ast.Ident, bool) {

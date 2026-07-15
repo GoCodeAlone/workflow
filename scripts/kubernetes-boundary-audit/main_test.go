@@ -134,9 +134,23 @@ func normalizeKubernetesBackendRegistration(owner string, bindings []KubernetesB
 	for _, binding := range bindings {
 		name := strings.TrimSpace(binding.Name)
 		if name == "" {
-			return "", nil, nil
+			return "", nil, fmt.Errorf("kubernetes backend registration: name must not be empty")
 		}
-` + validReservedNormalizationGuardSource + `		normalized[name] = binding
+` + validReservedNormalizationGuardSource + `		if _, duplicate := normalized[name]; duplicate {
+			return "", nil, fmt.Errorf("kubernetes backend registration has duplicate normalized name %q", name)
+		}
+		resourceType := strings.TrimSpace(binding.ResourceType)
+		if resourceType == "" {
+			return "", nil, fmt.Errorf("kubernetes backend registration %q: resource type must not be empty", name)
+		}
+		if binding.Client == nil {
+			return "", nil, fmt.Errorf("kubernetes backend registration %q: client must not be nil", name)
+		}
+		normalized[name] = KubernetesBackendBinding{
+			Name:         name,
+			ResourceType: resourceType,
+			Client:       binding.Client,
+		}
 	}
 	return owner, normalized, nil
 }
@@ -639,8 +653,21 @@ func TestInspectRootRequiresCanonicalReservedRouteAndNormalizationGuard(t *testi
 			name: "normalized name overwritten before guard",
 			mutate: func(t *testing.T, root string) {
 				mutated := strings.Replace(validPluginRegistrySource,
-					"\t\tif name == \"\" {\n\t\t\treturn \"\", nil, nil\n\t\t}\n",
+					"\t\tif name == \"\" {\n\t\t\treturn \"\", nil, fmt.Errorf(\"kubernetes backend registration: name must not be empty\")\n\t\t}\n",
 					"\t\tname = \"digitalocean\"\n", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
+		},
+		{
+			name: "normalized name overwritten after reserved guard",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource,
+					validReservedNormalizationGuardSource,
+					validReservedNormalizationGuardSource+
+						"\t\tif name == \"digitalocean\" {\n"+
+						"\t\t\tname = \"kind\"\n"+
+						"\t\t}\n", 1)
 				writeTestFile(t, root, pluginRegistryFile, mutated)
 			},
 			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
@@ -684,6 +711,62 @@ func TestInspectRootRequiresCanonicalReservedRouteAndNormalizationGuard(t *testi
 			root := writeFixture(t, false)
 			test.mutate(t, root)
 			assertViolation(t, inspectRoot(root, true), test.expected)
+		})
+	}
+}
+
+func TestInspectRootRejectsSecurityNormalizerBodyDrift(t *testing.T) {
+	const duplicateGuard = `		if _, duplicate := normalized[name]; duplicate {
+			return "", nil, fmt.Errorf("kubernetes backend registration has duplicate normalized name %q", name)
+		}
+`
+	const resourceTypeAssignment = "\t\tresourceType := strings.TrimSpace(binding.ResourceType)\n"
+	tests := []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{
+			name: "missing statement",
+			mutate: func(source string) string {
+				return strings.Replace(source, resourceTypeAssignment, "", 1)
+			},
+		},
+		{
+			name: "reordered statements",
+			mutate: func(source string) string {
+				source = strings.Replace(source, duplicateGuard, "NORMALIZER_DUPLICATE_GUARD\n", 1)
+				source = strings.Replace(source, resourceTypeAssignment, duplicateGuard, 1)
+				return strings.Replace(source, "NORMALIZER_DUPLICATE_GUARD\n", resourceTypeAssignment, 1)
+			},
+		},
+		{
+			name: "resource type reassignment",
+			mutate: func(source string) string {
+				return strings.Replace(source, resourceTypeAssignment,
+					resourceTypeAssignment+"\t\tresourceType = strings.TrimSpace(binding.Name)\n", 1)
+			},
+		},
+		{
+			name: "alternate normalized key",
+			mutate: func(source string) string {
+				return strings.Replace(source,
+					"\t\tnormalized[name] = KubernetesBackendBinding{",
+					"\t\tnormalized[resourceType] = KubernetesBackendBinding{", 1)
+			},
+		},
+		{
+			name: "alternate normalized value",
+			mutate: func(source string) string {
+				return strings.Replace(source, "\t\t\tName:         name", "\t\t\tName:         \"kind\"", 1)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			writeTestFile(t, root, pluginRegistryFile, test.mutate(validPluginRegistrySource))
+			assertViolation(t, inspectRoot(root, true), "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType")
 		})
 	}
 }

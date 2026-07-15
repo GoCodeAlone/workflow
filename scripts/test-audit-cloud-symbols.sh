@@ -146,12 +146,26 @@ func normalizeKubernetesBackendRegistration(owner string, bindings []KubernetesB
 	for _, binding := range bindings {
 		name := strings.TrimSpace(binding.Name)
 		if name == "" {
-			return "", nil, nil
+			return "", nil, fmt.Errorf("kubernetes backend registration: name must not be empty")
 		}
 		if isReservedKubernetesBackendType(name) {
 			return "", nil, fmt.Errorf("plugin registered reserved kubernetes backend type %q", name)
 		}
-		normalized[name] = binding
+		if _, duplicate := normalized[name]; duplicate {
+			return "", nil, fmt.Errorf("kubernetes backend registration has duplicate normalized name %q", name)
+		}
+		resourceType := strings.TrimSpace(binding.ResourceType)
+		if resourceType == "" {
+			return "", nil, fmt.Errorf("kubernetes backend registration %q: resource type must not be empty", name)
+		}
+		if binding.Client == nil {
+			return "", nil, fmt.Errorf("kubernetes backend registration %q: client must not be nil", name)
+		}
+		normalized[name] = KubernetesBackendBinding{
+			Name:         name,
+			ResourceType: resourceType,
+			Client:       binding.Client,
+		}
 	}
 	return owner, normalized, nil
 }
@@ -609,6 +623,21 @@ awk '
 ' "$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go" >"$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go.tmp"
 mv "$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go.tmp" "$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go"
 expect_failure "normalized name overwritten before reserved guard" "$overwritten_normalized_name" "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType"
+
+post_guard_name_rewrite="$TMP_ROOT/post-guard-name-rewrite"
+write_allowed_fixture "$post_guard_name_rewrite"
+awk '
+  { print }
+  /^\t\tif isReservedKubernetesBackendType\(name\)/ { in_reserved_guard=1 }
+  in_reserved_guard && /^\t\t}$/ {
+    print "\t\tif name == \"digitalocean\" {"
+    print "\t\t\tname = \"kind\""
+    print "\t\t}"
+    in_reserved_guard=0
+  }
+' "$post_guard_name_rewrite/module/platform_kubernetes_plugin_registry.go" >"$post_guard_name_rewrite/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$post_guard_name_rewrite/module/platform_kubernetes_plugin_registry.go.tmp" "$post_guard_name_rewrite/module/platform_kubernetes_plugin_registry.go"
+expect_failure "normalized name overwritten after reserved guard" "$post_guard_name_rewrite" "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType"
 
 early_reserved_return="$TMP_ROOT/early-reserved-return"
 write_allowed_fixture "$early_reserved_return"
