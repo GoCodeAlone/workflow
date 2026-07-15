@@ -24,7 +24,6 @@ type KubernetesClusterState struct {
 }
 
 var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
-var reservedKubernetesBackendTypes = map[string]struct{}{}
 
 func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) {
 	kubernetesBackendRegistry[clusterType] = factory
@@ -63,7 +62,7 @@ func (m *PlatformKubernetes) Init(app any) error {
 		clusterType = "kind"
 	}
 
-	if _, coreLocal := reservedKubernetesBackendTypes[clusterType]; coreLocal {
+	if isReservedKubernetesBackendType(clusterType) {
 		factory, ok := kubernetesBackendRegistry[clusterType]
 		if !ok {
 			return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
@@ -105,6 +104,41 @@ func (m *PlatformKubernetes) Init(app any) error {
 		Status: "pending",
 	}
 	return app.RegisterService(m.name, m)
+}
+`
+
+const validReservedPredicateSource = `func isReservedKubernetesBackendType(name string) bool {
+	switch name {
+	case "kind", "k3s":
+		return true
+	default:
+		return false
+	}
+}
+`
+
+const validReservedNormalizationGuardSource = `		if isReservedKubernetesBackendType(name) {
+			return "", nil, fmt.Errorf("plugin registered reserved kubernetes backend type %q", name)
+		}
+`
+
+const validPluginRegistrySource = `package module
+
+` + validReservedPredicateSource + `
+func normalizeKubernetesBackendRegistration(owner string, bindings []KubernetesBackendBinding) (string, map[string]KubernetesBackendBinding, error) {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return "", nil, fmt.Errorf("kubernetes backend registration: owner must not be empty")
+	}
+	normalized := make(map[string]KubernetesBackendBinding, len(bindings))
+	for _, binding := range bindings {
+		name := strings.TrimSpace(binding.Name)
+		if name == "" {
+			return "", nil, nil
+		}
+` + validReservedNormalizationGuardSource + `		normalized[name] = binding
+	}
+	return owner, normalized, nil
 }
 `
 
@@ -295,7 +329,7 @@ func TestInspectRootRequiresExactlyTwoCanonicalRegistryLookups(t *testing.T) {
 		{
 			name: "extra lookup",
 			mutate: func(source string) string {
-				return strings.Replace(source, "\tif _, coreLocal :=", "\t_, _ = kubernetesBackendRegistry[clusterType]\n\tif _, coreLocal :=", 1)
+				return strings.Replace(source, "\tif isReservedKubernetesBackendType", "\t_, _ = kubernetesBackendRegistry[clusterType]\n\tif isReservedKubernetesBackendType", 1)
 			},
 			expected: "expected exactly two kubernetesBackendRegistry lookups in (*PlatformKubernetes).Init, found 3",
 		},
@@ -389,14 +423,14 @@ func TestInspectRootRejectsNonsemanticRegistryLookups(t *testing.T) {
 		{
 			name: "core routing replacement",
 			mutate: func(source string) string {
-				return strings.Replace(source, "reservedKubernetesBackendTypes[clusterType]", "providerKubernetesBackendTypes[clusterType]", 1)
+				return strings.Replace(source, "isReservedKubernetesBackendType(clusterType)", "isProviderKubernetesBackendType(clusterType)", 1)
 			},
 			expected: "must preserve the core-local Kubernetes backend lookup and initialization branch",
 		},
 		{
 			name: "earlier provider route preserves canonical branch",
 			mutate: func(source string) string {
-				return strings.Replace(source, "\tif _, coreLocal :=", "\tif providerRoute { return nil }\n\tif _, coreLocal :=", 1)
+				return strings.Replace(source, "\tif isReservedKubernetesBackendType", "\tif providerRoute { return nil }\n\tif isReservedKubernetesBackendType", 1)
 			},
 			expected: "must remain the anchored routing decision",
 		},
@@ -490,6 +524,170 @@ func TestInspectRootRejectsNonsemanticRegistryLookups(t *testing.T) {
 	}
 }
 
+func TestInspectRootRejectsReservedPredicateMutations(t *testing.T) {
+	tests := []struct {
+		name     string
+		mutate   func(*testing.T, string)
+		expected string
+	}{
+		{
+			name: "removed map resurrection with provider member",
+			mutate: func(t *testing.T, root string) {
+				writeTestFile(t, root, "module/hidden_reserved.go", `package module
+
+var reservedKubernetesBackendTypes = map[string]struct{}{"digitalocean": {}}
+`)
+			},
+			expected: "removed reservedKubernetesBackendTypes map must not exist",
+		},
+		{
+			name: "provider predicate case",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource, `case "kind", "k3s":`, `case "kind", "k3s", "digitalocean":`, 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "isReservedKubernetesBackendType must be the canonical exact predicate",
+		},
+		{
+			name: "default true",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource, "\t\treturn false\n", "\t\treturn true\n", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "isReservedKubernetesBackendType must be the canonical exact predicate",
+		},
+		{
+			name: "body drift",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource, validReservedPredicateSource, `func isReservedKubernetesBackendType(name string) bool {
+	return name == "kind"
+}
+`, 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "isReservedKubernetesBackendType must be the canonical exact predicate",
+		},
+		{
+			name: "generic signature drift",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource,
+					"func isReservedKubernetesBackendType(name string) bool",
+					"func isReservedKubernetesBackendType[T any](name string) bool", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "isReservedKubernetesBackendType must be the canonical exact predicate",
+		},
+		{
+			name: "predicate alias",
+			mutate: func(t *testing.T, root string) {
+				writeTestFile(t, root, "module/hidden_reserved.go", "package module\n\nvar hiddenReserved = isReservedKubernetesBackendType\n")
+			},
+			expected: "isReservedKubernetesBackendType reference is only permitted in its declaration, core route, and normalization guard",
+		},
+		{
+			name: "moved declaration",
+			mutate: func(t *testing.T, root string) {
+				writeTestFile(t, root, pluginRegistryFile, strings.Replace(validPluginRegistrySource, validReservedPredicateSource, "", 1))
+				writeTestFile(t, root, "module/hidden_reserved.go", "package module\n\n"+validReservedPredicateSource)
+			},
+			expected: "isReservedKubernetesBackendType declaration must be in module/platform_kubernetes_plugin_registry.go",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			test.mutate(t, root)
+			assertViolation(t, inspectRoot(root, true), test.expected)
+		})
+	}
+}
+
+func TestInspectRootRequiresCanonicalReservedRouteAndNormalizationGuard(t *testing.T) {
+	tests := []struct {
+		name     string
+		mutate   func(*testing.T, string)
+		expected string
+	}{
+		{
+			name: "replaced core route",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validRegistrySource, "isReservedKubernetesBackendType(clusterType)", "isProviderKubernetesBackendType(clusterType)", 1)
+				writeTestFile(t, root, registryFile, mutated)
+			},
+			expected: "expected exactly one canonical isReservedKubernetesBackendType core route, found 0",
+		},
+		{
+			name: "aliased core route",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validRegistrySource,
+					"\tif isReservedKubernetesBackendType(clusterType) {",
+					"\treserved := isReservedKubernetesBackendType\n\tif reserved(clusterType) {", 1)
+				writeTestFile(t, root, registryFile, mutated)
+			},
+			expected: "expected exactly one canonical isReservedKubernetesBackendType core route, found 0",
+		},
+		{
+			name: "missing normalization guard",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource, validReservedNormalizationGuardSource, "", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
+		},
+		{
+			name: "normalized name overwritten before guard",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource,
+					"\t\tif name == \"\" {\n\t\t\treturn \"\", nil, nil\n\t\t}\n",
+					"\t\tname = \"digitalocean\"\n", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
+		},
+		{
+			name: "reserved registration returned before guarded loop",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource,
+					"\tnormalized := make(map[string]KubernetesBackendBinding, len(bindings))\n",
+					"\tnormalized := make(map[string]KubernetesBackendBinding, len(bindings))\n"+
+						"\tif len(bindings) == 1 {\n"+
+						"\t\tnormalized[\"kind\"] = bindings[0]\n"+
+						"\t\treturn owner, normalized, nil\n"+
+						"\t}\n", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
+		},
+		{
+			name: "replaced normalization guard",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource, "isReservedKubernetesBackendType(name)", "isProviderKubernetesBackendType(name)", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
+		},
+		{
+			name: "aliased normalization guard",
+			mutate: func(t *testing.T, root string) {
+				mutated := strings.Replace(validPluginRegistrySource,
+					"\t\tif isReservedKubernetesBackendType(name) {",
+					"\t\treserved := isReservedKubernetesBackendType\n\t\tif reserved(name) {", 1)
+				writeTestFile(t, root, pluginRegistryFile, mutated)
+			},
+			expected: "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			test.mutate(t, root)
+			assertViolation(t, inspectRoot(root, true), test.expected)
+		})
+	}
+}
+
 func TestInspectRootIgnoresCommentsAndStrings(t *testing.T) {
 	root := writeFixture(t, false)
 	noise := "package module\n\n" +
@@ -532,6 +730,16 @@ var hiddenRegistry map[string]KubernetesBackendFactory
 func init() {
 	hiddenRegistry["digitalocean"] = nil
 }
+`,
+		},
+		{
+			name: "removed reserved map",
+			source: `package module
+
+import _ "unsafe"
+
+//go:linkname hiddenReserved github.com/GoCodeAlone/workflow/module.reservedKubernetesBackendTypes
+var hiddenReserved map[string]struct{}
 `,
 		},
 	}
@@ -580,6 +788,7 @@ func TestInspectRootRejectsSymlinkedAuditInputs(t *testing.T) {
 		{name: "phase marker", path: ".phase-b-complete", fixtureMode: false},
 		{name: "canonical registry", path: registryFile, fixtureMode: true},
 		{name: "canonical core", path: coreFile, fixtureMode: true},
+		{name: "canonical plugin registry", path: pluginRegistryFile, fixtureMode: true},
 		{name: "scanned production Go file", path: "module/provider_backend.go", fixtureMode: true},
 	}
 
@@ -616,6 +825,7 @@ func writeFixture(t *testing.T, withIdentity bool) string {
 	root := t.TempDir()
 	writeTestFile(t, root, registryFile, validRegistrySource)
 	writeTestFile(t, root, coreFile, validCoreSource)
+	writeTestFile(t, root, pluginRegistryFile, validPluginRegistrySource)
 	if withIdentity {
 		writeTestFile(t, root, "go.mod", "module "+workflowModulePath+"\n\ngo 1.26.5\n")
 		writeTestFile(t, root, ".phase-b-complete", "")

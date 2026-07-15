@@ -18,12 +18,16 @@ import (
 )
 
 const (
-	workflowModulePath = "github.com/GoCodeAlone/workflow"
-	registryFile       = "module/platform_kubernetes.go"
-	coreFile           = "module/platform_kubernetes_core.go"
-	gkeFile            = "module/platform_kubernetes_gke.go"
-	registerIdentifier = "RegisterKubernetesBackend"
-	registryIdentifier = "kubernetesBackendRegistry"
+	workflowModulePath              = "github.com/GoCodeAlone/workflow"
+	registryFile                    = "module/platform_kubernetes.go"
+	coreFile                        = "module/platform_kubernetes_core.go"
+	pluginRegistryFile              = "module/platform_kubernetes_plugin_registry.go"
+	gkeFile                         = "module/platform_kubernetes_gke.go"
+	registerIdentifier              = "RegisterKubernetesBackend"
+	registryIdentifier              = "kubernetesBackendRegistry"
+	reservedPredicateIdentifier     = "isReservedKubernetesBackendType"
+	removedReservedMapIdentifier    = "reservedKubernetesBackendTypes"
+	normalizeRegistrationIdentifier = "normalizeKubernetesBackendRegistration"
 )
 
 var requiredBackends = []string{"kind", "k3s", "eks", "aks"}
@@ -113,7 +117,7 @@ func inspectRoot(root string, fixtureMode bool) auditResult {
 	} else {
 		result.repositoryOK = validateRepositoryIdentity(root, &result)
 	}
-	for _, requiredFile := range []string{registryFile, coreFile} {
+	for _, requiredFile := range []string{registryFile, coreFile, pluginRegistryFile} {
 		if _, statErr := confinedRegularFile(root, filepath.Join(root, filepath.FromSlash(requiredFile))); statErr != nil {
 			result.addViolation("missing canonical Kubernetes registration file %s: %v", requiredFile, statErr)
 		}
@@ -216,7 +220,10 @@ func candidateGoFiles(root string) ([]parsedGoFile, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
-		if !bytes.Contains(source, []byte(registerIdentifier)) && !bytes.Contains(source, []byte(registryIdentifier)) {
+		if !bytes.Contains(source, []byte(registerIdentifier)) &&
+			!bytes.Contains(source, []byte(registryIdentifier)) &&
+			!bytes.Contains(source, []byte(reservedPredicateIdentifier)) &&
+			!bytes.Contains(source, []byte(removedReservedMapIdentifier)) {
 			continue
 		}
 		fset := token.NewFileSet()
@@ -272,6 +279,8 @@ func pathIsWithinRoot(root, path string) (bool, error) {
 }
 
 func analyzeFiles(files []parsedGoFile, result *auditResult) {
+	analyzeReservedBackendAuthority(files, result)
+
 	handledRegisterRefs := make(map[*ast.Ident]bool)
 	allowedRegistryRefs := make(map[*ast.Ident]bool)
 	directRegistrationOwners := make(map[*ast.CallExpr]*ast.FuncDecl)
@@ -517,6 +526,256 @@ func analyzeFiles(files []parsedGoFile, result *auditResult) {
 	}
 }
 
+func analyzeReservedBackendAuthority(files []parsedGoFile, result *auditResult) {
+	allowedPredicateRefs := make(map[*ast.Ident]bool)
+	predicateDeclCount := 0
+	canonicalRouteCount := 0
+	normalizationDeclCount := 0
+	canonicalNormalizationGuardCount := 0
+
+	for _, parsed := range files {
+		for _, declaration := range parsed.file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if function.Name.Name == reservedPredicateIdentifier {
+				allowedPredicateRefs[function.Name] = true
+				predicateDeclCount++
+				if parsed.relPath != pluginRegistryFile || function.Recv != nil {
+					result.addViolation("%s declaration must be in %s", reservedPredicateIdentifier, pluginRegistryFile)
+				}
+				if !isCanonicalReservedPredicate(function) {
+					result.addViolation("%s must be the canonical exact predicate reserving only kind and k3s", reservedPredicateIdentifier)
+				}
+			}
+			if parsed.relPath == registryFile && isPlatformKubernetesInit(function) && function.Body != nil {
+				for _, statement := range function.Body.List {
+					branch, ok := statement.(*ast.IfStmt)
+					if !ok || branch.Init != nil {
+						continue
+					}
+					identifier, ok := reservedPredicateCall(branch.Cond, "clusterType")
+					if !ok {
+						continue
+					}
+					allowedPredicateRefs[identifier] = true
+					canonicalRouteCount++
+				}
+			}
+			if function.Name.Name == normalizeRegistrationIdentifier {
+				normalizationDeclCount++
+				if parsed.relPath != pluginRegistryFile || function.Recv != nil {
+					result.addViolation("%s declaration must be in %s", normalizeRegistrationIdentifier, pluginRegistryFile)
+				}
+				identifier, ok := canonicalNormalizationReservedGuard(function)
+				if !ok {
+					result.addViolation("%s must directly guard normalized name with %s and return the reserved-type rejection", normalizeRegistrationIdentifier, reservedPredicateIdentifier)
+					continue
+				}
+				allowedPredicateRefs[identifier] = true
+				canonicalNormalizationGuardCount++
+			}
+		}
+	}
+
+	for _, parsed := range files {
+		ast.Inspect(parsed.file, func(node ast.Node) bool {
+			identifier, ok := node.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			switch identifier.Name {
+			case removedReservedMapIdentifier:
+				result.addViolation("%s:%d removed %s map must not exist", parsed.relPath, parsed.fset.Position(identifier.Pos()).Line, removedReservedMapIdentifier)
+			case reservedPredicateIdentifier:
+				if !allowedPredicateRefs[identifier] {
+					result.addViolation("%s:%d %s reference is only permitted in its declaration, core route, and normalization guard", parsed.relPath, parsed.fset.Position(identifier.Pos()).Line, reservedPredicateIdentifier)
+				}
+			}
+			return true
+		})
+	}
+
+	if predicateDeclCount != 1 {
+		result.addViolation("expected exactly one %s declaration in %s, found %d", reservedPredicateIdentifier, pluginRegistryFile, predicateDeclCount)
+	}
+	if canonicalRouteCount != 1 {
+		result.addViolation("expected exactly one canonical %s core route, found %d", reservedPredicateIdentifier, canonicalRouteCount)
+	}
+	if normalizationDeclCount != 1 {
+		result.addViolation("expected exactly one %s declaration in %s, found %d", normalizeRegistrationIdentifier, pluginRegistryFile, normalizationDeclCount)
+	}
+	if canonicalNormalizationGuardCount != 1 {
+		result.addViolation("expected exactly one canonical %s normalization guard, found %d", reservedPredicateIdentifier, canonicalNormalizationGuardCount)
+	}
+}
+
+func isCanonicalReservedPredicate(function *ast.FuncDecl) bool {
+	if function.Recv != nil || function.Type == nil || function.Type.TypeParams != nil ||
+		function.Body == nil || len(function.Body.List) != 1 {
+		return false
+	}
+	parameters := function.Type.Params
+	if parameters == nil || len(parameters.List) != 1 || len(parameters.List[0].Names) != 1 ||
+		parameters.List[0].Names[0].Name != "name" || !isIdentifier(parameters.List[0].Type, "string") {
+		return false
+	}
+	results := function.Type.Results
+	if results == nil || len(results.List) != 1 || len(results.List[0].Names) != 0 || !isIdentifier(results.List[0].Type, "bool") {
+		return false
+	}
+	switchStatement, ok := function.Body.List[0].(*ast.SwitchStmt)
+	if !ok || switchStatement.Init != nil || !isIdentifier(switchStatement.Tag, "name") ||
+		switchStatement.Body == nil || len(switchStatement.Body.List) != 2 {
+		return false
+	}
+	reservedCase, ok := switchStatement.Body.List[0].(*ast.CaseClause)
+	if !ok || len(reservedCase.List) != 2 || !isStringLiteral(reservedCase.List[0], "kind") ||
+		!isStringLiteral(reservedCase.List[1], "k3s") || len(reservedCase.Body) != 1 ||
+		!isBooleanReturn(reservedCase.Body[0], "true") {
+		return false
+	}
+	defaultCase, ok := switchStatement.Body.List[1].(*ast.CaseClause)
+	return ok && len(defaultCase.List) == 0 && len(defaultCase.Body) == 1 && isBooleanReturn(defaultCase.Body[0], "false")
+}
+
+func isBooleanReturn(statement ast.Stmt, value string) bool {
+	returned, ok := statement.(*ast.ReturnStmt)
+	return ok && len(returned.Results) == 1 && isIdentifier(returned.Results[0], value)
+}
+
+func reservedPredicateCall(expression ast.Expr, argument string) (*ast.Ident, bool) {
+	call, ok := expression.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 || !isIdentifier(call.Args[0], argument) {
+		return nil, false
+	}
+	identifier, ok := call.Fun.(*ast.Ident)
+	return identifier, ok && identifier.Name == reservedPredicateIdentifier
+}
+
+func canonicalNormalizationReservedGuard(function *ast.FuncDecl) (*ast.Ident, bool) {
+	if function.Body == nil || len(function.Body.List) != 5 ||
+		!isCanonicalOwnerNormalization(function.Body.List[0]) ||
+		!isCanonicalOwnerEmptyGuard(function.Body.List[1]) ||
+		!isCanonicalNormalizedBindingsInitialization(function.Body.List[2]) ||
+		!isCanonicalNormalizedBindingsReturn(function.Body.List[4]) {
+		return nil, false
+	}
+	iteration, ok := function.Body.List[3].(*ast.RangeStmt)
+	if !ok || iteration.Tok != token.DEFINE || !isIdentifier(iteration.Key, "_") ||
+		!isIdentifier(iteration.Value, "binding") || !isIdentifier(iteration.X, "bindings") ||
+		iteration.Body == nil || len(iteration.Body.List) < 3 {
+		return nil, false
+	}
+	if !isNormalizedBackendNameAssignment(iteration.Body.List[0]) ||
+		!isCanonicalNormalizedNameEmptyGuard(iteration.Body.List[1]) {
+		return nil, false
+	}
+	return isCanonicalReservedNormalizationGuard(iteration.Body.List[2])
+}
+
+func isCanonicalOwnerNormalization(statement ast.Stmt) bool {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.ASSIGN || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 ||
+		!isIdentifier(assignment.Lhs[0], "owner") {
+		return false
+	}
+	call, ok := assignment.Rhs[0].(*ast.CallExpr)
+	return ok && isSelector(call.Fun, "strings", "TrimSpace") && len(call.Args) == 1 &&
+		isIdentifier(call.Args[0], "owner")
+}
+
+func isCanonicalOwnerEmptyGuard(statement ast.Stmt) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || branch.Else != nil || branch.Body == nil || len(branch.Body.List) != 1 {
+		return false
+	}
+	condition, ok := branch.Cond.(*ast.BinaryExpr)
+	if !ok || condition.Op != token.EQL || !isIdentifier(condition.X, "owner") || !isStringLiteral(condition.Y, "") {
+		return false
+	}
+	returned, ok := branch.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(returned.Results) != 3 || !isStringLiteral(returned.Results[0], "") ||
+		!isIdentifier(returned.Results[1], "nil") {
+		return false
+	}
+	call, ok := returned.Results[2].(*ast.CallExpr)
+	return ok && isSelector(call.Fun, "fmt", "Errorf") && len(call.Args) == 1 &&
+		isStringLiteral(call.Args[0], "kubernetes backend registration: owner must not be empty")
+}
+
+func isCanonicalNormalizedBindingsInitialization(statement ast.Stmt) bool {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 ||
+		!isIdentifier(assignment.Lhs[0], "normalized") {
+		return false
+	}
+	call, ok := assignment.Rhs[0].(*ast.CallExpr)
+	if !ok || !isIdentifier(call.Fun, "make") || len(call.Args) != 2 {
+		return false
+	}
+	mapType, ok := call.Args[0].(*ast.MapType)
+	if !ok || !isIdentifier(mapType.Key, "string") || !isIdentifier(mapType.Value, "KubernetesBackendBinding") {
+		return false
+	}
+	length, ok := call.Args[1].(*ast.CallExpr)
+	return ok && isIdentifier(length.Fun, "len") && len(length.Args) == 1 && isIdentifier(length.Args[0], "bindings")
+}
+
+func isCanonicalNormalizedBindingsReturn(statement ast.Stmt) bool {
+	returned, ok := statement.(*ast.ReturnStmt)
+	return ok && len(returned.Results) == 3 && isIdentifier(returned.Results[0], "owner") &&
+		isIdentifier(returned.Results[1], "normalized") && isIdentifier(returned.Results[2], "nil")
+}
+
+func isCanonicalNormalizedNameEmptyGuard(statement ast.Stmt) bool {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || branch.Else != nil || branch.Body == nil || len(branch.Body.List) != 1 {
+		return false
+	}
+	condition, ok := branch.Cond.(*ast.BinaryExpr)
+	if !ok || condition.Op != token.EQL || !isIdentifier(condition.X, "name") || !isStringLiteral(condition.Y, "") {
+		return false
+	}
+	returned, ok := branch.Body.List[0].(*ast.ReturnStmt)
+	return ok && len(returned.Results) == 3
+}
+
+func isNormalizedBackendNameAssignment(statement ast.Stmt) bool {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 ||
+		!isIdentifier(assignment.Lhs[0], "name") {
+		return false
+	}
+	call, ok := assignment.Rhs[0].(*ast.CallExpr)
+	return ok && isSelector(call.Fun, "strings", "TrimSpace") && len(call.Args) == 1 &&
+		isSelector(call.Args[0], "binding", "Name")
+}
+
+func isCanonicalReservedNormalizationGuard(statement ast.Stmt) (*ast.Ident, bool) {
+	branch, ok := statement.(*ast.IfStmt)
+	if !ok || branch.Init != nil || branch.Else != nil || branch.Body == nil || len(branch.Body.List) != 1 {
+		return nil, false
+	}
+	identifier, ok := reservedPredicateCall(branch.Cond, "name")
+	if !ok {
+		return nil, false
+	}
+	returned, ok := branch.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(returned.Results) != 3 || !isStringLiteral(returned.Results[0], "") ||
+		!isIdentifier(returned.Results[1], "nil") {
+		return nil, false
+	}
+	call, ok := returned.Results[2].(*ast.CallExpr)
+	if !ok || !isSelector(call.Fun, "fmt", "Errorf") || len(call.Args) != 2 ||
+		!isStringLiteral(call.Args[0], "plugin registered reserved kubernetes backend type %q") ||
+		!isIdentifier(call.Args[1], "name") {
+		return nil, false
+	}
+	return identifier, true
+}
+
 func validateBoundaryLinknames(parsed parsedGoFile, result *auditResult) {
 	for _, group := range parsed.file.Comments {
 		for _, comment := range group.List {
@@ -539,7 +798,7 @@ func validateBoundaryLinknames(parsed parsedGoFile, result *auditResult) {
 }
 
 func linknameReferencesBoundarySymbol(symbol string) bool {
-	for _, boundary := range []string{registerIdentifier, registryIdentifier} {
+	for _, boundary := range []string{registerIdentifier, registryIdentifier, removedReservedMapIdentifier} {
 		if symbol == boundary || strings.HasSuffix(symbol, "."+boundary) {
 			return true
 		}
@@ -763,15 +1022,11 @@ func isKubernetesServicePublication(node ast.Stmt) bool {
 }
 
 func isCoreLocalRoutingCondition(branch *ast.IfStmt) bool {
-	assignment, ok := branch.Init.(*ast.AssignStmt)
-	if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 2 || len(assignment.Rhs) != 1 {
+	if branch.Init != nil {
 		return false
 	}
-	if !isIdentifier(assignment.Lhs[0], "_") || !isIdentifier(assignment.Lhs[1], "coreLocal") || !isIdentifier(branch.Cond, "coreLocal") {
-		return false
-	}
-	index, ok := assignment.Rhs[0].(*ast.IndexExpr)
-	return ok && isIdentifier(index.X, "reservedKubernetesBackendTypes") && isIdentifier(index.Index, "clusterType")
+	_, ok := reservedPredicateCall(branch.Cond, "clusterType")
+	return ok
 }
 
 func validateCoreLocalBackendBranch(body *ast.BlockStmt) (*ast.Ident, bool) {

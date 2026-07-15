@@ -15,9 +15,13 @@ const KubernetesBackendRegistryServiceName = "workflow.internal.kubernetes-backe
 
 const legacyKubernetesBackendResourceType = "infra.k8s_cluster"
 
-var reservedKubernetesBackendTypes = map[string]struct{}{
-	"kind": {},
-	"k3s":  {},
+func isReservedKubernetesBackendType(name string) bool {
+	switch name {
+	case "kind", "k3s":
+		return true
+	default:
+		return false
+	}
 }
 
 // KubernetesBackendBinding is the exact manifest/runtime route selected for a
@@ -99,7 +103,7 @@ func normalizeKubernetesBackendRegistration(owner string, bindings []KubernetesB
 		if name == "" {
 			return "", nil, fmt.Errorf("kubernetes backend registration: name must not be empty")
 		}
-		if _, reserved := reservedKubernetesBackendTypes[name]; reserved {
+		if isReservedKubernetesBackendType(name) {
 			return "", nil, fmt.Errorf("plugin registered reserved kubernetes backend type %q", name)
 		}
 		if _, duplicate := normalized[name]; duplicate {

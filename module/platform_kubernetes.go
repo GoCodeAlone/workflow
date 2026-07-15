@@ -94,7 +94,7 @@ func (m *PlatformKubernetes) Init(app modular.Application) error {
 	}
 
 	// kind/k3s are deliberately core-local and never consult plugin state.
-	if _, coreLocal := reservedKubernetesBackendTypes[clusterType]; coreLocal {
+	if isReservedKubernetesBackendType(clusterType) {
 		factory, ok := kubernetesBackendRegistry[clusterType]
 		if !ok {
 			return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)

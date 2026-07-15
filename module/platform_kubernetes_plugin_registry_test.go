@@ -18,6 +18,44 @@ func (r *testScopedKubernetesBackendRegistry) ResolveKubernetesBackend(name stri
 	return KubernetesBackendBinding{Name: name, ResourceType: "infra." + name, Client: client}, "test-provider", ok
 }
 
+func TestIsReservedKubernetesBackendTypeExactSet(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "kind", want: true},
+		{name: "k3s", want: true},
+		{name: "", want: false},
+		{name: "digitalocean", want: false},
+		{name: "gke", want: false},
+		{name: "eks", want: false},
+		{name: "aks", want: false},
+		{name: " kind ", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isReservedKubernetesBackendType(test.name); got != test.want {
+				t.Fatalf("isReservedKubernetesBackendType(%q) = %v, want %v", test.name, got, test.want)
+			}
+		})
+	}
+}
+
+func TestKubernetesBackendRegistryRejectsReservedPluginRegistration(t *testing.T) {
+	reg := NewKubernetesBackendRegistry()
+	fake := &fakeResourceDriverClient{}
+	for _, name := range []string{"kind", "k3s"} {
+		err := reg.Register("provider-test", []KubernetesBackendBinding{{
+			Name:         name,
+			ResourceType: "infra.test",
+			Client:       fake,
+		}})
+		if err == nil || !strings.Contains(err.Error(), `reserved kubernetes backend type "`+name+`"`) {
+			t.Fatalf("Register(%q) error = %v, want reserved-type rejection", name, err)
+		}
+	}
+}
+
 // TestKubernetesBackendClientRegistry exercises the engine-side registry that
 // maps a plugin-served platform.kubernetes cluster type to a ResourceDriver
 // gRPC client. Mirrors TestIaCStateBackendRegistry.

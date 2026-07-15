@@ -45,7 +45,6 @@ type KubernetesClusterState struct {
 }
 
 var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
-var reservedKubernetesBackendTypes = map[string]struct{}{}
 
 func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) { kubernetesBackendRegistry[clusterType] = factory }
 
@@ -82,7 +81,7 @@ func (m *PlatformKubernetes) Init(app any) error {
 		clusterType = "kind"
 	}
 
-	if _, coreLocal := reservedKubernetesBackendTypes[clusterType]; coreLocal {
+	if isReservedKubernetesBackendType(clusterType) {
 		factory, ok := kubernetesBackendRegistry[clusterType]
 		if !ok {
 			return fmt.Errorf("platform.kubernetes %q: unsupported type %q", m.name, clusterType)
@@ -124,6 +123,37 @@ func (m *PlatformKubernetes) Init(app any) error {
 		Status: "pending",
 	}
 	return app.RegisterService(m.name, m)
+}
+EOF
+  cat >"$root/module/platform_kubernetes_plugin_registry.go" <<'EOF'
+package module
+
+func isReservedKubernetesBackendType(name string) bool {
+	switch name {
+	case "kind", "k3s":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeKubernetesBackendRegistration(owner string, bindings []KubernetesBackendBinding) (string, map[string]KubernetesBackendBinding, error) {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return "", nil, fmt.Errorf("kubernetes backend registration: owner must not be empty")
+	}
+	normalized := make(map[string]KubernetesBackendBinding, len(bindings))
+	for _, binding := range bindings {
+		name := strings.TrimSpace(binding.Name)
+		if name == "" {
+			return "", nil, nil
+		}
+		if isReservedKubernetesBackendType(name) {
+			return "", nil, fmt.Errorf("plugin registered reserved kubernetes backend type %q", name)
+		}
+		normalized[name] = binding
+	}
+	return owner, normalized, nil
 }
 EOF
   cat >"$root/module/platform_kubernetes_core.go" <<'EOF'
@@ -438,14 +468,14 @@ expect_failure "dummy registry reads" "$dummy_reads" "must preserve the core-loc
 
 routing_replacement="$TMP_ROOT/routing-replacement"
 write_allowed_fixture "$routing_replacement"
-sed 's/reservedKubernetesBackendTypes\[clusterType\]/providerKubernetesBackendTypes[clusterType]/' "$routing_replacement/module/platform_kubernetes.go" >"$routing_replacement/module/platform_kubernetes.go.tmp"
+sed 's/isReservedKubernetesBackendType(clusterType)/isProviderKubernetesBackendType(clusterType)/' "$routing_replacement/module/platform_kubernetes.go" >"$routing_replacement/module/platform_kubernetes.go.tmp"
 mv "$routing_replacement/module/platform_kubernetes.go.tmp" "$routing_replacement/module/platform_kubernetes.go"
 expect_failure "core-local routing replacement" "$routing_replacement" "must preserve the core-local Kubernetes backend lookup and initialization branch"
 
 extra_registry_read="$TMP_ROOT/extra-registry-read"
 write_allowed_fixture "$extra_registry_read"
 awk '
-  /^\tif _, coreLocal :=/ { print "\t_, _ = kubernetesBackendRegistry[clusterType]" }
+  /^\tif isReservedKubernetesBackendType/ { print "\t_, _ = kubernetesBackendRegistry[clusterType]" }
   { print }
 ' "$extra_registry_read/module/platform_kubernetes.go" >"$extra_registry_read/module/platform_kubernetes.go.tmp"
 mv "$extra_registry_read/module/platform_kubernetes.go.tmp" "$extra_registry_read/module/platform_kubernetes.go"
@@ -465,8 +495,8 @@ expect_failure "moved compatibility registry lookup" "$moved_fallback" "must pre
 
 earlier_provider_route="$TMP_ROOT/earlier-provider-route"
 write_allowed_fixture "$earlier_provider_route"
-sed 's/^\tif _, coreLocal :=/\tif providerRoute { return nil }\
-\tif _, coreLocal :=/' "$earlier_provider_route/module/platform_kubernetes.go" >"$earlier_provider_route/module/platform_kubernetes.go.tmp"
+sed 's/^\tif isReservedKubernetesBackendType/\tif providerRoute { return nil }\
+\tif isReservedKubernetesBackendType/' "$earlier_provider_route/module/platform_kubernetes.go" >"$earlier_provider_route/module/platform_kubernetes.go.tmp"
 mv "$earlier_provider_route/module/platform_kubernetes.go.tmp" "$earlier_provider_route/module/platform_kubernetes.go"
 expect_failure "earlier provider route with preserved canonical branch" "$earlier_provider_route" "must remain the anchored routing decision"
 
@@ -539,6 +569,67 @@ awk '
 mv "$provider_final_fallback/module/platform_kubernetes.go.tmp" "$provider_final_fallback/module/platform_kubernetes.go"
 expect_failure "provider backend in final fallback" "$provider_final_fallback" "must preserve the provider-first compatibility fallback lookup and initialization branch"
 
+reserved_map_resurrection="$TMP_ROOT/reserved-map-resurrection"
+write_allowed_fixture "$reserved_map_resurrection"
+cat >"$reserved_map_resurrection/module/hidden_reserved.go" <<'EOF'
+package module
+
+var reservedKubernetesBackendTypes = map[string]struct{}{"digitalocean": {}}
+EOF
+expect_failure "removed reserved map resurrection" "$reserved_map_resurrection" "removed reservedKubernetesBackendTypes map must not exist"
+
+provider_predicate_case="$TMP_ROOT/provider-predicate-case"
+write_allowed_fixture "$provider_predicate_case"
+sed 's/case "kind", "k3s":/case "kind", "k3s", "digitalocean":/' "$provider_predicate_case/module/platform_kubernetes_plugin_registry.go" >"$provider_predicate_case/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$provider_predicate_case/module/platform_kubernetes_plugin_registry.go.tmp" "$provider_predicate_case/module/platform_kubernetes_plugin_registry.go"
+expect_failure "provider added to reserved predicate" "$provider_predicate_case" "isReservedKubernetesBackendType must be the canonical exact predicate"
+
+default_true_predicate="$TMP_ROOT/default-true-predicate"
+write_allowed_fixture "$default_true_predicate"
+sed 's/^\t\treturn false$/\t\treturn true/' "$default_true_predicate/module/platform_kubernetes_plugin_registry.go" >"$default_true_predicate/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$default_true_predicate/module/platform_kubernetes_plugin_registry.go.tmp" "$default_true_predicate/module/platform_kubernetes_plugin_registry.go"
+expect_failure "reserved predicate default true" "$default_true_predicate" "isReservedKubernetesBackendType must be the canonical exact predicate"
+
+missing_normalization_guard="$TMP_ROOT/missing-normalization-guard"
+write_allowed_fixture "$missing_normalization_guard"
+awk '
+  /^\t\tif isReservedKubernetesBackendType\(name\)/ { skipping=1; next }
+  skipping && /^\t\t}$/ { skipping=0; next }
+  !skipping { print }
+' "$missing_normalization_guard/module/platform_kubernetes_plugin_registry.go" >"$missing_normalization_guard/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$missing_normalization_guard/module/platform_kubernetes_plugin_registry.go.tmp" "$missing_normalization_guard/module/platform_kubernetes_plugin_registry.go"
+expect_failure "missing reserved normalization guard" "$missing_normalization_guard" "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType"
+
+overwritten_normalized_name="$TMP_ROOT/overwritten-normalized-name"
+write_allowed_fixture "$overwritten_normalized_name"
+awk '
+  /^\t\tif name == ""/ { print "\t\tname = \"digitalocean\""; skipping=1; next }
+  skipping && /^\t\t}$/ { skipping=0; next }
+  !skipping { print }
+' "$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go" >"$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go.tmp" "$overwritten_normalized_name/module/platform_kubernetes_plugin_registry.go"
+expect_failure "normalized name overwritten before reserved guard" "$overwritten_normalized_name" "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType"
+
+early_reserved_return="$TMP_ROOT/early-reserved-return"
+write_allowed_fixture "$early_reserved_return"
+awk '
+  { print }
+  /^\tnormalized := make/ {
+    print "\tif len(bindings) == 1 {"
+    print "\t\tnormalized[\"kind\"] = bindings[0]"
+    print "\t\treturn owner, normalized, nil"
+    print "\t}"
+  }
+' "$early_reserved_return/module/platform_kubernetes_plugin_registry.go" >"$early_reserved_return/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$early_reserved_return/module/platform_kubernetes_plugin_registry.go.tmp" "$early_reserved_return/module/platform_kubernetes_plugin_registry.go"
+expect_failure "reserved registration returned before guarded loop" "$early_reserved_return" "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType"
+
+replaced_normalization_guard="$TMP_ROOT/replaced-normalization-guard"
+write_allowed_fixture "$replaced_normalization_guard"
+sed 's/isReservedKubernetesBackendType(name)/isProviderKubernetesBackendType(name)/' "$replaced_normalization_guard/module/platform_kubernetes_plugin_registry.go" >"$replaced_normalization_guard/module/platform_kubernetes_plugin_registry.go.tmp"
+mv "$replaced_normalization_guard/module/platform_kubernetes_plugin_registry.go.tmp" "$replaced_normalization_guard/module/platform_kubernetes_plugin_registry.go"
+expect_failure "replaced reserved normalization guard" "$replaced_normalization_guard" "normalizeKubernetesBackendRegistration must directly guard normalized name with isReservedKubernetesBackendType"
+
 lexical_noise="$TMP_ROOT/lexical-noise"
 write_allowed_fixture "$lexical_noise"
 cat >"$lexical_noise/module/lexical_noise.go" <<'EOF'
@@ -551,7 +642,7 @@ const rawRegistration = `RegisterKubernetesBackend("managed-cloud", nil)`
 EOF
 expect_success "comments and strings are not registrations" "$lexical_noise"
 
-for linkname_symbol in RegisterKubernetesBackend kubernetesBackendRegistry; do
+for linkname_symbol in RegisterKubernetesBackend kubernetesBackendRegistry reservedKubernetesBackendTypes; do
   linkname_root="$TMP_ROOT/linkname-$linkname_symbol"
   write_allowed_fixture "$linkname_root"
   if [[ "$linkname_symbol" == "RegisterKubernetesBackend" ]]; then
@@ -567,7 +658,7 @@ func init() {
 	hiddenRegister("digitalocean", nil)
 }
 EOF
-  else
+  elif [[ "$linkname_symbol" == "kubernetesBackendRegistry" ]]; then
     cat >"$linkname_root/module/linkname_alias.go" <<'EOF'
 package module
 
@@ -579,6 +670,15 @@ var hiddenRegistry map[string]KubernetesBackendFactory
 func init() {
 	hiddenRegistry["digitalocean"] = nil
 }
+EOF
+  else
+    cat >"$linkname_root/module/linkname_alias.go" <<'EOF'
+package module
+
+import _ "unsafe"
+
+//go:linkname hiddenReserved github.com/GoCodeAlone/workflow/module.reservedKubernetesBackendTypes
+var hiddenReserved map[string]struct{}
 EOF
   fi
   expect_failure "go:linkname alias for $linkname_symbol" "$linkname_root" "go:linkname must not reference Kubernetes backend boundary symbol"
@@ -658,7 +758,7 @@ wrong_root="$TMP_ROOT/wrong-root"
 mkdir -p "$wrong_root"
 expect_failure "wrong Workflow root" "$wrong_root" "missing canonical Kubernetes registration file module/platform_kubernetes.go"
 
-for missing_file in platform_kubernetes.go platform_kubernetes_core.go; do
+for missing_file in platform_kubernetes.go platform_kubernetes_core.go platform_kubernetes_plugin_registry.go; do
   missing_file_root="$TMP_ROOT/missing-${missing_file%.go}"
   write_allowed_fixture "$missing_file_root"
   rm "$missing_file_root/module/$missing_file"
