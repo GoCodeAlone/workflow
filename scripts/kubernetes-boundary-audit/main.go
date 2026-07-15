@@ -212,10 +212,11 @@ func candidateGoFiles(root string) ([]parsedGoFile, error) {
 
 func analyzeFiles(files []parsedGoFile, result *auditResult) {
 	handledRegisterRefs := make(map[*ast.Ident]bool)
-	handledRegistryDecls := make(map[*ast.Ident]bool)
+	allowedRegistryRefs := make(map[*ast.Ident]bool)
 	registerDeclCount := 0
 	registryDeclCount := 0
 	canonicalRegistryWrites := 0
+	canonicalRegistryLookups := 0
 	registrationCounts := make(map[string]int)
 
 	for _, parsed := range files {
@@ -257,10 +258,13 @@ func analyzeFiles(files []parsedGoFile, result *auditResult) {
 				if name.Name != registryIdentifier {
 					continue
 				}
-				handledRegistryDecls[name] = true
+				allowedRegistryRefs[name] = true
 				registryDeclCount++
 				if parsed.relPath != registryFile || !topLevelRegistryDecls[name] {
 					result.addViolation("%s declaration must be in %s", registryIdentifier, registryFile)
+				}
+				if !isEmptyRegistryMapInitializer(valueSpec, name) {
+					result.addViolation("%s must initialize an empty map literal of type map[string]KubernetesBackendFactory", registryIdentifier)
 				}
 			}
 			return true
@@ -271,31 +275,87 @@ func analyzeFiles(files []parsedGoFile, result *auditResult) {
 			if !ok || function.Body == nil {
 				continue
 			}
+			allowedDirectWrites := make(map[*ast.AssignStmt]*ast.Ident)
+			if parsed.relPath == registryFile && function.Name.Name == registerIdentifier && function.Recv == nil {
+				for _, statement := range function.Body.List {
+					assignment, ok := statement.(*ast.AssignStmt)
+					if !ok {
+						continue
+					}
+					if identifier, ok := directRegistryAssignmentBase(assignment); ok {
+						allowedDirectWrites[assignment] = identifier
+					}
+				}
+				if len(allowedDirectWrites) != 1 {
+					result.addViolation("%s must directly assign %s[clusterType] = factory", registerIdentifier, registryIdentifier)
+				}
+			}
+			writeRefs := make(map[*ast.Ident]bool)
 			ast.Inspect(function.Body, func(node ast.Node) bool {
 				switch node := node.(type) {
 				case *ast.AssignStmt:
+					invalidWrite := false
 					for _, target := range node.Lhs {
-						if containsIdentifier(target, registryIdentifier) {
-							if parsed.relPath == registryFile && function.Name.Name == registerIdentifier {
+						for _, identifier := range identifiersNamed(target, registryIdentifier) {
+							writeRefs[identifier] = true
+							if allowedDirectWrites[node] == identifier {
+								allowedRegistryRefs[identifier] = true
 								canonicalRegistryWrites++
-							} else {
-								result.addViolation("%s write must remain in %s in %s", registryIdentifier, registerIdentifier, registryFile)
+								continue
 							}
+							invalidWrite = true
 						}
+					}
+					if invalidWrite {
+						result.addViolation("%s write must remain in %s in %s as the single direct assignment", registryIdentifier, registerIdentifier, registryFile)
+					}
+				case *ast.IncDecStmt:
+					refs := identifiersNamed(node.X, registryIdentifier)
+					if len(refs) != 0 {
+						for _, identifier := range refs {
+							writeRefs[identifier] = true
+						}
+						result.addViolation("%s write must remain in %s in %s as the single direct assignment", registryIdentifier, registerIdentifier, registryFile)
 					}
 				case *ast.CallExpr:
 					builtin, ok := node.Fun.(*ast.Ident)
-					if !ok || (builtin.Name != "delete" && builtin.Name != "clear") || len(node.Args) == 0 || !containsIdentifier(node.Args[0], registryIdentifier) {
+					if !ok || (builtin.Name != "delete" && builtin.Name != "clear") || len(node.Args) == 0 {
 						return true
 					}
-					if parsed.relPath == registryFile && function.Name.Name == registerIdentifier {
-						canonicalRegistryWrites++
-					} else {
-						result.addViolation("%s write must remain in %s in %s", registryIdentifier, registerIdentifier, registryFile)
+					refs := identifiersNamed(node.Args[0], registryIdentifier)
+					if len(refs) != 0 {
+						for _, identifier := range refs {
+							writeRefs[identifier] = true
+						}
+						result.addViolation("%s write must remain in %s in %s as the single direct assignment", registryIdentifier, registerIdentifier, registryFile)
 					}
 				}
 				return true
 			})
+
+			if parsed.relPath == registryFile && isPlatformKubernetesInit(function) {
+				ast.Inspect(function.Body, func(node ast.Node) bool {
+					if _, nested := node.(*ast.FuncLit); nested {
+						return false
+					}
+					index, ok := node.(*ast.IndexExpr)
+					if !ok {
+						return true
+					}
+					identifier, ok := index.X.(*ast.Ident)
+					if !ok || identifier.Name != registryIdentifier || writeRefs[identifier] {
+						return true
+					}
+					key, ok := index.Index.(*ast.Ident)
+					if !ok || key.Name != "clusterType" {
+						result.addViolation("%s lookup in (*PlatformKubernetes).Init must index by clusterType", registryIdentifier)
+						return true
+					}
+					allowedRegistryRefs[identifier] = true
+					canonicalRegistryLookups++
+					return true
+				})
+			}
 		}
 
 		ast.Inspect(parsed.file, func(node ast.Node) bool {
@@ -329,8 +389,8 @@ func analyzeFiles(files []parsedGoFile, result *auditResult) {
 					result.addViolation("%s:%d unsupported %s reference; only direct canonical calls are permitted", parsed.relPath, parsed.fset.Position(identifier.Pos()).Line, registerIdentifier)
 				}
 			case registryIdentifier:
-				if parsed.relPath != registryFile && !handledRegistryDecls[identifier] {
-					result.addViolation("%s:%d %s reference must remain in %s", parsed.relPath, parsed.fset.Position(identifier.Pos()).Line, registryIdentifier, registryFile)
+				if !allowedRegistryRefs[identifier] {
+					result.addViolation("%s:%d %s reference is only permitted in its declaration and %s write, or two (*PlatformKubernetes).Init lookups", parsed.relPath, parsed.fset.Position(identifier.Pos()).Line, registryIdentifier, registerIdentifier)
 				}
 			}
 			return true
@@ -346,6 +406,9 @@ func analyzeFiles(files []parsedGoFile, result *auditResult) {
 	if canonicalRegistryWrites != 1 {
 		result.addViolation("expected exactly one %s write in %s in %s, found %d", registryIdentifier, registerIdentifier, registryFile, canonicalRegistryWrites)
 	}
+	if canonicalRegistryLookups != 2 {
+		result.addViolation("expected exactly two %s lookups in (*PlatformKubernetes).Init, found %d", registryIdentifier, canonicalRegistryLookups)
+	}
 	for _, required := range requiredBackends {
 		switch registrationCounts[required] {
 		case 0:
@@ -355,6 +418,73 @@ func analyzeFiles(files []parsedGoFile, result *auditResult) {
 			result.addViolation("duplicate Kubernetes backend registration %q", required)
 		}
 	}
+}
+
+func isEmptyRegistryMapInitializer(spec *ast.ValueSpec, target *ast.Ident) bool {
+	if len(spec.Names) != 1 || spec.Names[0] != target || len(spec.Values) != 1 {
+		return false
+	}
+	literal, ok := spec.Values[0].(*ast.CompositeLit)
+	if !ok || len(literal.Elts) != 0 {
+		return false
+	}
+	mapType, ok := literal.Type.(*ast.MapType)
+	if !ok {
+		return false
+	}
+	key, ok := mapType.Key.(*ast.Ident)
+	if !ok || key.Name != "string" {
+		return false
+	}
+	value, ok := mapType.Value.(*ast.Ident)
+	return ok && value.Name == "KubernetesBackendFactory"
+}
+
+func directRegistryAssignmentBase(assignment *ast.AssignStmt) (*ast.Ident, bool) {
+	if assignment.Tok != token.ASSIGN || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+		return nil, false
+	}
+	index, ok := assignment.Lhs[0].(*ast.IndexExpr)
+	if !ok {
+		return nil, false
+	}
+	identifier, ok := index.X.(*ast.Ident)
+	if !ok || identifier.Name != registryIdentifier {
+		return nil, false
+	}
+	key, ok := index.Index.(*ast.Ident)
+	if !ok || key.Name != "clusterType" {
+		return nil, false
+	}
+	value, ok := assignment.Rhs[0].(*ast.Ident)
+	if !ok || value.Name != "factory" {
+		return nil, false
+	}
+	return identifier, true
+}
+
+func isPlatformKubernetesInit(function *ast.FuncDecl) bool {
+	if function.Name.Name != "Init" || function.Recv == nil || len(function.Recv.List) != 1 {
+		return false
+	}
+	receiver, ok := function.Recv.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	identifier, ok := receiver.X.(*ast.Ident)
+	return ok && identifier.Name == "PlatformKubernetes"
+}
+
+func identifiersNamed(node ast.Node, name string) []*ast.Ident {
+	identifiers := make([]*ast.Ident, 0)
+	ast.Inspect(node, func(node ast.Node) bool {
+		identifier, ok := node.(*ast.Ident)
+		if ok && identifier.Name == name {
+			identifiers = append(identifiers, identifier)
+		}
+		return true
+	})
+	return identifiers
 }
 
 func validateDirectCall(parsed parsedGoFile, call *ast.CallExpr, identifier *ast.Ident, result *auditResult) (string, bool) {
@@ -389,19 +519,6 @@ func validateDirectCall(parsed parsedGoFile, call *ast.CallExpr, identifier *ast
 		valid = false
 	}
 	return name, valid
-}
-
-func containsIdentifier(node ast.Node, name string) bool {
-	found := false
-	ast.Inspect(node, func(node ast.Node) bool {
-		identifier, ok := node.(*ast.Ident)
-		if ok && identifier.Name == name {
-			found = true
-			return false
-		}
-		return !found
-	})
-	return found
 }
 
 func isRequiredBackend(name string) bool {

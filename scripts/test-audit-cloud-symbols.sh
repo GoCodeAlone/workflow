@@ -30,9 +30,18 @@ write_allowed_fixture() {
   cat >"$root/module/platform_kubernetes.go" <<'EOF'
 package module
 
-var kubernetesBackendRegistry = map[string]any{}
+type KubernetesBackendFactory func()
 
-func RegisterKubernetesBackend(name string, factory any) { kubernetesBackendRegistry[name] = factory }
+var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
+
+func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) { kubernetesBackendRegistry[clusterType] = factory }
+
+type PlatformKubernetes struct{}
+
+func (*PlatformKubernetes) Init(clusterType string) {
+	_, _ = kubernetesBackendRegistry[clusterType]
+	_, _ = kubernetesBackendRegistry[clusterType]
+}
 EOF
   cat >"$root/module/platform_kubernetes_core.go" <<'EOF'
 package module
@@ -136,7 +145,7 @@ mv "$moved_function/module/platform_kubernetes.go.tmp" "$moved_function/module/p
 cat >"$moved_function/module/provider_backend.go" <<'EOF'
 package module
 
-func RegisterKubernetesBackend(name string, factory any) { kubernetesBackendRegistry[name] = factory }
+func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) { kubernetesBackendRegistry[clusterType] = factory }
 EOF
 expect_failure "moved RegisterKubernetesBackend declaration" "$moved_function" "RegisterKubernetesBackend declaration must be in module/platform_kubernetes.go"
 
@@ -147,7 +156,7 @@ mv "$moved_registry/module/platform_kubernetes.go.tmp" "$moved_registry/module/p
 cat >"$moved_registry/module/provider_backend.go" <<'EOF'
 package module
 
-var kubernetesBackendRegistry = map[string]any{}
+var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
 EOF
 expect_failure "moved kubernetesBackendRegistry declaration" "$moved_registry" "kubernetesBackendRegistry declaration must be in module/platform_kubernetes.go"
 
@@ -161,6 +170,46 @@ func registerProviderBackendDirectly() {
 }
 EOF
 expect_failure "noncanonical registry write" "$registry_write" "kubernetesBackendRegistry write must remain in RegisterKubernetesBackend"
+
+registry_initializer="$TMP_ROOT/registry-initializer"
+write_allowed_fixture "$registry_initializer"
+sed 's/map\[string\]KubernetesBackendFactory{}/map[string]KubernetesBackendFactory{"gke": nil}/' "$registry_initializer/module/platform_kubernetes.go" >"$registry_initializer/module/platform_kubernetes.go.tmp"
+mv "$registry_initializer/module/platform_kubernetes.go.tmp" "$registry_initializer/module/platform_kubernetes.go"
+expect_failure "provider registry initializer entry" "$registry_initializer" "kubernetesBackendRegistry must initialize an empty map literal"
+
+registry_shape="$TMP_ROOT/registry-shape"
+write_allowed_fixture "$registry_shape"
+sed 's/map\[string\]KubernetesBackendFactory{}/map[string]any{}/' "$registry_shape/module/platform_kubernetes.go" >"$registry_shape/module/platform_kubernetes.go.tmp"
+mv "$registry_shape/module/platform_kubernetes.go.tmp" "$registry_shape/module/platform_kubernetes.go"
+expect_failure "alternate registry map value type" "$registry_shape" "kubernetesBackendRegistry must initialize an empty map literal"
+
+for assignment_mutation in hard-coded-key substituted-rhs; do
+  assignment_root="$TMP_ROOT/assignment-$assignment_mutation"
+  write_allowed_fixture "$assignment_root"
+  case "$assignment_mutation" in
+    hard-coded-key)
+      replacement='kubernetesBackendRegistry["gke"] = factory'
+      ;;
+    substituted-rhs)
+      replacement='kubernetesBackendRegistry[clusterType] = providerFactory'
+      ;;
+  esac
+  sed "s/kubernetesBackendRegistry\[clusterType\] = factory/$replacement/" "$assignment_root/module/platform_kubernetes.go" >"$assignment_root/module/platform_kubernetes.go.tmp"
+  mv "$assignment_root/module/platform_kubernetes.go.tmp" "$assignment_root/module/platform_kubernetes.go"
+  expect_failure "$assignment_mutation canonical registry assignment" "$assignment_root" "RegisterKubernetesBackend must directly assign kubernetesBackendRegistry[clusterType] = factory"
+done
+
+canonical_registry_escape="$TMP_ROOT/canonical-registry-escape"
+write_allowed_fixture "$canonical_registry_escape"
+cat >>"$canonical_registry_escape/module/platform_kubernetes.go" <<'EOF'
+
+func mutateRegistryWithoutRegistration() {
+	alias := kubernetesBackendRegistry
+	_ = alias
+	kubernetesBackendRegistry["gke"]++
+}
+EOF
+expect_failure "canonical registry alias/read/write escape" "$canonical_registry_escape" "kubernetesBackendRegistry reference is only permitted in its declaration and RegisterKubernetesBackend write"
 
 lexical_noise="$TMP_ROOT/lexical-noise"
 write_allowed_fixture "$lexical_noise"

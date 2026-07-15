@@ -9,10 +9,19 @@ import (
 
 const validRegistrySource = `package module
 
-var kubernetesBackendRegistry = map[string]any{}
+type KubernetesBackendFactory func()
 
-func RegisterKubernetesBackend(name string, factory any) {
-	kubernetesBackendRegistry[name] = factory
+var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}
+
+func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) {
+	kubernetesBackendRegistry[clusterType] = factory
+}
+
+type PlatformKubernetes struct{}
+
+func (*PlatformKubernetes) Init(clusterType string) {
+	_, _ = kubernetesBackendRegistry[clusterType]
+	_, _ = kubernetesBackendRegistry[clusterType]
 }
 `
 
@@ -72,18 +81,18 @@ func TestInspectRootRejectsMovedDeclarationsAndRegistryWrites(t *testing.T) {
 		{
 			name: "moved function declaration",
 			mutate: func(t *testing.T, root string) {
-				canonical := strings.ReplaceAll(validRegistrySource, "func RegisterKubernetesBackend(name string, factory any) {\n\tkubernetesBackendRegistry[name] = factory\n}\n", "")
+				canonical := strings.ReplaceAll(validRegistrySource, "func RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) {\n\tkubernetesBackendRegistry[clusterType] = factory\n}\n", "")
 				writeTestFile(t, root, registryFile, canonical)
-				writeTestFile(t, root, "module/provider_backend.go", "package module\n\nfunc RegisterKubernetesBackend(name string, factory any) {\n\tkubernetesBackendRegistry[name] = factory\n}\n")
+				writeTestFile(t, root, "module/provider_backend.go", "package module\n\nfunc RegisterKubernetesBackend(clusterType string, factory KubernetesBackendFactory) {\n\tkubernetesBackendRegistry[clusterType] = factory\n}\n")
 			},
 			expected: "RegisterKubernetesBackend declaration must be in module/platform_kubernetes.go",
 		},
 		{
 			name: "moved registry declaration",
 			mutate: func(t *testing.T, root string) {
-				canonical := strings.ReplaceAll(validRegistrySource, "var kubernetesBackendRegistry = map[string]any{}\n\n", "")
+				canonical := strings.ReplaceAll(validRegistrySource, "var kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}\n\n", "")
 				writeTestFile(t, root, registryFile, canonical)
-				writeTestFile(t, root, "module/provider_backend.go", "package module\n\nvar kubernetesBackendRegistry = map[string]any{}\n")
+				writeTestFile(t, root, "module/provider_backend.go", "package module\n\nvar kubernetesBackendRegistry = map[string]KubernetesBackendFactory{}\n")
 			},
 			expected: "kubernetesBackendRegistry declaration must be in module/platform_kubernetes.go",
 		},
@@ -100,6 +109,106 @@ func TestInspectRootRejectsMovedDeclarationsAndRegistryWrites(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := writeFixture(t, false)
 			test.mutate(t, root)
+			assertViolation(t, inspectRoot(root, true), test.expected)
+		})
+	}
+}
+
+func TestInspectRootRejectsRegistryInitializerMutations(t *testing.T) {
+	tests := []struct {
+		name        string
+		initializer string
+	}{
+		{name: "provider entry", initializer: `map[string]KubernetesBackendFactory{"gke": nil}`},
+		{name: "positional entry", initializer: `map[string]KubernetesBackendFactory{nil}`},
+		{name: "dynamic make", initializer: `make(map[string]KubernetesBackendFactory)`},
+		{name: "alternate value type", initializer: `map[string]any{}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			mutated := strings.Replace(validRegistrySource, "map[string]KubernetesBackendFactory{}", test.initializer, 1)
+			writeTestFile(t, root, registryFile, mutated)
+			assertViolation(t, inspectRoot(root, true), "kubernetesBackendRegistry must initialize an empty map literal")
+		})
+	}
+}
+
+func TestInspectRootRejectsNoncanonicalRegisterAssignment(t *testing.T) {
+	tests := []struct {
+		name       string
+		assignment string
+	}{
+		{name: "hard-coded provider key", assignment: `kubernetesBackendRegistry["gke"] = factory`},
+		{name: "alternate key identifier", assignment: `kubernetesBackendRegistry[backendName] = factory`},
+		{name: "substituted right-hand side", assignment: `kubernetesBackendRegistry[clusterType] = providerFactory`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			mutated := strings.Replace(validRegistrySource, "kubernetesBackendRegistry[clusterType] = factory", test.assignment, 1)
+			writeTestFile(t, root, registryFile, mutated)
+			assertViolation(t, inspectRoot(root, true), "RegisterKubernetesBackend must directly assign kubernetesBackendRegistry[clusterType] = factory")
+		})
+	}
+}
+
+func TestInspectRootRejectsCanonicalRegistryReferenceEscapes(t *testing.T) {
+	tests := []struct {
+		name   string
+		escape string
+	}{
+		{name: "alias read", escape: `func hidden() { alias := kubernetesBackendRegistry; _ = alias }`},
+		{name: "direct read", escape: `func hidden() { _ = kubernetesBackendRegistry }`},
+		{name: "tuple alias", escape: `func hidden() { alias, n := kubernetesBackendRegistry, 0; _, _ = alias, n }`},
+		{name: "increment write", escape: `func hidden() { kubernetesBackendRegistry["gke"]++ }`},
+		{name: "initializer reference", escape: `var hiddenRegistry = kubernetesBackendRegistry`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			writeTestFile(t, root, registryFile, validRegistrySource+"\n"+test.escape+"\n")
+			assertViolation(t, inspectRoot(root, true), "kubernetesBackendRegistry reference is only permitted in its declaration and RegisterKubernetesBackend write")
+		})
+	}
+}
+
+func TestInspectRootRequiresExactlyTwoCanonicalRegistryLookups(t *testing.T) {
+	tests := []struct {
+		name     string
+		mutate   func(string) string
+		expected string
+	}{
+		{
+			name: "missing lookup",
+			mutate: func(source string) string {
+				return strings.Replace(source, "\t_, _ = kubernetesBackendRegistry[clusterType]\n", "", 1)
+			},
+			expected: "expected exactly two kubernetesBackendRegistry lookups in (*PlatformKubernetes).Init, found 1",
+		},
+		{
+			name: "extra lookup",
+			mutate: func(source string) string {
+				return strings.Replace(source, "\t_, _ = kubernetesBackendRegistry[clusterType]\n", "\t_, _ = kubernetesBackendRegistry[clusterType]\n\t_, _ = kubernetesBackendRegistry[clusterType]\n", 1)
+			},
+			expected: "expected exactly two kubernetesBackendRegistry lookups in (*PlatformKubernetes).Init, found 3",
+		},
+		{
+			name: "alternate key",
+			mutate: func(source string) string {
+				return strings.Replace(source, "\t_, _ = kubernetesBackendRegistry[clusterType]\n", "\t_, _ = kubernetesBackendRegistry[\"gke\"]\n", 1)
+			},
+			expected: "kubernetesBackendRegistry lookup in (*PlatformKubernetes).Init must index by clusterType",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeFixture(t, false)
+			writeTestFile(t, root, registryFile, test.mutate(validRegistrySource))
 			assertViolation(t, inspectRoot(root, true), test.expected)
 		})
 	}
