@@ -1958,5 +1958,501 @@
     "contextSHA256": "7e6b8738cb89f1af132d306880423405b06b7eb3e71bb0cb65b627c88fbf95f3",
     "state": "active",
     "rationale": "Exact reviewed tr statement for release.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "07316a6dee4fa421f202dd55c47def6146f4bfdac654bb879860cdfc1a35a9ea",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "382ca07cb95080b3c93d28d1d5ed08c7a243e6a172dcde7914225ab80f170452",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "3f2364983a794efb2e46b4801974c38b4bf6d5e1fc055ce31fc887a31fa3820c",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "9f65eed4afa41afc2b6d4191e175afd313960d00b44b8d8897b439c6d5a549c0",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "$assignment",
+    "statementSHA256": "d02333163acb2a002b2f00961a5ffa46ef990eaacaaf930132129e4900e5ba37",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed literal assignment for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "[",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed [ statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "[",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed [ statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "[",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed [ statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "audit-cloud-symbols.sh",
+    "statementSHA256": "32084b0bd50db35412979127f9b6e37eb3581e64c1ee7e8249458badaa35742b",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Run the exact hash-bound core cloud-SDK boundary audit."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "17e52953ed4faf4c86413738740a5673c00021f03375fcda35f2cd1a400749ff",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "81f8a8bb0252e7c0ab24019ede6124b516d8eb9a2e00f43927fb3065631949ae",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "92f0ca32bddd727ae2912374c0aec5686041a0966972274686cf8a013a89b1a3",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "cd",
+    "statementSHA256": "d97a7e99821a0fdb80c5ddc4ebb5ac872572ff770b86cff9eedfeb85a67f4feb",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed cd statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "check-public-workflow-policy.sh",
+    "statementSHA256": "2000f63928c4818a9653d149623438efcababa010d3b4b6f776e4b5cdec768b1",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Run the exact hash-bound public workflow policy check."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "c2f927ee34e00d06f3daa9cf4baf6048e53f0319e52a13df6c8e6cbb44a7bd84",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "echo",
+    "statementSHA256": "d9226bd7f30f8e40be5a58694ca48084e36e69db4535df313c35c288e88b0da6",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed echo statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "exit",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed exit statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "exit",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed exit statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "find",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed find statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "5b49e49b41e5006e0aaf449e50811687a97834b64c2a4273d8b2dc6f5b6e89c4",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "7b87c971c975fcaeb3a40a34f47ff8c3f2d698282a0b5d7400831b0dc13fd456",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "9acb5173a63ca7ad834e42ba202de48f945806765c110e4cb90e366980229a88",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "a5dc2ca2789cc2eb9e4ca1ca36a970deb7fc37fda61954d7bf1f41c7055327e1",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "git",
+    "statementSHA256": "d74f87aa2ba416c536083533d6f836d3a2991c94bdbf777f65bbf9583a7d6eae",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed git statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "07316a6dee4fa421f202dd55c47def6146f4bfdac654bb879860cdfc1a35a9ea",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "151a1642363d89e5acbb5e513a50290c47fbc96d24523440353dd16e73386645",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "26041f77388bcaa32465908b060d7476b5114371241c1c195ef74b70d2252995",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "2d41bcec9837f54956908dd2d0b0a8f2807d7f06604c5a11a0eb74bb9cfbba5c",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "42a8263a643ccbe692d70752ffdd8cea328fc2d3190677df1485ee06f55b350a",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "4e7f68cf26c2ff26989715c4bbf23f715c4e0923a4f7bf66ed82c4fa536456b4",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "5aebdf7446ebca99f13ca2b455880d5d55233a2d83498cf097922da02828b02f",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "8ae32f1ee523f29fdfeeef0f9c855a5c669aa3899989085af27d95a0640d8595",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "b41ef78946e68fecaa590bc077054e0638416890b5a7a1f46d5e44cf1c24707a",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact focused semantic godo dependency test."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "e0d3de6e43dc98e02cdf01a691a746c2d4558a598f92a3dda32d71e372927aa0",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "eeb0b460bb01315284c7e24a75dd833efca6415522c0343b15b880ef7220c5ba",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "go",
+    "statementSHA256": "f7061781d47f4bb513d9b9fb1ed3cd376f2c7d61f2946f106b559d006dbd8ba1",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed go statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "0b5fa343e243742f1115a207b9c1d7445ca6d8c9b323c1be8e92a2e000a90e62",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "7e5cf50406f390d8f6d072addd0a5fd37b0a4383f6171301dd7864e8b3a55517",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "grep",
+    "statementSHA256": "e708827d46940e663db927e2c4d82356e6f24a0401684c2f7aba1ac0b6ceb8b1",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed grep statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "head",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed head statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "17e52953ed4faf4c86413738740a5673c00021f03375fcda35f2cd1a400749ff",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "92f0ca32bddd727ae2912374c0aec5686041a0966972274686cf8a013a89b1a3",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "npm",
+    "statementSHA256": "d97a7e99821a0fdb80c5ddc4ebb5ac872572ff770b86cff9eedfeb85a67f4feb",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed npm statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "printf",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed printf statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "read",
+    "statementSHA256": "4bcc3d47a83eb623df4342a174e0963068244db476cec554840c24c167c6f95e",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed read statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "sed",
+    "statementSHA256": "6589a21c9aef0df2b0e7d38f3ef984fc919f170a90372943220d5f59eb4707fe",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed sed statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "set",
+    "statementSHA256": "2e1a7639d1948bff0214cdd5718cd1f7b8e6dd5ff44fe84790357701f90c19fb",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed set statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "set",
+    "statementSHA256": "825769eed1c7cd6531f7d329eba635d64140a7ee9d8c6363ff00a953d7e071f9",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed set statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "sort",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed sort statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "test-audit-cloud-symbols.sh",
+    "statementSHA256": "fdd3263e21ef03a2d38caa247dd8a3e083ede1aa47d5ea79aae5dd8918a91c6a",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Runs the reviewed credential-free boundary-audit mutation suite."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "test-check-public-workflow-policy.sh",
+    "statementSHA256": "fadc93497dfe2d7f2ceefe3e759006346002bc51a874f0591e43bcfaaf9ee391",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Run the exact hash-bound public workflow mutation harness."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "timeout",
+    "statementSHA256": "b835b6257f216b7ba333e6d8c28c505a75ef0172355e86bdf3daa1d04b3cf4e2",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed timeout statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "command": "true",
+    "statementSHA256": "13529b0e68cc47db2882ea87e9109fb4e8b3c4b0903976bc2ce5379913c7e19c",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Exact reviewed true statement for ci.yml automation."
   }
 ]
