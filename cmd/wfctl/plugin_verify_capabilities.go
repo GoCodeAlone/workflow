@@ -20,10 +20,12 @@ import (
 	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/plugin"
 	external "github.com/GoCodeAlone/workflow/plugin/external"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	hclog "github.com/hashicorp/go-hclog"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -109,8 +111,8 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 		return fmt.Errorf("%s validate: %w", filepath.Base(manifestPath), err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	ctx, stopProviderCommand := boundedProviderCommandContext(30 * time.Second)
+	defer stopProviderCommand()
 
 	binAbs, err := filepath.Abs(binary)
 	if err != nil {
@@ -134,13 +136,13 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 	rpcClient, err := client.Client()
 	if err != nil {
 		if ctx.Err() != nil {
-			return fmt.Errorf("timeout waiting for plugin handshake (stderr: %s)", stderr.String())
+			return fmt.Errorf("plugin startup canceled or timed out; plugin stderr and provider error text suppressed")
 		}
-		return fmt.Errorf("plugin dial: %w (stderr: %s)", err, stderr.String())
+		return fmt.Errorf("plugin dial failed; plugin stderr and provider error text suppressed")
 	}
 	raw, err := rpcClient.Dispense("plugin")
 	if err != nil {
-		return fmt.Errorf("dispense plugin: %w (stderr: %s)", err, stderr.String())
+		return fmt.Errorf("dispense plugin failed; plugin stderr and provider error text suppressed")
 	}
 	pluginClient, ok := raw.(*external.PluginClient)
 	if !ok {
@@ -150,7 +152,7 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 	pbClient := pb.NewPluginServiceClient(pluginClient.Conn())
 	runtime, err := pbClient.GetManifest(ctx, &emptypb.Empty{})
 	if err != nil {
-		return fmt.Errorf("GetManifest RPC: %w (stderr: %s)", err, stderr.String())
+		return providerCapabilityTransportError("GetManifest", err)
 	}
 
 	failures := compareManifestWithRuntime(declared, runtime, opts)
@@ -164,7 +166,7 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 		// declared service (correct: plugin advertises nothing).
 		contractReg = nil
 	case regErr != nil:
-		return fmt.Errorf("GetContractRegistry RPC: %w (stderr: %s)", regErr, stderr.String())
+		return providerCapabilityTransportError("GetContractRegistry", regErr)
 	}
 	// Defense-in-depth: client-side namespace filter per ADR 0042
 	// (decisions/0042-verify-capabilities-iac-namespace.md) and design §2.
@@ -182,36 +184,18 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 		fmt.Fprintf(os.Stderr, "WARN  %s: binary advertises %q not in plugin.json.iacServices (additive — consider updating plugin.json)\n", declared.Name, s)
 	}
 
-	if len(declared.KubernetesBackends) > 0 {
-		resourceDriverAdvertised := false
-		for _, contract := range contractReg.GetContracts() {
-			if contract.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE &&
-				contract.GetServiceName() == pb.ResourceDriver_ServiceDesc.ServiceName {
-				resourceDriverAdvertised = true
-				break
-			}
-		}
-		if !resourceDriverAdvertised {
-			failures = append(failures,
-				"kubernetesBackends: plugin.json declares backends but binary does not advertise ResourceDriver")
-		} else {
-			caps, capsErr := pb.NewIaCProviderRequiredClient(pluginClient.Conn()).Capabilities(ctx, &pb.CapabilitiesRequest{})
-			if capsErr != nil {
-				return fmt.Errorf("IaCProviderRequired.Capabilities RPC: %w (stderr: %s)", capsErr, stderr.String())
-			}
-			runtimeResourceTypes := make(map[string]struct{}, len(caps.GetCapabilities()))
-			for _, capability := range caps.GetCapabilities() {
-				runtimeResourceTypes[capability.GetResourceType()] = struct{}{}
-			}
-			for _, backend := range declared.KubernetesBackends {
-				if _, advertised := runtimeResourceTypes[backend.ResourceType]; !advertised {
-					failures = append(failures, fmt.Sprintf(
-						"kubernetesBackends: plugin.json declares backend %q resourceType %q but binary Capabilities does not advertise it",
-						backend.Name, backend.ResourceType))
-				}
-			}
-		}
+	runtimeProviderDeclarations, providerErr := readRuntimeProviderDeclarations(ctx, pluginClient.Conn(), contractReg, declared)
+	if providerErr != nil {
+		return fmt.Errorf("provider capability verification: %w", providerErr)
 	}
+	declaredProviderDeclarations := config.ProviderDeclarations{
+		CredentialSources:   declared.CredentialSources,
+		CredentialResolvers: declared.CredentialResolvers,
+		KubernetesBackends:  declared.KubernetesBackends,
+		ContainerRegistries: declared.ContainerRegistries,
+		SecretStores:        declared.SecretStores,
+	}
+	failures = append(failures, compareProviderDeclarationsWithRuntime(declaredProviderDeclarations, runtimeProviderDeclarations)...)
 
 	if len(failures) > 0 {
 		fmt.Fprintf(os.Stderr, "FAIL  %s (plugin.json)\nerror: %d mismatch(es)\n", declared.Name, len(failures))
@@ -224,6 +208,70 @@ func verifyPluginManifestAgainstBinaryWithOptions(binary, manifestPath string, o
 	}
 	fmt.Printf("OK    %s %s (plugin.json: %s)\n", declared.Name, runtime.GetVersion(), declared.Version)
 	return nil
+}
+
+func providerCapabilityTransportError(operation string, err error) error {
+	return fmt.Errorf("%s RPC: %s; provider error text suppressed", operation, status.Code(err))
+}
+
+func readRuntimeProviderDeclarations(ctx context.Context, conn grpc.ClientConnInterface, registry *pb.ContractRegistry, declared plugin.PluginManifest) (providerRuntimeDeclarations, error) {
+	runtime := providerRuntimeDeclarations{AdvertisedServices: make(map[string]bool)}
+	for _, contract := range registry.GetContracts() {
+		if contract.GetKind() == pb.ContractKind_CONTRACT_KIND_SERVICE {
+			runtime.AdvertisedServices[contract.GetServiceName()] = true
+		}
+	}
+
+	if runtime.AdvertisedServices[pb.CredentialIssuer_ServiceDesc.ServiceName] {
+		response, err := pb.NewCredentialIssuerClient(conn).DescribeSources(ctx, &pb.CredentialSourceDeclarationsRequest{})
+		if err != nil {
+			return runtime, providerCapabilityTransportError("CredentialIssuer.DescribeSources", err)
+		}
+		if response.GetError() != nil {
+			return runtime, fmt.Errorf("CredentialIssuer.DescribeSources: %s; provider error text suppressed", response.GetError().GetCode())
+		}
+		runtime.CredentialSources = response.GetSources()
+	}
+	if runtime.AdvertisedServices[pb.CredentialResolver_ServiceDesc.ServiceName] {
+		response, err := pb.NewCredentialResolverClient(conn).DescribeResolvers(ctx, &pb.CredentialResolverDeclarationsRequest{})
+		if err != nil {
+			return runtime, providerCapabilityTransportError("CredentialResolver.DescribeResolvers", err)
+		}
+		if response.GetError() != nil {
+			return runtime, fmt.Errorf("CredentialResolver.DescribeResolvers: %s; provider error text suppressed", response.GetError().GetCode())
+		}
+		runtime.CredentialResolvers = response.GetResolvers()
+	}
+	if runtime.AdvertisedServices[pb.ContainerRegistry_ServiceDesc.ServiceName] {
+		response, err := pb.NewContainerRegistryClient(conn).DescribeRegistries(ctx, &pb.ContainerRegistryDeclarationsRequest{})
+		if err != nil {
+			return runtime, providerCapabilityTransportError("ContainerRegistry.DescribeRegistries", err)
+		}
+		if response.GetError() != nil {
+			return runtime, fmt.Errorf("ContainerRegistry.DescribeRegistries: %s; provider error text suppressed", response.GetError().GetCode())
+		}
+		runtime.ContainerRegistries = response.GetRegistries()
+	}
+	if runtime.AdvertisedServices[pb.SecretStore_ServiceDesc.ServiceName] {
+		response, err := pb.NewSecretStoreClient(conn).DescribeSecretStores(ctx, &pb.SecretStoreDeclarationsRequest{})
+		if err != nil {
+			return runtime, providerCapabilityTransportError("SecretStore.DescribeSecretStores", err)
+		}
+		if response.GetError() != nil {
+			return runtime, fmt.Errorf("SecretStore.DescribeSecretStores: %s; provider error text suppressed", response.GetError().GetCode())
+		}
+		runtime.SecretStores = response.GetStores()
+	}
+	if len(declared.KubernetesBackends) > 0 && runtime.AdvertisedServices[pb.ResourceDriver_ServiceDesc.ServiceName] {
+		response, err := pb.NewIaCProviderRequiredClient(conn).Capabilities(ctx, &pb.CapabilitiesRequest{})
+		if err != nil {
+			return runtime, providerCapabilityTransportError("IaCProviderRequired.Capabilities", err)
+		}
+		for _, capability := range response.GetCapabilities() {
+			runtime.KubernetesResourceTypes = append(runtime.KubernetesResourceTypes, capability.GetResourceType())
+		}
+	}
+	return runtime, nil
 }
 
 func compareManifestWithRuntime(declared plugin.PluginManifest, runtime *pb.Manifest, opts manifestCompareOptions) []string {

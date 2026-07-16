@@ -28,14 +28,63 @@ type pruneProvider interface {
 // recoveryFile is the on-disk state written by `wfctl infra rotate-and-prune`
 // (Task 21) and consumed by `wfctl infra prune --recovery-from-last-rotation`
 // (Task 19). The shape is intentionally minimal — only the fields the prune
-// filter needs (--created-before + --exclude-access-key derived from the new
-// rotation's CreatedAt + AccessKey).
+// filter needs. Typed rotations derive the cutoff from the excluded
+// credential's fresh provider-inventory record; legacy rotations persist a
+// created-before timestamp directly.
 type recoveryFile struct {
-	Type      string `json:"type"`
-	Name      string `json:"name"`
-	AccessKey string `json:"access_key"`
-	CreatedAt string `json:"created_at"`
+	Type                        string `json:"type"`
+	Name                        string `json:"name"`
+	AccessKey                   string `json:"access_key"`
+	IdentifierSensitive         bool   `json:"identifier_sensitive,omitempty"`
+	CutoffFromExcludedInventory bool   `json:"cutoff_from_excluded_inventory,omitempty"`
+	CreatedAt                   string `json:"created_at"`
 }
+
+type infraPruneOptions struct {
+	IdentifierSensitive         bool
+	CutoffFromExcludedInventory bool
+	Context                     context.Context
+}
+
+func normalizePruneInventory(resourceType string, outputs []*interfaces.ResourceOutput) ([]*interfaces.ResourceOutput, error) {
+	normalized := make([]*interfaces.ResourceOutput, 0, len(outputs))
+	for index, output := range outputs {
+		if output == nil {
+			return nil, fmt.Errorf("provider inventory record %d is nil; provider error text suppressed", index)
+		}
+		if output.Type == "" || output.Type != resourceType {
+			return nil, fmt.Errorf("provider inventory record %d has an invalid resource type; provider error text suppressed", index)
+		}
+		providerID := output.ProviderID
+		if providerID == "" {
+			providerID, _ = output.Outputs["access_key"].(string)
+		}
+		name := output.Name
+		if name == "" {
+			name, _ = output.Outputs["name"].(string)
+		}
+		if providerID == "" || name == "" {
+			return nil, fmt.Errorf("provider inventory record %d has an unusable identity; provider error text suppressed", index)
+		}
+		copy := *output
+		copy.Type = resourceType
+		copy.Name = name
+		copy.ProviderID = providerID
+		normalized = append(normalized, &copy)
+	}
+	return normalized, nil
+}
+
+func cleanupRecoveryFile(w io.Writer) {
+	if err := os.Remove(recoveryFilePath()); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(w, "warning: failed to clean up recovery file %s: %v\n", recoveryFilePath(), err)
+	}
+}
+
+var (
+	pruneInventoryCutoffAttempts = 3
+	pruneInventoryCutoffDelay    = 250 * time.Millisecond
+)
 
 // defaultStateDir returns the canonical wfctl state directory:
 // $WFCTL_STATE_DIR if set, else $HOME/.wfctl. Both writers (rotate-and-prune,
@@ -68,7 +117,34 @@ func recoveryFilePath() string {
 // operators can locate / hand-edit if needed.
 func readRecoveryFile() (*recoveryFile, error) {
 	p := recoveryFilePath()
-	data, err := os.ReadFile(p) //nolint:gosec // intentional state-dir path
+	dir := filepath.Dir(p)
+	dirInfo, err := os.Lstat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("inspect recovery directory %s: %w", dir, err)
+	}
+	if !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || !privateRecoveryStateMode(dirInfo) {
+		return nil, fmt.Errorf("recovery directory %s must be a private regular directory", dir)
+	}
+	pathInfo, err := os.Lstat(p)
+	if err != nil {
+		return nil, fmt.Errorf("inspect %s: %w", p, err)
+	}
+	if !pathInfo.Mode().IsRegular() || !privateRecoveryStateMode(pathInfo) {
+		return nil, fmt.Errorf("recovery state %s must be a private regular file", p)
+	}
+	file, err := os.Open(p) //nolint:gosec // validated private state-dir path
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", p, err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("inspect opened recovery state %s: %w", p, err)
+	}
+	if !os.SameFile(pathInfo, openedInfo) {
+		return nil, fmt.Errorf("recovery state %s changed while opening; refusing destructive recovery", p)
+	}
+	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", p, err)
 	}
@@ -107,6 +183,10 @@ func readRecoveryFile() (*recoveryFile, error) {
 //
 //nolint:cyclop // intentional validation gauntlet — splitting it moves opt-in checks further from --confirm parsing
 func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
+	return runInfraPruneWithOptions(args, provider, w, infraPruneOptions{})
+}
+
+func runInfraPruneWithOptions(args []string, provider pruneProvider, w io.Writer, options infraPruneOptions) int {
 	fs := flag.NewFlagSet("infra prune", flag.ContinueOnError)
 	fs.SetOutput(w)
 	var resourceType, createdBefore, excludeAK, preserveNames string
@@ -138,7 +218,19 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 		return 1
 	}
 
+	var releaseRecoveryLock func()
 	if recoveryFromLastRotation {
+		lockDir, err := credentialOperationLockDir()
+		if err != nil {
+			fmt.Fprintf(w, "prune: resolve recovery-state lock directory: %v\n", err)
+			return 1
+		}
+		releaseRecoveryLock, err = acquireCredentialOperationLock(lockDir, "wfctl.rotate-and-prune-recovery", "global")
+		if err != nil {
+			fmt.Fprintf(w, "prune: acquire global recovery-state lock: %v\n", err)
+			return 1
+		}
+		defer releaseRecoveryLock()
 		rec, err := readRecoveryFile()
 		if err != nil {
 			fmt.Fprintf(w, "prune: read recovery file: %v\n", err)
@@ -150,17 +242,25 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 		}
 		createdBefore = rec.CreatedAt
 		excludeAK = rec.AccessKey
+		options.IdentifierSensitive = options.IdentifierSensitive || rec.IdentifierSensitive
+		options.CutoffFromExcludedInventory = options.CutoffFromExcludedInventory || rec.CutoffFromExcludedInventory
 	}
 
-	if createdBefore == "" || excludeAK == "" {
-		fmt.Fprintln(w, "prune: --created-before AND --exclude-access-key are both required (paranoia rail)")
+	if excludeAK == "" || (createdBefore == "" && !options.CutoffFromExcludedInventory) {
+		fmt.Fprintln(w, "prune: --exclude-access-key and either --created-before or a typed recovery inventory cutoff are required (paranoia rail)")
 		return 1
 	}
 
-	cutoff, err := time.Parse(time.RFC3339, createdBefore)
-	if err != nil {
-		fmt.Fprintf(w, "prune: invalid --created-before timestamp: %v\n", err)
-		return 1
+	var (
+		cutoff time.Time
+		err    error
+	)
+	if createdBefore != "" && !options.CutoffFromExcludedInventory {
+		cutoff, err = time.Parse(time.RFC3339, createdBefore)
+		if err != nil {
+			fmt.Fprintf(w, "prune: invalid --created-before timestamp: %v\n", err)
+			return 1
+		}
 	}
 
 	var preserveRe *regexp.Regexp
@@ -173,10 +273,33 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 		preserveRe = re
 	}
 
-	ctx := context.Background()
-	outs, err := provider.EnumerateAll(ctx, resourceType)
+	ctx := options.Context
+	if ctx == nil {
+		var stop context.CancelFunc
+		ctx, stop = boundedProviderCommandContext(providerCommandOperationTimeout)
+		defer stop()
+	}
+	if err := ctx.Err(); err != nil {
+		fmt.Fprintln(w, "prune: command cancelled before provider inventory")
+		return 1
+	}
+	var outs []*interfaces.ResourceOutput
+	if options.CutoffFromExcludedInventory {
+		outs, cutoff, err = derivePruneCutoffFromExcludedInventory(ctx, provider, resourceType, excludeAK)
+		if err != nil {
+			fmt.Fprintf(w, "prune: resolve excluded credential inventory cutoff: %v\n", err)
+			return 1
+		}
+	} else {
+		outs, err = provider.EnumerateAll(ctx, resourceType)
+		if err != nil {
+			fmt.Fprintln(w, "prune: enumerate failed; provider error text suppressed")
+			return 1
+		}
+	}
+	outs, err = normalizePruneInventory(resourceType, outs)
 	if err != nil {
-		fmt.Fprintf(w, "prune: enumerate: %v\n", err)
+		fmt.Fprintf(w, "prune: %v\n", err)
 		return 1
 	}
 
@@ -225,10 +348,17 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 			ak, _ = o.Outputs["access_key"].(string)
 		}
 		ca, _ := o.Outputs["created_at"].(string)
-		fmt.Fprintf(w, "  - %s (access_key=%s, created=%s)\n", name, ak, ca)
+		fmt.Fprintf(w, "  - %s (access_key=%s, created=%s)\n", name, credentialIdentifierForLog(ak, options.IdentifierSensitive), ca)
 	}
 
 	if len(toDelete) == 0 {
+		if recoveryFromLastRotation {
+			if err := ctx.Err(); err != nil {
+				fmt.Fprintln(w, "prune: command cancelled; recovery file retained")
+				return 1
+			}
+			cleanupRecoveryFile(w)
+		}
 		return 0
 	}
 
@@ -245,9 +375,13 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 
 	var failed int
 	for _, o := range toDelete {
+		if err := ctx.Err(); err != nil {
+			fmt.Fprintln(w, "prune: command cancelled before remaining deletes")
+			return 1
+		}
 		ref := interfaces.ResourceRef{Type: o.Type, Name: o.Name, ProviderID: o.ProviderID}
 		if delErr := provider.DeleteResource(ctx, ref); delErr != nil {
-			fmt.Fprintf(w, "prune: delete %s: %v\n", o.Name, delErr)
+			fmt.Fprintf(w, "prune: delete %s failed; provider error text suppressed\n", o.Name)
 			failed++
 			continue
 		}
@@ -267,13 +401,11 @@ func runInfraPrune(args []string, provider pruneProvider, w io.Writer) int {
 		return 1
 	}
 	if recoveryFromLastRotation {
-		// Cleanup is best-effort but non-silent: if perms changed or the
-		// file is locked, the next --recovery-from-last-rotation invocation
-		// would re-read stale data, so warn loud enough that the operator
-		// can hand-clean.
-		if rmErr := os.Remove(recoveryFilePath()); rmErr != nil && !os.IsNotExist(rmErr) {
-			fmt.Fprintf(w, "warning: failed to clean up recovery file %s: %v\n", recoveryFilePath(), rmErr)
+		if err := ctx.Err(); err != nil {
+			fmt.Fprintln(w, "prune: command cancelled after deletes; recovery file retained")
+			return 1
 		}
+		cleanupRecoveryFile(w)
 	}
 	fmt.Fprintf(w, "\n%d resource(s) pruned successfully.\n", len(toDelete))
 	return 0
@@ -351,10 +483,12 @@ func runInfraPruneCmd(args []string) error {
 	currentInfraPluginDir = pluginDirFlag
 	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
-	ctx := context.Background()
+	ctx, stopProviderCommand := boundedProviderCommandContext(providerCommandOperationTimeout)
+	defer stopProviderCommand()
+	ctx = withProviderCapabilityDiagnosticsSuppressed(ctx)
 	providers, closers, err := pruneLoadProviders(ctx, fs, configFile, envName)
 	if err != nil {
-		return fmt.Errorf("load providers: %w", err)
+		return fmt.Errorf("load providers failed; provider error text suppressed")
 	}
 	defer func() {
 		for _, c := range closers {
@@ -362,7 +496,7 @@ func runInfraPruneCmd(args []string) error {
 				continue
 			}
 			if cerr := c.Close(); cerr != nil {
-				fmt.Fprintf(pruneStderr, "warning: provider shutdown: %v\n", cerr)
+				fmt.Fprintln(pruneStderr, "warning: provider shutdown failed; provider error text suppressed")
 			}
 		}
 	}()
@@ -410,7 +544,7 @@ func runInfraPruneCmd(args []string) error {
 	// runInfraPrune for the first provider that actually returns data;
 	// the cached-enumerator wrapper avoids a second cloud call inside
 	// runInfraPrune.
-	var lastUnimpl error
+	var lastUnimplProvider string
 	var anyEnumerator bool
 	for _, p := range providers {
 		if _, ok := p.(interfaces.EnumeratorAll); !ok {
@@ -425,7 +559,7 @@ func runInfraPruneCmd(args []string) error {
 		// message rather than the dispatcher emitting a less helpful
 		// "all providers Unimplemented" wrapper.
 		if resourceType == "" {
-			rc := runInfraPrune(inner, adapter, pruneStdout)
+			rc := runInfraPruneWithOptions(inner, adapter, pruneStdout, infraPruneOptions{Context: ctx})
 			if rc != 0 {
 				return fmt.Errorf("prune exited with code %d", rc)
 			}
@@ -436,32 +570,31 @@ func runInfraPruneCmd(args []string) error {
 			if errors.Is(probeErr, interfaces.ErrProviderMethodUnimplemented) {
 				// Plugin doesn't support EnumerateAll behind the bridge.
 				// Continue probing remaining providers.
-				lastUnimpl = fmt.Errorf("%s: %w", p.Name(), probeErr)
+				lastUnimplProvider = p.Name()
 				continue
 			}
 			// Any other error is loud — this is real provider failure.
-			return fmt.Errorf("prune: enumerate from %s: %w", p.Name(), probeErr)
+			return fmt.Errorf("prune: enumerate from %s failed; provider error text suppressed", p.Name())
 		}
 		// Success — wrap the probed outs in a cached adapter so
 		// runInfraPrune's internal EnumerateAll call serves from cache
 		// and we don't double-bill the cloud API.
 		cached := &cachedPruneProvider{cached: outs, inner: adapter, resourceType: resourceType}
-		rc := runInfraPrune(inner, cached, pruneStdout)
+		rc := runInfraPruneWithOptions(inner, cached, pruneStdout, infraPruneOptions{Context: ctx})
 		if rc != 0 {
 			return fmt.Errorf("prune exited with code %d", rc)
 		}
 		return nil
 	}
-	if anyEnumerator && lastUnimpl != nil {
-		return fmt.Errorf("prune: no loaded provider implements EnumeratorAll for %q (last probed: %w)", resourceType, lastUnimpl)
+	if anyEnumerator && lastUnimplProvider != "" {
+		return fmt.Errorf("prune: no loaded provider implements EnumeratorAll for %q (last probed: %s; provider error text suppressed)", resourceType, lastUnimplProvider)
 	}
 	return fmt.Errorf("prune: no loaded provider implements EnumeratorAll")
 }
 
-// cachedPruneProvider serves a previously-probed EnumerateAll result for
-// a single resourceType. Used by runInfraPruneCmd's dispatcher to avoid
-// issuing the same cloud-API enumerate twice (once for the dispatcher's
-// Unimplemented probe, again inside runInfraPrune).
+// cachedPruneProvider serves a previously-probed EnumerateAll result for a
+// single resourceType. Typed inventory-cutoff recovery calls EnumerateAllFresh
+// to bypass it; other paths avoid repeating the dispatcher's capability probe.
 //
 // Falls through to the underlying provider for any non-cached resourceType
 // (defensive — runInfraPrune's --type matches the dispatcher's --type so
@@ -478,6 +611,65 @@ func (c *cachedPruneProvider) EnumerateAll(ctx context.Context, resourceType str
 		return c.cached, nil
 	}
 	return c.inner.EnumerateAll(ctx, resourceType)
+}
+
+func (c *cachedPruneProvider) EnumerateAllFresh(ctx context.Context, resourceType string) ([]*interfaces.ResourceOutput, error) {
+	return c.inner.EnumerateAll(ctx, resourceType)
+}
+
+type freshPruneInventoryProvider interface {
+	EnumerateAllFresh(context.Context, string) ([]*interfaces.ResourceOutput, error)
+}
+
+func derivePruneCutoffFromExcludedInventory(ctx context.Context, provider pruneProvider, resourceType, excludeIdentifier string) ([]*interfaces.ResourceOutput, time.Time, error) {
+	var lastProblem string
+	for attempt := 0; attempt < pruneInventoryCutoffAttempts; attempt++ {
+		var (
+			outputs []*interfaces.ResourceOutput
+			err     error
+		)
+		if fresh, ok := provider.(freshPruneInventoryProvider); ok {
+			outputs, err = fresh.EnumerateAllFresh(ctx, resourceType)
+		} else {
+			outputs, err = provider.EnumerateAll(ctx, resourceType)
+		}
+		if err != nil {
+			return nil, time.Time{}, fmt.Errorf("fresh inventory failed; provider error text suppressed")
+		}
+		outputs, err = normalizePruneInventory(resourceType, outputs)
+		if err != nil {
+			return nil, time.Time{}, err
+		}
+		var matches []*interfaces.ResourceOutput
+		for _, output := range outputs {
+			if output.ProviderID == excludeIdentifier {
+				matches = append(matches, output)
+			}
+		}
+		if len(matches) > 1 {
+			return nil, time.Time{}, fmt.Errorf("fresh inventory returned multiple exact excluded-credential matches")
+		}
+		if len(matches) == 1 {
+			createdAt, _ := matches[0].Outputs["created_at"].(string)
+			cutoff, parseErr := time.Parse(time.RFC3339, createdAt)
+			if parseErr == nil {
+				return outputs, cutoff, nil
+			}
+			lastProblem = "exact excluded-credential match has no valid RFC3339 created_at"
+		} else {
+			lastProblem = "exact excluded-credential match not found"
+		}
+		if attempt+1 < pruneInventoryCutoffAttempts {
+			timer := time.NewTimer(pruneInventoryCutoffDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, time.Time{}, ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return nil, time.Time{}, fmt.Errorf("%s after %d fresh inventory attempts", lastProblem, pruneInventoryCutoffAttempts)
 }
 
 func (c *cachedPruneProvider) DeleteResource(ctx context.Context, ref interfaces.ResourceRef) error {

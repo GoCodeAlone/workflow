@@ -149,7 +149,7 @@ func (m *ExternalPluginManager) LoadPluginContext(ctx context.Context, name stri
 	}
 	m.mu.RUnlock()
 
-	launch, err := m.startPluginUnlocked(name)
+	launch, err := m.startPluginUnlocked(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,13 @@ func (m *ExternalPluginManager) LoadPluginContext(ctx context.Context, name stri
 	return launch.adapter, nil
 }
 
-func (m *ExternalPluginManager) startPluginUnlocked(name string) (*pluginLaunch, error) {
+func (m *ExternalPluginManager) startPluginUnlocked(ctx context.Context, name string) (*pluginLaunch, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if m.startPlugin != nil {
 		return m.startPlugin(name)
 	}
@@ -252,7 +258,14 @@ func (m *ExternalPluginManager) startPluginUnlocked(name string) (*pluginLaunch,
 	// This ensures plugins that extract embedded assets (e.g. ui_dist/) write to
 	// their own directory rather than inheriting the parent's working directory,
 	// which may not be writable (e.g. /app owned by root, process runs as nonroot).
-	cmd := exec.Command(binaryPath) //nolint:gosec // G204: plugin binary path is from trusted data/plugins directory
+	startupCtx, cancelStartup := context.WithCancel(context.Background())
+	startupSucceeded := false
+	defer func() {
+		if !startupSucceeded {
+			cancelStartup()
+		}
+	}()
+	cmd := exec.CommandContext(startupCtx, binaryPath) //nolint:gosec // G204: plugin binary path is from trusted data/plugins directory
 	cmd.Dir = pluginDir
 	pluginStderr := newPluginStderrForwarder(name, m.logger)
 
@@ -264,32 +277,71 @@ func (m *ExternalPluginManager) startPluginUnlocked(name string) (*pluginLaunch,
 		SyncStderr:       pluginStderr,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 	})
+	startupAccepted := make(chan struct{})
+	startupWatcherDone := make(chan struct{})
+	go func() {
+		defer close(startupWatcherDone)
+		select {
+		case <-ctx.Done():
+			cancelStartup()
+		case <-startupAccepted:
+		}
+	}()
+	var stopStartupWatcher sync.Once
+	stopWatchingStartup := func() {
+		stopStartupWatcher.Do(func() {
+			close(startupAccepted)
+			<-startupWatcherDone
+		})
+	}
+	defer stopWatchingStartup()
 
 	// Connect to the plugin process via gRPC
 	rpcClient, err := client.Client()
 	if err != nil {
+		stopWatchingStartup()
 		client.Kill()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, fmt.Errorf("connect to plugin %q: %w", name, err)
+	}
+	if err := ctx.Err(); err != nil {
+		stopWatchingStartup()
+		client.Kill()
+		return nil, err
 	}
 
 	// Dispense the plugin interface
 	raw, err := rpcClient.Dispense("plugin")
 	if err != nil {
+		stopWatchingStartup()
 		client.Kill()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, fmt.Errorf("dispense plugin %q: %w", name, err)
 	}
 
 	pluginClient, ok := raw.(*PluginClient)
 	if !ok {
+		stopWatchingStartup()
 		client.Kill()
 		return nil, fmt.Errorf("plugin %q: dispensed object is not *PluginClient (got %T)", name, raw)
 	}
 
 	adapter, err := NewExternalPluginAdapter(name, pluginClient, manifest)
 	if err != nil {
+		stopWatchingStartup()
 		client.Kill()
 		return nil, fmt.Errorf("create adapter for plugin %q: %w", name, err)
 	}
+	stopWatchingStartup()
+	if err := ctx.Err(); err != nil {
+		client.Kill()
+		return nil, err
+	}
+	startupSucceeded = true
 
 	return &pluginLaunch{client: client, adapter: adapter}, nil
 }
@@ -401,7 +453,7 @@ func (m *ExternalPluginManager) ReloadPluginContext(ctx context.Context, name st
 	oldResolverRegistration := m.credentialResolverRegistrations[name]
 	m.mu.RUnlock()
 	if !wasLoaded {
-		launch, err := m.startPluginUnlocked(name)
+		launch, err := m.startPluginUnlocked(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -437,7 +489,7 @@ func (m *ExternalPluginManager) ReloadPluginContext(ctx context.Context, name st
 		return launch.adapter, nil
 	}
 
-	launch, err := m.startPluginUnlocked(name)
+	launch, err := m.startPluginUnlocked(ctx, name)
 	if err != nil {
 		m.logger.Printf("plugin %q reload failed; keeping existing plugin active: %v", name, err)
 		return nil, fmt.Errorf("reload plugin %q: %w", name, err)

@@ -1,16 +1,23 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestVerifyCapabilitiesUsage(t *testing.T) {
@@ -183,6 +190,185 @@ func TestVerifyCapabilities_Good(t *testing.T) {
 	bin := buildFixtureBinaryForVerify(t, "good", "v0.1.0")
 	if err := runPluginVerifyCapabilities([]string{"--binary", bin, "testdata/verify_capabilities/good"}); err != nil {
 		t.Fatalf("want PASS, got: %v", err)
+	}
+}
+
+func TestProviderCapabilityDiscoveryUsesRealPluginProcess(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "provider-good", "v0.1.0")
+	fixtureDir := filepath.Join("testdata", "verify_capabilities", "provider-good")
+	if err := runPluginVerifyCapabilities([]string{"--binary", bin, fixtureDir}); err != nil {
+		t.Fatalf("verify provider runtime declarations: %v", err)
+	}
+
+	pluginRoot := t.TempDir()
+	installName := "verify-provider"
+	installDir := filepath.Join(pluginRoot, installName)
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(fixtureDir, "plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, "plugin.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binary, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installDir, installName), binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, closeCredentialPlugin, declaration, pluginName, _, found, err := discoverCredentialIssuerCapability(ctx, pluginRoot, "example.source")
+	if err != nil || !found || declaration.Source != "example.source" || pluginName != installName {
+		t.Fatalf("credential discovery found=%v plugin=%q declaration=%+v error=%v", found, pluginName, declaration, err)
+	}
+	assertBuiltinCredentialResolverSelected(t)
+	if closeCredentialPlugin != nil {
+		closeCredentialPlugin()
+	}
+	_, closeRegistryPlugin, found, err := discoverContainerRegistryCapability(ctx, pluginRoot, "example-registry", "login")
+	if err != nil || !found {
+		t.Fatalf("registry discovery found=%v error=%v", found, err)
+	}
+	assertBuiltinCredentialResolverSelected(t)
+	if closeRegistryPlugin != nil {
+		closeRegistryPlugin()
+	}
+
+	t.Setenv("WFCTL_TEST_PROVIDER_DECLARATION_ERROR", "1")
+	providerStderr, providerErr := captureStderr(t, func() error {
+		_, closePlugin, _, _, _, _, discoverErr := discoverCredentialIssuerCapability(ctx, pluginRoot, "example.source")
+		if closePlugin != nil {
+			closePlugin()
+		}
+		return discoverErr
+	})
+	if providerErr == nil {
+		t.Fatal("want invalid runtime declaration error")
+	}
+	if strings.Contains(providerStderr, "SENTINEL_PROVIDER_STDERR_SECRET") {
+		t.Fatalf("generic provider dispatch leaked plugin stderr: %s", providerStderr)
+	}
+}
+
+func assertBuiltinCredentialResolverSelected(t *testing.T) {
+	t.Helper()
+	account := module.NewCloudAccount("provider-discovery-isolation", map[string]any{
+		"provider": "aws",
+		"credentials": map[string]any{
+			"type": "static", "accessKey": "builtin-access", "secretKey": "builtin-secret",
+		},
+	})
+	if err := account.Init(module.NewMockApplication()); err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := account.GetCredentials(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credentials.AccessKey != "builtin-access" {
+		t.Fatalf("command-scoped discovery activated unrelated credential resolver: access key=%q", credentials.AccessKey)
+	}
+}
+
+func TestProviderCapabilityVerifierStartupFailureOmitsPluginStderr(t *testing.T) {
+	bin := buildFixtureBinaryForVerify(t, "provider-good", "v0.1.0")
+	t.Setenv("WFCTL_TEST_PROVIDER_DECLARATION_ERROR", "1")
+	err := runPluginVerifyCapabilities([]string{
+		"--binary", bin, filepath.Join("testdata", "verify_capabilities", "provider-good"),
+	})
+	if err == nil {
+		t.Fatal("want provider capability verification failure")
+	}
+	if strings.Contains(err.Error(), "SENTINEL_PROVIDER_STDERR_SECRET") {
+		t.Fatalf("provider stderr leaked: %v", err)
+	}
+	if !strings.Contains(err.Error(), "plugin dial") || !strings.Contains(err.Error(), "provider error text suppressed") {
+		t.Fatalf("stable provider diagnostic missing: %v", err)
+	}
+}
+
+func TestProviderCapabilityVerifierCancelsRealStartup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable-script fixture")
+	}
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "hung-verifier")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"hung-verifier","version":"1.0.0","author":"Workflow tests","description":"non-handshaking verifier fixture"}`
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalCommandContext := providerCommandContext
+	providerCommandContext = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		timer := time.AfterFunc(100*time.Millisecond, cancel)
+		return ctx, func() {
+			timer.Stop()
+			cancel()
+		}
+	}
+	t.Cleanup(func() { providerCommandContext = originalCommandContext })
+
+	started := time.Now()
+	err := runPluginVerifyCapabilities([]string{"--binary", binary, dir})
+	if err == nil || !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("error=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("canceled verifier startup took %s", elapsed)
+	}
+}
+
+type providerDeclarationTransportErrorConn struct{}
+
+func (providerDeclarationTransportErrorConn) Invoke(context.Context, string, any, any, ...grpc.CallOption) error {
+	return status.Error(codes.Internal, "SENTINEL_PROVIDER_TRANSPORT_SECRET")
+}
+
+func (providerDeclarationTransportErrorConn) NewStream(context.Context, *grpc.StreamDesc, string, ...grpc.CallOption) (grpc.ClientStream, error) {
+	return nil, status.Error(codes.Internal, "SENTINEL_PROVIDER_TRANSPORT_SECRET")
+}
+
+func TestReadRuntimeProviderDeclarationsSuppressesTransportTextForEveryFamily(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		serviceName string
+		declared    plugin.PluginManifest
+		operation   string
+	}{
+		{name: "credential issuer", serviceName: pb.CredentialIssuer_ServiceDesc.ServiceName, operation: "CredentialIssuer.DescribeSources"},
+		{name: "credential resolver", serviceName: pb.CredentialResolver_ServiceDesc.ServiceName, operation: "CredentialResolver.DescribeResolvers"},
+		{name: "container registry", serviceName: pb.ContainerRegistry_ServiceDesc.ServiceName, operation: "ContainerRegistry.DescribeRegistries"},
+		{name: "secret store", serviceName: pb.SecretStore_ServiceDesc.ServiceName, operation: "SecretStore.DescribeSecretStores"},
+		{
+			name: "kubernetes backend", serviceName: pb.ResourceDriver_ServiceDesc.ServiceName,
+			declared:  plugin.PluginManifest{KubernetesBackends: []plugin.KubernetesBackendDecl{{Name: "managed", ResourceType: "infra.managed_cluster"}}},
+			operation: "IaCProviderRequired.Capabilities",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			registry := &pb.ContractRegistry{Contracts: []*pb.ContractDescriptor{{
+				Kind: pb.ContractKind_CONTRACT_KIND_SERVICE, ServiceName: test.serviceName,
+			}}}
+			_, err := readRuntimeProviderDeclarations(context.Background(), providerDeclarationTransportErrorConn{}, registry, test.declared)
+			if err == nil {
+				t.Fatal("want transport failure")
+			}
+			if !strings.Contains(err.Error(), test.operation) || !strings.Contains(err.Error(), codes.Internal.String()) {
+				t.Fatalf("stable transport diagnostic missing: %v", err)
+			}
+			if strings.Contains(err.Error(), "SENTINEL_PROVIDER_TRANSPORT_SECRET") {
+				t.Fatalf("provider transport text leaked: %v", err)
+			}
+		})
 	}
 }
 

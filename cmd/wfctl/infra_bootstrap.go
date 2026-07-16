@@ -15,6 +15,7 @@ import (
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
+	"github.com/mattn/go-isatty"
 )
 
 // multiStringFlag is a flag.Value that collects repeated --flag values and
@@ -59,6 +60,7 @@ func runInfraBootstrap(args []string) error {
 	fs.Var(&rotateNames, "force-rotate", "Comma-separated list of secret names to regenerate, replacing existing values. Repeatable. Use for recovery from known-bad secrets (empty value, leak, etc).")
 	var pluginDirFlag string
 	fs.StringVar(&pluginDirFlag, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
+	ackSingleWriter := fs.Bool("ack-single-writer", false, "Acknowledge that this process is the only credential issuer for single-writer sources (required in non-interactive mode)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -76,6 +78,22 @@ func runInfraBootstrap(args []string) error {
 	// via config.WorkflowConfig which has no Generate field, so the generate[] section
 	// would be silently dropped from the env-resolved temp file.
 	originalCfgFile := cfgFile
+	issuerStateDir, err := credentialOperationStateDirForConfig(originalCfgFile)
+	if err != nil {
+		return fmt.Errorf("resolve credential operation state directory: %w", err)
+	}
+	issuerLockDir, err := credentialOperationLockDir()
+	if err != nil {
+		return fmt.Errorf("resolve credential operation lock directory: %w", err)
+	}
+	issuerOptions := credentialIssuerOptions{
+		Enabled:         true,
+		PluginDir:       providerPluginDir(pluginDirFlag),
+		StateDir:        issuerStateDir,
+		LockDir:         issuerLockDir,
+		AckSingleWriter: *ackSingleWriter,
+		NonInteractive:  !isatty.IsTerminal(os.Stdin.Fd()),
+	}
 
 	// If --env is set, resolve the config for that environment before bootstrapping.
 	// cfgFile is reassigned to the temp path; originalCfgFile retains the original.
@@ -88,7 +106,10 @@ func runInfraBootstrap(args []string) error {
 		cfgFile = tmp
 	}
 
-	ctx := context.Background()
+	ctx, stopProviderCommand := boundedProviderCommandContext(providerCommandOperationTimeout)
+	defer stopProviderCommand()
+	ctx = withProviderCapabilityDiagnosticsSuppressed(ctx)
+	ctx = withCredentialIssuerOptions(ctx, issuerOptions)
 
 	// 1. Generate and store secrets FIRST so that state-backend access keys are
 	//    available in the current process environment before bootstrapStateBackend
@@ -118,7 +139,10 @@ func runInfraBootstrap(args []string) error {
 		// target is a provider_credential type. We do this lazily (only when needed)
 		// so that runs without --force-rotate on provider_credential don't require
 		// the plugin binary to be installed.
-		revoker, iacCloser := resolveCredentialRevoker(ctx, cfgFile, secretsCfg, forceRotate)
+		revoker, iacCloser, err := resolveCredentialRevokerForCapabilitiesFn(ctx, cfgFile, issuerOptions.PluginDir, secretsCfg, forceRotate)
+		if err != nil {
+			return fmt.Errorf("select credential revocation path: %w", err)
+		}
 		if iacCloser != nil {
 			defer func() {
 				if cerr := iacCloser.Close(); cerr != nil {
@@ -139,6 +163,9 @@ func runInfraBootstrap(args []string) error {
 		// that bootstrapStateBackend can read them via ${VAR} expansion in the
 		// module config (e.g. accessKey: "${PROVIDER_access_key}").
 		for k, v := range generated {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			os.Setenv(k, v) //nolint:errcheck
 		}
 	} else {
@@ -146,6 +173,9 @@ func runInfraBootstrap(args []string) error {
 	}
 
 	// 2. Bootstrap state backend (uses provider keys now in env from step 1).
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := bootstrapStateBackend(ctx, cfgFile); err != nil {
 		return fmt.Errorf("bootstrap state backend: %w", err)
 	}
@@ -250,14 +280,27 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		pType := provType
 		defer func() {
 			if cerr := closer.Close(); cerr != nil {
-				fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", pType, cerr)
+				if providerCapabilityDiagnosticsSuppressed(ctx) {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown failed; provider error text suppressed\n", pType)
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: provider %q shutdown: %v\n", pType, cerr)
+				}
 			}
 		}()
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	result, err := provider.BootstrapStateBackend(ctx, cfg)
 	if err != nil {
+		if providerCapabilityDiagnosticsSuppressed(ctx) {
+			return fmt.Errorf("bootstrap state backend (backend=%q, provider=%q) failed; provider error text suppressed", backend, provType)
+		}
 		return fmt.Errorf("bootstrap state backend (backend=%q, provider=%q): %w", backend, provType, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if result == nil {
 		return nil
@@ -292,6 +335,44 @@ func bootstrapStateBackend(ctx context.Context, cfgFile string) error {
 		}
 	}
 	return nil
+}
+
+func resolveCredentialRevokerForCapabilities(ctx context.Context, cfgFile, pluginDir string, secretsCfg *SecretsConfig, forceRotate map[string]bool) (interfaces.ProviderCredentialRevoker, interface{ Close() error }, error) {
+	needsLegacy, err := legacyCredentialRevokerRequired(pluginDir, secretsCfg, forceRotate)
+	if err != nil || !needsLegacy {
+		return nil, nil, err
+	}
+	revoker, closer := resolveCredentialRevoker(ctx, cfgFile, secretsCfg, forceRotate)
+	return revoker, closer, nil
+}
+
+var resolveCredentialRevokerForCapabilitiesFn = resolveCredentialRevokerForCapabilities
+
+func legacyCredentialRevokerRequired(pluginDir string, secretsCfg *SecretsConfig, forceRotate map[string]bool) (bool, error) {
+	if len(forceRotate) == 0 || secretsCfg == nil {
+		return false, nil
+	}
+	index, err := loadProviderCapabilityIndex(pluginDir)
+	if err != nil {
+		return false, err
+	}
+	needsLegacy := false
+	for _, gen := range secretsCfg.Generate {
+		if !forceRotate[gen.Key] || gen.Type != "provider_credential" {
+			continue
+		}
+		_, selectErr := index.selectCredentialSource(gen.Source)
+		if selectErr == nil {
+			continue
+		}
+		var notFound providerCapabilityNotFoundError
+		if errors.As(selectErr, &notFound) {
+			needsLegacy = true
+			continue
+		}
+		return false, selectErr
+	}
+	return needsLegacy, nil
 }
 
 // resolveCredentialRevoker checks whether any force-rotate target is a
@@ -333,11 +414,15 @@ func resolveCredentialRevoker(ctx context.Context, cfgFile string, secretsCfg *S
 		return nil, nil
 	}
 
-	iacProv, iacCloser, loadErr := loadIaCProviderFromConfig(ctx, cfgFile)
+	iacProv, iacCloser, loadErr := loadCredentialRevokerIaCProvider(ctx, cfgFile)
 	if loadErr != nil {
 		// Non-fatal: log warning; credential will still be minted but old one
 		// won't be automatically revoked at the upstream provider.
-		fmt.Fprintf(os.Stderr, "warn: could not load IaC provider for credential revocation: %v\n", loadErr)
+		if providerCapabilityDiagnosticsSuppressed(ctx) {
+			fmt.Fprintln(os.Stderr, "warn: could not load IaC provider for credential revocation; provider error text suppressed")
+		} else {
+			fmt.Fprintf(os.Stderr, "warn: could not load IaC provider for credential revocation: %v\n", loadErr)
+		}
 		fmt.Fprintf(os.Stderr, "warn: old provider credential will NOT be revoked automatically — revoke manually\n")
 		return nil, nil
 	}
@@ -367,6 +452,8 @@ func resolveCredentialRevoker(ctx context.Context, cfgFile string, secretsCfg *S
 	// the typed dispatch happens inside the adapter method.
 	return adapter, iacCloser
 }
+
+var loadCredentialRevokerIaCProvider = loadIaCProviderFromConfig
 
 // loadIaCProviderFromConfig is a one-line delegating shim onto
 // wfctlhelpers.LoadIaCProviderFromConfig. The body moved to the shared
@@ -439,15 +526,17 @@ func writeBucketBackToConfig(cfgFile, bucket string) error {
 // can identify the newly-minted credential without re-running bootstrap as a
 // subprocess and parsing stderr. Per ADR 0020 + review #2 closeout.
 //
-// AccessKey and CreatedAt come from the provider_credential generator output:
-// AccessKey is stored as a GH Secret (it's in providerCredentialSubKeys);
-// CreatedAt is filtered out by the storage-filter and surfaced here +
-// emitted to stderr as a sidecar.
+// For typed issuers, AccessKey is the declared identifier and
+// CutoffFromInventory requires prune to resolve that identifier's timestamp
+// from fresh provider inventory. Legacy generators retain their provider-
+// output CreatedAt metadata until their compatibility path is removed.
 type RotationResult struct {
-	Key       string // canonical generator key, e.g. "SPACES"
-	Source    string // generator source, e.g. "digitalocean.spaces"
-	AccessKey string // newly-minted credential identifier
-	CreatedAt string // ISO8601 timestamp from provider API
+	Key                 string // canonical generator key, e.g. "SPACES"
+	Source              string // generator source, e.g. "digitalocean.spaces"
+	AccessKey           string // newly-minted credential identifier
+	IdentifierSensitive bool   // manifest-authoritative identifier sensitivity
+	CutoffFromInventory bool   // derive typed prune cutoff from this identifier's provider inventory record
+	CreatedAt           string // RFC3339 legacy provider metadata; empty for typed issuers
 }
 
 // providerCredentialSubKeys lists the sub-key names produced by each
@@ -475,6 +564,52 @@ func subKeysForSource(source string) ([]string, bool) {
 // override it to exercise provider_credential code paths without reaching
 // out to cloud APIs.
 var generateSecret = secrets.GenerateSecret
+
+type credentialIssuerOptions struct {
+	Enabled         bool
+	PluginDir       string
+	StateDir        string
+	LockDir         string
+	PreparationKey  string
+	AckSingleWriter bool
+	NonInteractive  bool
+	BeforeIssue     func(context.Context, bool) error
+}
+
+type credentialIssuerOptionsContextKey struct{}
+
+func credentialIdentifierForLog(identifier string, sensitive bool) string {
+	if sensitive {
+		return "[sensitive identifier redacted]"
+	}
+	return identifier
+}
+
+func withCredentialIssuerOptions(ctx context.Context, options credentialIssuerOptions) context.Context {
+	return context.WithValue(ctx, credentialIssuerOptionsContextKey{}, options)
+}
+
+func credentialIssuerOptionsFromContext(ctx context.Context) credentialIssuerOptions {
+	options, _ := ctx.Value(credentialIssuerOptionsContextKey{}).(credentialIssuerOptions)
+	return options
+}
+
+func installedCredentialSourceDeclaration(pluginDir, source string) (*config.CredentialSourceDecl, bool, error) {
+	index, err := loadProviderCapabilityIndex(pluginDir)
+	if err != nil {
+		return nil, false, err
+	}
+	route, err := index.selectCredentialSource(source)
+	if err != nil {
+		var notFound providerCapabilityNotFoundError
+		if errors.As(err, &notFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	declaration := *route.CredentialSource
+	return &declaration, true, nil
+}
 
 // expectedStoredKeys returns every key name that a completed generation of
 // gen would have stored in the provider. For provider_credential with a
@@ -505,16 +640,15 @@ func expectedStoredKeys(gen SecretGen) []string {
 // pattern as the `var generateSecret` hook above.
 //
 // forceRotate is an optional set of secret keys to regenerate even when the
-// secret already exists. The function deletes the existing value before
-// re-creating it (best-effort delete: a missing secret is logged as a warning
-// and treated as the "no pre-existing value" case). After rotation the audit
-// line is written to stderr.
+// secret already exists. Typed provider credentials require a readable store,
+// snapshot all declared outputs, restore them after any Set failure, and delete
+// the old identifier through the selected CredentialIssuer only after every new
+// output is stored. Legacy provider credentials retain their compatibility
+// revoker, while other generator types retain best-effort pre-deletion. After a
+// successful rotation the audit line is written to stderr.
 //
-// revoker is an optional ProviderCredentialRevoker. When non-nil and a
-// provider_credential is being force-rotated, the OLD credential is revoked at
-// the upstream provider AFTER the new credential has been minted and stored
-// (mint-new-then-revoke-old; see ADR 0012). If revoker is nil, the old
-// credential is not explicitly revoked (operator must revoke manually).
+// revoker is an optional legacy ProviderCredentialRevoker used only for a
+// force-rotated provider_credential with no installed typed source owner.
 //
 // Storage-filter (ADR 0020): for provider_credential generators, only the
 // sub-keys listed in providerCredentialSubKeys[gen.Source] are persisted as
@@ -523,6 +657,7 @@ func expectedStoredKeys(gen SecretGen) []string {
 // for operator observability + audit logs, but never stored in the secrets
 // provider.
 var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg *SecretsConfig, forceRotate map[string]bool, revoker ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	issuerOptions := credentialIssuerOptionsFromContext(ctx)
 	var credRevoker interfaces.ProviderCredentialRevoker
 	if len(revoker) > 0 {
 		credRevoker = revoker[0]
@@ -605,9 +740,23 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 	}
 
 	for _, gen := range cfg.Generate {
+		if err := ctx.Err(); err != nil {
+			return generated, rotations, err
+		}
 		// infra_output secrets depend on apply-time state; skip during bootstrap.
 		if gen.Type == "infra_output" {
 			continue
+		}
+
+		var installedSource *config.CredentialSourceDecl
+		if gen.Type == "provider_credential" && issuerOptions.Enabled {
+			declaration, found, declarationErr := installedCredentialSourceDeclaration(issuerOptions.PluginDir, gen.Source)
+			if declarationErr != nil {
+				return generated, rotations, fmt.Errorf("select credential source %q: %w", gen.Source, declarationErr)
+			}
+			if found {
+				installedSource = declaration
+			}
 		}
 
 		// Build generator config from SecretGen fields.
@@ -622,47 +771,99 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 			genConfig["name"] = gen.Name
 		}
 
-		// --force-rotate path: for provider_credential, read the OLD access_key
-		// BEFORE deleting so we can revoke it at the upstream provider after minting
-		// the new one (mint-new-then-revoke-old; see ADR 0012).
-		// For other types, delete the existing value (best-effort) so that the
-		// normal "doesn't exist → generate + create" code path runs below.
-		var oldCredentialID string // non-empty only for provider_credential + force-rotate
+		// Typed provider credentials snapshot every declared output before any
+		// regeneration. A readable partial store can therefore be restored after
+		// any Set failure; a visible write-only partial or fully opaque store is
+		// rejected before Issue.
+		// Force rotation retains the same snapshot rule even when every output is
+		// present. Other generator types keep their historical best-effort delete.
+		var oldCredentialID string
+		var oldCredentialIDSensitive bool
+		type storedOutputSnapshot struct {
+			value  string
+			exists bool
+		}
+		var storedOutputsBeforeMutation map[string]storedOutputSnapshot
+		if installedSource != nil {
+			identifierKey := installedSource.IdentifierKey
+			for _, output := range installedSource.Outputs {
+				if output.Key == identifierKey {
+					oldCredentialIDSensitive = output.IsSensitive()
+					break
+				}
+			}
+			storedOutputsBeforeMutation = make(map[string]storedOutputSnapshot, len(installedSource.Outputs))
+			readable := true
+			existingCount := 0
+			for _, output := range installedSource.Outputs {
+				fullKey := gen.Key + "_" + output.Key
+				oldValue, getErr := provider.Get(ctx, fullKey)
+				switch {
+				case getErr == nil:
+					storedOutputsBeforeMutation[fullKey] = storedOutputSnapshot{value: oldValue, exists: true}
+					existingCount++
+					if output.Key == identifierKey {
+						oldCredentialID = oldValue
+					}
+				case errors.Is(getErr, secrets.ErrNotFound):
+					storedOutputsBeforeMutation[fullKey] = storedOutputSnapshot{}
+				case errors.Is(getErr, secrets.ErrUnsupported):
+					readable = false
+				default:
+					return generated, rotations, fmt.Errorf("snapshot stored credential output %q before regeneration: %w", fullKey, getErr)
+				}
+				if !readable {
+					break
+				}
+			}
+			if !readable {
+				if forceRotate[gen.Key] {
+					return generated, rotations, fmt.Errorf("typed provider credential %q cannot be safely force-rotated through write-only secrets provider %q", gen.Key, provider.Name())
+				}
+				existingCount = 0
+				storedOutputsBeforeMutation = make(map[string]storedOutputSnapshot, len(installedSource.Outputs))
+				for _, output := range installedSource.Outputs {
+					fullKey := gen.Key + "_" + output.Key
+					present, existsErr := secretExists(fullKey)
+					if existsErr != nil {
+						return generated, rotations, existsErr
+					}
+					storedOutputsBeforeMutation[fullKey] = storedOutputSnapshot{}
+					if present {
+						existingCount++
+					}
+				}
+				if errors.Is(listErr, secrets.ErrUnsupported) {
+					return generated, rotations, fmt.Errorf("typed provider credential %q cannot safely determine existing outputs through opaque secrets provider %q", gen.Key, provider.Name())
+				}
+				if existingCount > 0 && existingCount < len(installedSource.Outputs) {
+					return generated, rotations, fmt.Errorf("typed provider credential %q cannot safely regenerate partial outputs through write-only secrets provider %q", gen.Key, provider.Name())
+				}
+			}
+			if !forceRotate[gen.Key] && existingCount == len(installedSource.Outputs) {
+				fmt.Printf("  secret %q: already exists — skipped\n", gen.Key)
+				continue
+			}
+		}
 		if forceRotate[gen.Key] {
 			if gen.Type == "provider_credential" {
-				// Always attempt to read the old access_key, even when credRevoker
-				// is nil: this allows the "no revoker available" warning to include the
-				// old credential ID so operators can revoke it manually.
-				accessKeyName := gen.Key + "_access_key"
-				if oldVal, getErr := provider.Get(ctx, accessKeyName); getErr == nil {
-					oldCredentialID = oldVal
-				} else if errors.Is(getErr, secrets.ErrUnsupported) {
-					// Write-only provider (e.g. GitHub Actions) — Get is not supported.
-					// Revocation will be skipped; warn the operator.
-					fmt.Fprintf(os.Stderr, "warn: secrets provider does not support Get — cannot read old %s for revocation; revoke manually after rotation\n", accessKeyName)
-				} else if !errors.Is(getErr, secrets.ErrNotFound) {
-					// Unexpected error reading old credential (not "doesn't exist" and not "unsupported").
-					// Log a warning so operators know revocation may not occur, but continue — we still
-					// mint and store the new credential.
-					fmt.Fprintf(os.Stderr, "warn: could not read old %s for revocation (%v) — revoke manually after rotation\n", accessKeyName, getErr)
-				}
-				// Delete all sub-keys for this provider_credential.
-				subKeys, hasSubKeys := subKeysForSource(gen.Source)
-				if hasSubKeys {
-					for _, sub := range subKeys {
-						fullKey := gen.Key + "_" + sub
-						if delErr := provider.Delete(ctx, fullKey); delErr != nil {
-							fmt.Fprintf(os.Stderr, "warn: rotate-pre-delete %s: %v (continuing)\n", fullKey, delErr)
-						}
-					}
-				} else {
-					// Unknown source — best-effort single delete.
-					if delErr := provider.Delete(ctx, accessKeyName); delErr != nil {
-						fmt.Fprintf(os.Stderr, "warn: rotate-pre-delete %s: %v (continuing)\n", accessKeyName, delErr)
+				if installedSource == nil {
+					identifierKey := "access_key"
+					// Legacy compatibility can only identify the historical access key.
+					accessKeyName := gen.Key + "_" + identifierKey
+					if oldVal, getErr := provider.Get(ctx, accessKeyName); getErr == nil {
+						oldCredentialID = oldVal
+					} else if errors.Is(getErr, secrets.ErrUnsupported) {
+						fmt.Fprintf(os.Stderr, "warn: secrets provider does not support Get — cannot read old %s for revocation; revoke manually after rotation\n", accessKeyName)
+					} else if !errors.Is(getErr, secrets.ErrNotFound) {
+						fmt.Fprintf(os.Stderr, "warn: could not read old %s for revocation (%v) — revoke manually after rotation\n", accessKeyName, getErr)
 					}
 				}
 			} else {
 				deleteKey := gen.Key
+				if err := ctx.Err(); err != nil {
+					return generated, rotations, err
+				}
 				if delErr := provider.Delete(ctx, deleteKey); delErr != nil {
 					// Log and continue regardless of the error kind — both absent/unsupported
 					// secrets and unexpected errors should not block the rotation flow.
@@ -675,7 +876,7 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 			listDone = false
 			listSet = nil
 			githubListFoldSet = nil
-		} else {
+		} else if installedSource == nil {
 			// Normal path: check that EVERY expected stored key is already present
 			// before skipping. provider_credential writes multiple sub-keys; if a
 			// prior write was partial or one sub-key was manually removed, we must
@@ -700,22 +901,91 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 			}
 		}
 
-		// Generate the secret value.
-		value, err := generateSecret(ctx, gen.Type, genConfig)
-		if err != nil {
-			return generated, rotations, fmt.Errorf("generate secret %q: %w", gen.Key, err)
+		// Generate the secret value. Installed provider-owned credential sources
+		// are routed through the typed CredentialIssuer service; a zero match
+		// retains the legacy generator until the provider migrations remove it.
+		var issuedCredential *credentialIssueResult
+		var typedCredentialOutputs map[string]string
+		var value string
+		if err := ctx.Err(); err != nil {
+			return generated, rotations, err
+		}
+		if installedSource != nil {
+			configJSON, marshalErr := json.Marshal(genConfig)
+			if marshalErr != nil {
+				return generated, rotations, fmt.Errorf("encode credential source %q config: %w", gen.Source, marshalErr)
+			}
+			logicalName := gen.Name
+			if logicalName == "" {
+				logicalName = gen.Key
+			}
+			beforeIssue := issuerOptions.BeforeIssue
+			if !forceRotate[gen.Key] {
+				beforeIssue = nil
+			}
+			result, handled, issueErr := runCredentialIssuerCapability(ctx, credentialIssuerRequest{
+				PluginDir:       issuerOptions.PluginDir,
+				StateDir:        issuerOptions.StateDir,
+				LockDir:         issuerOptions.LockDir,
+				Source:          gen.Source,
+				LogicalName:     logicalName,
+				ConfigJSON:      configJSON,
+				PreparationKey:  issuerOptions.PreparationKey,
+				AckSingleWriter: issuerOptions.AckSingleWriter,
+				NonInteractive:  issuerOptions.NonInteractive,
+				BeforeIssue:     beforeIssue,
+			})
+			if issueErr != nil {
+				return generated, rotations, fmt.Errorf("issue provider credential %q: %w", gen.Key, issueErr)
+			}
+			if !handled {
+				return generated, rotations, fmt.Errorf("credential source %q disappeared after capability selection", gen.Source)
+			}
+			issuedCredential = result
+			typedCredentialOutputs = make(map[string]string, len(result.Outputs))
+			for key, output := range result.Outputs {
+				typedCredentialOutputs[key] = string(output)
+			}
+		} else {
+			if gen.Type == "provider_credential" && forceRotate[gen.Key] && issuerOptions.BeforeIssue != nil {
+				if err := ctx.Err(); err != nil {
+					return generated, rotations, err
+				}
+				if prepareErr := issuerOptions.BeforeIssue(ctx, false); prepareErr != nil {
+					return generated, rotations, fmt.Errorf("prepare provider credential %q: %w", gen.Key, prepareErr)
+				}
+				if err := ctx.Err(); err != nil {
+					return generated, rotations, err
+				}
+			}
+			var generateErr error
+			value, generateErr = generateSecret(ctx, gen.Type, genConfig)
+			if generateErr != nil {
+				return generated, rotations, fmt.Errorf("generate secret %q: %w", gen.Key, generateErr)
+			}
 		}
 
 		// For provider_credential results (JSON map), apply the storage-filter:
 		// only persist keys listed in providerCredentialSubKeys[gen.Source].
-		// Sidecar metadata (e.g. created_at) is captured into RotationResult
-		// AND emitted to stderr as `WFCTL_NEW_KEY_<UPPER>=<v>` lines so
+		// Legacy sidecar metadata (e.g. created_at) is captured into
+		// RotationResult AND emitted to stderr as `WFCTL_NEW_KEY_<UPPER>=<v>` lines so
 		// operators / log scrapers can observe it, but is NOT stored as a GH
 		// Secret. Per ADR 0020 storage-filter constraint.
 		if gen.Type == "provider_credential" {
-			var subKeyMap map[string]string
-			if jsonErr := json.Unmarshal([]byte(value), &subKeyMap); jsonErr == nil {
+			subKeyMap := typedCredentialOutputs
+			parsedOutputs := subKeyMap != nil
+			if !parsedOutputs {
+				parsedOutputs = json.Unmarshal([]byte(value), &subKeyMap) == nil
+			}
+			if parsedOutputs {
 				allowedSubKeys, ok := providerCredentialSubKeys[gen.Source]
+				if installedSource != nil {
+					allowedSubKeys = make([]string, 0, len(installedSource.Outputs))
+					for _, output := range installedSource.Outputs {
+						allowedSubKeys = append(allowedSubKeys, output.Key)
+					}
+					ok = true
+				}
 				if !ok {
 					return generated, rotations, fmt.Errorf("unknown provider_credential source %q (no subkey mapping)", gen.Source)
 				}
@@ -723,15 +993,22 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 				for _, k := range allowedSubKeys {
 					allowed[k] = true
 				}
+				sort.Strings(allowedSubKeys)
 
-				// Capture access_key + created_at BEFORE any Set call so the
+				// Capture access_key + legacy created_at BEFORE any Set call so the
 				// transactional rollback path has the upstream credential ID
 				// available even when the very first Set fails. Bug fix:
 				// previously these were extracted DURING iteration, so a
 				// Set("foo_access_key") failure left newAccessKey unset and
 				// the orphaned DO key invisible to the rollback path.
 				newAccessKey := subKeyMap["access_key"]
+				if issuedCredential != nil {
+					newAccessKey = issuedCredential.Identifier
+				}
 				newCreatedAt := subKeyMap["created_at"]
+				if issuedCredential != nil {
+					newCreatedAt = ""
+				}
 
 				// Transactional rollback: if ANY Set() inside the loop fails,
 				// revoke the just-created upstream credential before
@@ -747,6 +1024,10 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 					if newAccessKey == "" {
 						return
 					}
+					if err := ctx.Err(); err != nil {
+						fmt.Fprintf(os.Stderr, "warn: provider_credential %q cleanup skipped after command cancellation; manual cleanup required\n", gen.Key)
+						return
+					}
 					if credRevoker == nil {
 						fmt.Fprintf(os.Stderr, "warn: provider_credential %q minted access_key=%s but no revoker available; the upstream credential is now ORPHANED and unrecoverable. Run `wfctl secrets list-orphans --source %s --name %s` to clean up. Original error: %v\n",
 							gen.Key, newAccessKey, gen.Source, gen.Key, reason)
@@ -760,16 +1041,56 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 					fmt.Fprintf(os.Stderr, "wfctl: rolled back orphaned credential %q (access_key=%s) after Set failure\n", gen.Key, newAccessKey)
 				}
 
-				for subKey, subVal := range subKeyMap {
+				subKeys := make([]string, 0, len(subKeyMap))
+				for subKey := range subKeyMap {
+					subKeys = append(subKeys, subKey)
+				}
+				sort.Strings(subKeys)
+				for _, subKey := range subKeys {
 					if !allowed[subKey] {
 						// Sidecar field — emit to stderr in machine-parseable form
 						// for operator observability + audit logs.
-						fmt.Fprintf(os.Stderr, "WFCTL_NEW_KEY_%s=%s\n", strings.ToUpper(subKey), subVal)
+						fmt.Fprintf(os.Stderr, "WFCTL_NEW_KEY_%s=%s\n", strings.ToUpper(subKey), subKeyMap[subKey])
+					}
+				}
+				var attemptedKeys []string
+				for _, subKey := range allowedSubKeys {
+					subVal, present := subKeyMap[subKey]
+					if !present {
 						continue
 					}
 					fullKey := gen.Key + "_" + subKey
-					if setErr := provider.Set(ctx, fullKey, subVal); setErr != nil {
-						revokeOrphan(setErr)
+					attemptedKeys = append(attemptedKeys, fullKey)
+					setErr := ctx.Err()
+					if setErr == nil {
+						setErr = provider.Set(ctx, fullKey, subVal)
+					}
+					if setErr != nil {
+						if issuedCredential != nil {
+							cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 10*time.Second)
+							var cleanupErr error
+							for index := len(attemptedKeys) - 1; index >= 0; index-- {
+								if err := cleanupCtx.Err(); err != nil {
+									cleanupErr = errors.Join(cleanupErr, err)
+									break
+								}
+								cleanupKey := attemptedKeys[index]
+								snapshot := storedOutputsBeforeMutation[cleanupKey]
+								if snapshot.exists {
+									if restoreErr := provider.Set(cleanupCtx, cleanupKey, snapshot.value); restoreErr != nil {
+										cleanupErr = errors.Join(cleanupErr, fmt.Errorf("restore previous secret %q failed", cleanupKey))
+									}
+								} else if deleteErr := provider.Delete(cleanupCtx, cleanupKey); deleteErr != nil && !errors.Is(deleteErr, secrets.ErrNotFound) {
+									cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete newly stored secret %q failed", cleanupKey))
+								}
+								delete(generated, cleanupKey)
+							}
+							cleanupCancel()
+							finalizeErr := issuedCredential.Finalize(setErr)
+							return generated, rotations, fmt.Errorf("store secret %q: %w", fullKey, errors.Join(setErr, cleanupErr, finalizeErr))
+						} else {
+							revokeOrphan(setErr)
+						}
 						return generated, rotations, fmt.Errorf("store secret %q: %w", fullKey, setErr)
 					}
 					generated[fullKey] = subVal
@@ -786,35 +1107,59 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 					// have the new credential id without re-running bootstrap.
 					if newAccessKey != "" {
 						rotations = append(rotations, RotationResult{
-							Key:       gen.Key,
-							Source:    gen.Source,
-							AccessKey: newAccessKey,
-							CreatedAt: newCreatedAt,
+							Key:                 gen.Key,
+							Source:              gen.Source,
+							AccessKey:           newAccessKey,
+							IdentifierSensitive: issuedCredential != nil && issuedCredential.IdentifierSensitive,
+							CutoffFromInventory: issuedCredential != nil,
+							CreatedAt:           newCreatedAt,
 						})
 					}
-					// Revoke the OLD credential at the upstream provider AFTER storing
-					// the new one. Failure is non-fatal: the new credential is valid and
-					// must not be rolled back. Log warning + continue (see ADR 0012).
-					// Per Task 17: capability discovery happens in resolveCredentialRevoker
-					// via typedIaCAdapter.CredentialRevoker(); the revoke dispatch itself
-					// goes through the typedIaCAdapter.RevokeProviderCredential method
-					// which translates to a typed pb.RevokeProviderCredential RPC under
-					// the hood. interfaces.ProviderCredentialRevoker stays as the
-					// signature for caller stability + test-fixture compatibility.
-					if credRevoker != nil && oldCredentialID != "" {
-						if revokeErr := credRevoker.RevokeProviderCredential(ctx, gen.Source, oldCredentialID); revokeErr != nil {
-							fmt.Fprintf(os.Stderr, "warn: revoke old credential %s (id=%s): %v — revoke manually\n", gen.Key, oldCredentialID, revokeErr)
-						} else {
-							fmt.Fprintf(os.Stderr, "wfctl: revoked old credential %s (id=%s)\n", gen.Key, oldCredentialID)
+					if issuedCredential == nil && credRevoker != nil && oldCredentialID != "" {
+						if err := ctx.Err(); err != nil {
+							return generated, rotations, err
 						}
-					} else if credRevoker == nil && oldCredentialID != "" {
-						fmt.Fprintf(os.Stderr, "warn: no revoker available — old credential %s (id=%s) must be revoked manually\n", gen.Key, oldCredentialID)
+						identifierForLog := credentialIdentifierForLog(oldCredentialID, oldCredentialIDSensitive)
+						if revokeErr := credRevoker.RevokeProviderCredential(ctx, gen.Source, oldCredentialID); revokeErr != nil {
+							if oldCredentialIDSensitive {
+								fmt.Fprintf(os.Stderr, "warn: revoke old credential %s (id=%s) failed; provider error text suppressed — revoke manually\n", gen.Key, identifierForLog)
+							} else {
+								fmt.Fprintf(os.Stderr, "warn: revoke old credential %s (id=%s): %v — revoke manually\n", gen.Key, identifierForLog, revokeErr)
+							}
+						} else {
+							fmt.Fprintf(os.Stderr, "wfctl: revoked old credential %s (id=%s)\n", gen.Key, identifierForLog)
+						}
+					} else if issuedCredential == nil && credRevoker == nil && oldCredentialID != "" {
+						identifierForLog := credentialIdentifierForLog(oldCredentialID, oldCredentialIDSensitive)
+						fmt.Fprintf(os.Stderr, "warn: no revoker available — old credential %s (id=%s) must be revoked manually\n", gen.Key, identifierForLog)
 					}
+				}
+				// A typed partial regeneration is a replacement just like an explicit
+				// force rotation. Revoke the prior identifier only after every new
+				// output is durably stored, while the selected issuer remains locked.
+				if issuedCredential != nil && oldCredentialID != "" && oldCredentialID != newAccessKey {
+					identifierForLog := credentialIdentifierForLog(oldCredentialID, oldCredentialIDSensitive)
+					if revokeErr := issuedCredential.DeletePrevious(oldCredentialID); revokeErr != nil {
+						fmt.Fprintf(os.Stderr, "warn: revoke old credential %s (id=%s) failed: %v — revoke manually\n", gen.Key, identifierForLog, revokeErr)
+					} else {
+						fmt.Fprintf(os.Stderr, "wfctl: revoked old credential %s (id=%s)\n", gen.Key, identifierForLog)
+					}
+				}
+				if issuedCredential != nil {
+					if finalizeErr := issuedCredential.Finalize(nil); finalizeErr != nil {
+						return generated, rotations, fmt.Errorf("finalize credential operation %q: %w", gen.Key, finalizeErr)
+					}
+				}
+				if err := ctx.Err(); err != nil {
+					return generated, rotations, err
 				}
 				continue
 			}
 		}
 
+		if err := ctx.Err(); err != nil {
+			return generated, rotations, err
+		}
 		if err := provider.Set(ctx, gen.Key, value); err != nil {
 			return generated, rotations, fmt.Errorf("store secret %q: %w", gen.Key, err)
 		}
@@ -826,6 +1171,9 @@ var bootstrapSecrets = func(ctx context.Context, provider secrets.Provider, cfg 
 		} else {
 			fmt.Printf("  secret %q: created\n", gen.Key)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return generated, rotations, err
 	}
 	return generated, rotations, nil
 }

@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -15,6 +20,167 @@ type trackingProvider struct {
 	inner       map[string]string // key → value (mutable in-memory store)
 	deleteCalls []string
 	setCalls    []string
+}
+
+func TestResolveCredentialRevokerForCapabilitiesLoadsLegacyOnlyForZeroTypedMatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		manifests []string
+		wantLoads int
+		wantError bool
+	}{
+		{
+			name: "typed match",
+			manifests: []string{
+				`{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"}],"identifierKey":"id"}]}`,
+			},
+		},
+		{name: "zero typed matches", wantLoads: 1},
+		{
+			name: "typed collision",
+			manifests: []string{
+				`{"name":"workflow-plugin-example-a","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"}],"identifierKey":"id"}]}`,
+				`{"name":"workflow-plugin-example-b","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"}],"identifierKey":"id"}]}`,
+			},
+			wantError: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pluginDir := t.TempDir()
+			for index, manifest := range test.manifests {
+				installName := "workflow-plugin-example"
+				if len(test.manifests) > 1 {
+					installName += fmt.Sprintf("-%c", 'a'+index)
+				}
+				installedDir := filepath.Join(pluginDir, installName)
+				if err := os.MkdirAll(installedDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			loads := 0
+			oldLoad := loadCredentialRevokerIaCProvider
+			loadCredentialRevokerIaCProvider = func(context.Context, string) (interfaces.IaCProvider, interface{ Close() error }, error) {
+				loads++
+				return nil, nil, nil
+			}
+			t.Cleanup(func() { loadCredentialRevokerIaCProvider = oldLoad })
+			cfg := &SecretsConfig{Generate: []SecretGen{{
+				Key: "EXAMPLE", Type: "provider_credential", Source: "example.source",
+			}}}
+			_, _, err := resolveCredentialRevokerForCapabilities(context.Background(), "workflow.yaml", pluginDir, cfg, map[string]bool{"EXAMPLE": true})
+			if test.wantError != (err != nil) {
+				t.Fatalf("error=%v, wantError=%v", err, test.wantError)
+			}
+			if loads != test.wantLoads {
+				t.Fatalf("legacy IaC loads=%d, want %d", loads, test.wantLoads)
+			}
+		})
+	}
+}
+
+func TestRunInfraBootstrapUsesCancelableProviderCommandContext(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "infra.yaml")
+	configData := `name: cancellation-test
+modules:
+  - name: state
+    type: iac.state
+    config:
+      backend: filesystem
+      path: "` + filepath.Join(dir, "state") + `"
+secrets:
+  provider: env
+  generate:
+    - key: TEST_SECRET
+      type: random_hex
+      length: 8
+`
+	if err := os.WriteFile(configPath, []byte(configData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalCommandContext := providerCommandContext
+	providerCommandContext = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, func() {}
+	}
+	t.Cleanup(func() { providerCommandContext = originalCommandContext })
+	originalBootstrap := bootstrapSecrets
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatalf("bootstrap context error=%v", ctx.Err())
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("bootstrap provider context is not bounded")
+		}
+		return nil, nil, ctx.Err()
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+	if err := runInfraBootstrap([]string{"--config", configPath}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("runInfraBootstrap error=%v", err)
+	}
+}
+
+func TestRunInfraBootstrapStopsBeforeEnvAndBackendMutationAfterCancellation(t *testing.T) {
+	dir := t.TempDir()
+	const generatedKey = "WFCTL_TEST_CANCELLED_GENERATED_SECRET"
+	t.Setenv(generatedKey, "")
+	if err := os.Unsetenv(generatedKey); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "infra.yaml")
+	configData := `name: cancellation-after-secrets-test
+modules:
+  - name: state
+    type: iac.state
+    config:
+      backend: remote-test
+  - name: provider
+    type: iac.provider
+    config:
+      provider: example
+secrets:
+  provider: env
+  generate:
+    - key: ` + generatedKey + `
+      type: random_hex
+      length: 8
+`
+	if err := os.WriteFile(configPath, []byte(configData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalCommandContext := providerCommandContext
+	var cancel context.CancelFunc
+	providerCommandContext = func() (context.Context, context.CancelFunc) {
+		ctx, commandCancel := context.WithCancel(context.Background())
+		cancel = commandCancel
+		return ctx, commandCancel
+	}
+	t.Cleanup(func() { providerCommandContext = originalCommandContext })
+	originalBootstrap := bootstrapSecrets
+	bootstrapSecrets = func(context.Context, secrets.Provider, *SecretsConfig, map[string]bool, ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		cancel()
+		return map[string]string{generatedKey: "must-not-export"}, nil, nil
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+	originalResolver := resolveIaCProvider
+	resolverCalls := 0
+	resolveIaCProvider = func(context.Context, string, map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		resolverCalls++
+		return nil, nil, errors.New("must not load backend provider")
+	}
+	t.Cleanup(func() { resolveIaCProvider = originalResolver })
+
+	err := runInfraBootstrap([]string{"--config", configPath})
+	_, exported := os.LookupEnv(generatedKey)
+	if !errors.Is(err, context.Canceled) || exported || resolverCalls != 0 {
+		t.Fatalf("error=%v exported=%v backend resolver calls=%d", err, exported, resolverCalls)
+	}
 }
 
 func newTrackingProvider(initial map[string]string) *trackingProvider {

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -186,6 +188,38 @@ func TestInfraCleanup_TagRequired(t *testing.T) {
 	}
 	if err != nil && !strings.Contains(err.Error(), "--tag") {
 		t.Errorf("expected error to mention --tag; got: %v", err)
+	}
+}
+
+func TestDefaultCleanupLoadProvidersSuppressesLegacyLoaderErrorText(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "infra.yaml")
+	configData := []byte(`modules:
+  - name: example-provider
+    type: iac.provider
+    config:
+      provider: example
+`)
+	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	originalResolver := resolveIaCProvider
+	resolveIaCProvider = func(context.Context, string, map[string]any) (interfaces.IaCProvider, io.Closer, error) {
+		return nil, nil, errors.New("SENTINEL_PROVIDER_DETAIL")
+	}
+	t.Cleanup(func() { resolveIaCProvider = originalResolver })
+	originalStderr := cleanupStderr
+	var stderr bytes.Buffer
+	cleanupStderr = &stderr
+	t.Cleanup(func() { cleanupStderr = originalStderr })
+
+	ctx := withProviderCapabilityDiagnosticsSuppressed(context.Background())
+	providers, closers, err := defaultCleanupLoadProviders(ctx, flag.NewFlagSet("cleanup", flag.ContinueOnError), configPath, "")
+	if err != nil || len(providers) != 0 || len(closers) != 0 {
+		t.Fatalf("providers=%v closers=%v error=%v", providers, closers, err)
+	}
+	if got := stderr.String(); strings.Contains(got, "SENTINEL_PROVIDER_DETAIL") || !strings.Contains(got, "provider error text suppressed") {
+		t.Fatalf("legacy loader diagnostic=%q", got)
 	}
 }
 

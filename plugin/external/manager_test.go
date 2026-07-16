@@ -4,15 +4,71 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
+
+func TestExternalPluginManagerContextCancelsStartupHandshake(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable-script fixture")
+	}
+	pluginRoot := t.TempDir()
+	const name = "hung-plugin"
+	pluginDir := filepath.Join(pluginRoot, name)
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"hung-plugin","version":"1.0.0","author":"Workflow tests","description":"non-handshaking cancellation fixture"}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, name), []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewExternalPluginManager(pluginRoot, log.New(io.Discard, "", 0))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := manager.LoadPluginContext(ctx, name)
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Fatalf("startup error=%v, want context cancellation", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("canceled startup took %s", elapsed)
+	}
+}
+
+func TestExternalPluginManagerReleasedStartupContextDoesNotKillAcceptedPlugin(t *testing.T) {
+	pluginsDir := t.TempDir()
+	const pluginName = "accepted-context-fixture"
+	prepareContainerRegistryFixture(t, pluginsDir, pluginName, true, false)
+
+	manager := NewExternalPluginManager(pluginsDir, log.New(io.Discard, "", 0))
+	t.Cleanup(manager.Shutdown)
+	startupCtx, releaseStartup := context.WithCancel(context.Background())
+	adapter, err := manager.LoadPluginContext(startupCtx, pluginName)
+	if err != nil {
+		t.Fatalf("load plugin: %v", err)
+	}
+	releaseStartup()
+
+	callCtx, cancelCall := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelCall()
+	response, err := adapter.client.ContainerRegistryClient().DescribeRegistries(callCtx, &pb.ContainerRegistryDeclarationsRequest{})
+	if err != nil || len(response.GetRegistries()) == 0 {
+		t.Fatalf("accepted plugin died with released startup context: response=%v error=%v", response, err)
+	}
+}
 
 func TestExternalPluginManagerRejectsLifecycleMutationsAfterShutdown(t *testing.T) {
 	tests := []struct {

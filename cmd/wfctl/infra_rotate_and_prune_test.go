@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
@@ -27,10 +29,14 @@ import (
 type fakeProviderEnumerableDriver struct {
 	outputs   []*interfaces.ResourceOutput
 	deleted   []string
+	enumErr   error
 	deleteErr error
 }
 
 func (f *fakeProviderEnumerableDriver) EnumerateAll(_ context.Context, _ string) ([]*interfaces.ResourceOutput, error) {
+	if f.enumErr != nil {
+		return nil, f.enumErr
+	}
 	return f.outputs, nil
 }
 
@@ -89,6 +95,14 @@ func writeMinimalRotationConfig(t *testing.T, tmpDir string) string {
 	return cfgPath
 }
 
+func runStubbedCredentialPreparation(ctx context.Context) error {
+	options := credentialIssuerOptionsFromContext(ctx)
+	if options.BeforeIssue == nil {
+		return nil
+	}
+	return options.BeforeIssue(ctx, false)
+}
+
 // TestInfraRotateAndPrune_HappyPath verifies the all-in-one flow:
 //
 //  1. The rotate primitive (`bootstrapSecrets` package-level test hook —
@@ -114,7 +128,13 @@ func TestInfraRotateAndPrune_HappyPath(t *testing.T) {
 	// infra_bootstrap.go:507 as `var bootstrapSecrets = func(...)`).
 	origBoot := bootstrapSecrets
 	defer func() { bootstrapSecrets = origBoot }()
-	bootstrapSecrets = func(_ context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("rotate-and-prune provider context is not bounded")
+		}
+		if err := runStubbedCredentialPreparation(ctx); err != nil {
+			return nil, nil, err
+		}
 		return map[string]string{}, []RotationResult{
 			{Key: "test-key", Source: "digitalocean.spaces", AccessKey: "AK_NEW", CreatedAt: "2026-05-08T11:00:00Z"},
 		}, nil
@@ -173,6 +193,324 @@ func TestInfraRotateAndPrune_HappyPath(t *testing.T) {
 	}
 }
 
+func TestInfraRotateAndPruneThreadsTypedCredentialIssuerOptions(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	cfgPath := writeMinimalRotationConfig(t, stateRoot)
+	pluginDir := filepath.Join(stateRoot, "plugins")
+
+	originalResolver := resolveCredentialRevokerForCapabilitiesFn
+	var resolvedPluginDir string
+	resolveCredentialRevokerForCapabilitiesFn = func(_ context.Context, _, gotPluginDir string, _ *SecretsConfig, _ map[string]bool) (interfaces.ProviderCredentialRevoker, interface{ Close() error }, error) {
+		resolvedPluginDir = gotPluginDir
+		return nil, nil, nil
+	}
+	t.Cleanup(func() { resolveCredentialRevokerForCapabilitiesFn = originalResolver })
+
+	originalBootstrap := bootstrapSecrets
+	var issuerOptions credentialIssuerOptions
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		issuerOptions = credentialIssuerOptionsFromContext(ctx)
+		return map[string]string{}, []RotationResult{{
+			Key: "test-key", Source: "digitalocean.spaces", AccessKey: "AK_NEW", CreatedAt: "2026-05-08T11:00:00Z",
+		}}, nil
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+
+	provider := &fakeProviderEnumerableDriver{outputs: []*interfaces.ResourceOutput{{
+		Name: "test-key", Type: "infra.spaces_key", ProviderID: "AK_NEW",
+		Outputs: map[string]any{"access_key": "AK_NEW", "name": "test-key"},
+	}}}
+	var output bytes.Buffer
+	code := runInfraRotateAndPrune([]string{
+		"--type", "infra.spaces_key", "--name", "test-key", "--config", cfgPath,
+		"--plugin-dir", pluginDir, "--ack-single-writer", "--confirm", "--non-interactive", "--prune-first=false",
+	}, provider, &output)
+	if code != 0 {
+		t.Fatalf("code=%d output=%s", code, output.String())
+	}
+	if resolvedPluginDir != pluginDir {
+		t.Fatalf("revoker capability plugin directory=%q, want %q", resolvedPluginDir, pluginDir)
+	}
+	if !issuerOptions.Enabled || issuerOptions.PluginDir != pluginDir || !issuerOptions.AckSingleWriter || !issuerOptions.NonInteractive {
+		t.Fatalf("issuer options=%+v", issuerOptions)
+	}
+	if issuerOptions.StateDir == "" || issuerOptions.LockDir == "" {
+		t.Fatalf("issuer durable paths missing: %+v", issuerOptions)
+	}
+	wantPreparationKey := "infra.spaces_key\x00test-key\x00\x00false"
+	if issuerOptions.PreparationKey != wantPreparationKey {
+		t.Fatalf("issuer preparation key=%q, want %q", issuerOptions.PreparationKey, wantPreparationKey)
+	}
+}
+
+func TestInfraRotateAndPrunePersistsCommittedRotationWhenFinalSetCancels(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	configPath := filepath.Join(stateRoot, "infra.yaml")
+	configData := []byte(`secrets:
+  provider: env
+  generate:
+    - key: EXAMPLE
+      type: provider_credential
+      source: example.source
+      name: deploy-key
+`)
+	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pluginRoot := filepath.Join(stateRoot, "plugins")
+	pluginDir := filepath.Join(pluginRoot, "workflow-plugin-example")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"credential fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	issuerClient := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+	withCredentialIssuerResolver(t, issuerClient, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	secretProvider := &cancelAfterFirstSecretMutationProvider{cancel: cancel, cancelAfter: 2}
+	realBootstrap := bootstrapSecrets
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, cfg *SecretsConfig, forceRotate map[string]bool, revoker ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		return realBootstrap(ctx, secretProvider, cfg, forceRotate, revoker...)
+	}
+	t.Cleanup(func() { bootstrapSecrets = realBootstrap })
+
+	pruneProvider := &fakeProviderWithDelete{}
+	var output bytes.Buffer
+	code := runInfraRotateAndPruneWithContext(ctx, []string{
+		"--type", "infra.example_credential", "--name", "deploy-key", "--config", configPath,
+		"--plugin-dir", pluginRoot, "--confirm", "--non-interactive", "--prune-first=false",
+	}, pruneProvider, &output)
+	if code == 0 || !strings.Contains(output.String(), context.Canceled.Error()) {
+		t.Fatalf("code=%d output=%s", code, output.String())
+	}
+	if got := strings.Join(secretProvider.setCalls, ","); got != "EXAMPLE_id,EXAMPLE_secret" {
+		t.Fatalf("secret Set calls=%q", got)
+	}
+	if len(secretProvider.deleteCalls) != 0 || issuerClient.deleteCalls != 0 || len(pruneProvider.deleted) != 0 || pruneProvider.lastType != "" {
+		t.Fatalf("secret deletes=%v issuer deletes=%d prune deletes=%v inventory type=%q", secretProvider.deleteCalls, issuerClient.deleteCalls, pruneProvider.deleted, pruneProvider.lastType)
+	}
+	recovery, err := readRecoveryFile()
+	if err != nil {
+		t.Fatalf("committed rotation recovery missing: %v", err)
+	}
+	if recovery.Type != "infra.example_credential" || recovery.AccessKey != "credential-123" {
+		t.Fatalf("recovery=%+v", recovery)
+	}
+}
+
+func TestInfraRotateAndPrunePersistsCommittedRotationOnBookkeepingFailure(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	configPath := writeMinimalRotationConfig(t, stateRoot)
+
+	originalResolver := resolveCredentialRevokerForCapabilitiesFn
+	resolveCredentialRevokerForCapabilitiesFn = func(context.Context, string, string, *SecretsConfig, map[string]bool) (interfaces.ProviderCredentialRevoker, interface{ Close() error }, error) {
+		return nil, nil, nil
+	}
+	t.Cleanup(func() { resolveCredentialRevokerForCapabilitiesFn = originalResolver })
+	originalBootstrap := bootstrapSecrets
+	bootstrapSecrets = func(context.Context, secrets.Provider, *SecretsConfig, map[string]bool, ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		return nil, []RotationResult{{
+			Key: "test-key", Source: "example.source", AccessKey: "committed-id", CreatedAt: "2026-05-08T11:00:00Z",
+		}}, errors.New("simulated post-commit bookkeeping failure")
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+
+	provider := &fakeProviderWithDelete{}
+	var output bytes.Buffer
+	code := runInfraRotateAndPrune([]string{
+		"--type", "infra.example_credential", "--name", "test-key", "--config", configPath,
+		"--confirm", "--non-interactive", "--prune-first=false",
+	}, provider, &output)
+	if code == 0 || !strings.Contains(output.String(), "post-commit bookkeeping failure") || provider.lastType != "" || len(provider.deleted) != 0 {
+		t.Fatalf("code=%d inventory type=%q deletes=%v output=%s", code, provider.lastType, provider.deleted, output.String())
+	}
+	recovery, err := readRecoveryFile()
+	if err != nil || recovery.AccessKey != "committed-id" {
+		t.Fatalf("recovery=%+v error=%v", recovery, err)
+	}
+}
+
+func TestInfraRotateAndPruneSerializesGlobalRecoveryStateBeforeMutation(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	configPath := writeMinimalRotationConfig(t, stateRoot)
+	lockDir, err := credentialOperationLockDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := acquireCredentialOperationLock(lockDir, "wfctl.rotate-and-prune-recovery", "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
+	originalBootstrap := bootstrapSecrets
+	bootstrapCalls := 0
+	bootstrapSecrets = func(context.Context, secrets.Provider, *SecretsConfig, map[string]bool, ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		bootstrapCalls++
+		return nil, nil, nil
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+	var output bytes.Buffer
+	code := runInfraRotateAndPrune([]string{
+		"--type", "infra.example_credential", "--name", "test-key", "--config", configPath,
+		"--confirm", "--non-interactive", "--prune-first=false",
+	}, &fakeProviderEnumerableDriver{}, &output)
+	if code == 0 || bootstrapCalls != 0 || !strings.Contains(output.String(), "locked") {
+		t.Fatalf("code=%d bootstrap calls=%d output=%s", code, bootstrapCalls, output.String())
+	}
+}
+
+func TestInfraRotateAndPruneRefusesToOverwriteRetainedRecoveryRecord(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	configPath := writeMinimalRotationConfig(t, stateRoot)
+	if err := writeRecoveryRecord(recoveryRecord{
+		Type: "infra.spaces_key", Name: "test-key", AccessKey: "retained-id", CreatedAt: "2026-05-08T11:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	recoveryPath := filepath.Join(stateRoot, "last-rotation.json")
+	wantBytes, err := os.ReadFile(recoveryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalBootstrap := bootstrapSecrets
+	bootstrapCalls := 0
+	bootstrapSecrets = func(context.Context, secrets.Provider, *SecretsConfig, map[string]bool, ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		bootstrapCalls++
+		return nil, []RotationResult{{
+			Key: "test-key", Source: "digitalocean.spaces", AccessKey: "replacement-id", CreatedAt: "2026-05-09T11:00:00Z",
+		}}, nil
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+
+	var output bytes.Buffer
+	code := runInfraRotateAndPrune([]string{
+		"--type", "infra.spaces_key", "--name", "test-key", "--config", configPath,
+		"--confirm", "--non-interactive", "--prune-first=false",
+	}, &fakeProviderEnumerableDriver{}, &output)
+	if code == 0 || bootstrapCalls != 0 || !strings.Contains(output.String(), "recovery") {
+		t.Fatalf("code=%d bootstrap calls=%d output=%s", code, bootstrapCalls, output.String())
+	}
+	gotBytes, err := os.ReadFile(recoveryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotBytes, wantBytes) {
+		t.Fatalf("retained recovery record changed:\nwant=%s\n got=%s", wantBytes, gotBytes)
+	}
+}
+
+func TestInfraRotateAndPruneDefersPrePruneUntilBootstrapSafetyGates(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	cfgPath := writeMinimalRotationConfig(t, stateRoot)
+
+	originalBootstrap := bootstrapSecrets
+	bootstrapSecrets = func(context.Context, secrets.Provider, *SecretsConfig, map[string]bool, ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		return nil, nil, errors.New("simulated issuer safety gate failure")
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+
+	provider := &fakeProviderEnumerableDriver{outputs: []*interfaces.ResourceOutput{{
+		Name: "orphan-key", Type: "infra.spaces_key", ProviderID: "AK_ORPHAN",
+		Outputs: map[string]any{"created_at": "2026-05-01T00:00:00Z", "name": "orphan-key"},
+	}}}
+	var output bytes.Buffer
+	code := runInfraRotateAndPrune([]string{
+		"--type", "infra.spaces_key", "--name", "test-key", "--config", cfgPath,
+		"--confirm", "--non-interactive",
+	}, provider, &output)
+	if code == 0 || !strings.Contains(output.String(), "simulated issuer safety gate failure") {
+		t.Fatalf("code=%d output=%s", code, output.String())
+	}
+	if len(provider.deleted) != 0 {
+		t.Fatalf("pre-prune mutated resources before issuer safety gates: %v", provider.deleted)
+	}
+}
+
+func TestInfraRotateAndPruneRedactsSensitiveCredentialIdentifiers(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	stateRoot := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateRoot)
+	cfgPath := writeMinimalRotationConfig(t, stateRoot)
+
+	originalBootstrap := bootstrapSecrets
+	bootstrapSecrets = func(context.Context, secrets.Provider, *SecretsConfig, map[string]bool, ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		return map[string]string{}, []RotationResult{{
+			Key: "test-key", Source: "example.credential", AccessKey: "SENSITIVE_NEW", CreatedAt: "2026-05-08T11:00:00Z", IdentifierSensitive: true,
+		}}, nil
+	}
+	t.Cleanup(func() { bootstrapSecrets = originalBootstrap })
+
+	provider := &fakeProviderEnumerableDriver{outputs: []*interfaces.ResourceOutput{{
+		Name: "old-key", Type: "infra.example_credential", ProviderID: "SENSITIVE_OLD",
+		Outputs: map[string]any{"created_at": "2026-05-01T00:00:00Z", "name": "old-key"},
+	}}}
+	var output bytes.Buffer
+	code := runInfraRotateAndPrune([]string{
+		"--type", "infra.example_credential", "--name", "test-key", "--config", cfgPath,
+		"--confirm", "--non-interactive", "--prune-first=false",
+	}, provider, &output)
+	if code != 0 {
+		t.Fatalf("code=%d output=%s", code, output.String())
+	}
+	if strings.Contains(output.String(), "SENSITIVE_NEW") || strings.Contains(output.String(), "SENSITIVE_OLD") {
+		t.Fatalf("sensitive identifier leaked in output: %s", output.String())
+	}
+	if !strings.Contains(output.String(), "[sensitive identifier redacted]") {
+		t.Fatalf("redaction marker missing from output: %s", output.String())
+	}
+}
+
+func TestPreRotationPruneRedactsSensitiveCredentialIdentifiers(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	provider := &fakeProviderEnumerableDriver{outputs: []*interfaces.ResourceOutput{{
+		Name: "orphan-key", Type: "infra.example_credential", ProviderID: "SENSITIVE_ORPHAN",
+		Outputs: map[string]any{"created_at": "2026-05-01T00:00:00Z", "name": "orphan-key"},
+	}}}
+	var output bytes.Buffer
+	code := runPreRotationPrune(context.Background(), provider, "infra.example_credential", "canonical-key", "", true, true, &output)
+	if code != 0 {
+		t.Fatalf("code=%d output=%s", code, output.String())
+	}
+	if strings.Contains(output.String(), "SENSITIVE_ORPHAN") || !strings.Contains(output.String(), "[sensitive identifier redacted]") {
+		t.Fatalf("sensitive pre-prune identifier output=%s", output.String())
+	}
+}
+
+func TestPreRotationPruneSuppressesProviderErrorText(t *testing.T) {
+	t.Setenv("WFCTL_CONFIRM_PRUNE", "1")
+	for _, provider := range []*fakeProviderEnumerableDriver{
+		{enumErr: errors.New("SENSITIVE_ENUMERATE")},
+		{outputs: []*interfaces.ResourceOutput{{Name: "orphan", Type: "infra.example_credential", ProviderID: "orphan-id"}}, deleteErr: errors.New("SENSITIVE_DELETE")},
+	} {
+		var output bytes.Buffer
+		if code := runPreRotationPrune(context.Background(), provider, "infra.example_credential", "canonical", "", true, true, &output); code == 0 {
+			t.Fatalf("expected provider failure: %s", output.String())
+		}
+		if strings.Contains(output.String(), "SENSITIVE_") || !strings.Contains(output.String(), "provider error text suppressed") {
+			t.Fatalf("provider error output=%s", output.String())
+		}
+	}
+}
+
 // TestInfraRotateAndPrune_RecoveryFileWrittenWithCorrectPerms verifies the
 // partial-failure semantics: when the prune step fails (here: simulated
 // network error from DeleteResource), the recovery record at
@@ -196,7 +534,10 @@ func TestInfraRotateAndPrune_RecoveryFileWrittenWithCorrectPerms(t *testing.T) {
 
 	origBoot := bootstrapSecrets
 	defer func() { bootstrapSecrets = origBoot }()
-	bootstrapSecrets = func(_ context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		if err := runStubbedCredentialPreparation(ctx); err != nil {
+			return nil, nil, err
+		}
 		return map[string]string{}, []RotationResult{
 			{Key: "test-key", Source: "digitalocean.spaces", AccessKey: "AK_NEW", CreatedAt: "2026-05-08T11:00:00Z"},
 		}, nil
@@ -233,6 +574,53 @@ func TestInfraRotateAndPrune_RecoveryFileWrittenWithCorrectPerms(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0600 {
 		t.Errorf("recovery file perms must be 0600 (owner-only); got %o", perm)
+	}
+}
+
+func TestWriteRecoveryRecordHardensPreexistingStatePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires privileges on Windows")
+	}
+	stateDir := t.TempDir()
+	t.Setenv("WFCTL_STATE_DIR", stateDir)
+	if err := os.Chmod(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "unrelated")
+	if err := os.WriteFile(target, []byte("unchanged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recoveryPath := filepath.Join(stateDir, "last-rotation.json")
+	if err := os.Symlink(target, recoveryPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRecoveryRecord(recoveryRecord{
+		Type: "infra.example_credential", Name: "deploy-key", AccessKey: "credential-1", CreatedAt: "2026-05-08T11:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := os.ReadFile(target); err != nil || string(content) != "unchanged" {
+		t.Fatalf("recovery write followed symlink: content=%q error=%v", content, err)
+	}
+	info, err := os.Lstat(recoveryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+		t.Fatalf("recovery file mode=%v", info.Mode())
+	}
+	dirInfo, err := os.Stat(stateDir)
+	if err != nil || dirInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("state directory mode=%v error=%v", dirInfo.Mode(), err)
+	}
+	symlinkTargetDir := t.TempDir()
+	symlinkStateDir := filepath.Join(t.TempDir(), "state-link")
+	if err := os.Symlink(symlinkTargetDir, symlinkStateDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WFCTL_STATE_DIR", symlinkStateDir)
+	if err := writeRecoveryRecord(recoveryRecord{Type: "infra.example_credential", AccessKey: "credential-2"}); err == nil {
+		t.Fatal("writer accepted symlinked recovery-state directory")
 	}
 }
 
@@ -297,7 +685,10 @@ func TestRotateAndPrune_PruneFirst_HappyPath_AtQuota(t *testing.T) {
 
 	origBoot := bootstrapSecrets
 	defer func() { bootstrapSecrets = origBoot }()
-	bootstrapSecrets = func(_ context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		if err := runStubbedCredentialPreparation(ctx); err != nil {
+			return nil, nil, err
+		}
 		return map[string]string{}, []RotationResult{
 			{Key: "canonical-name", Source: "digitalocean.spaces", AccessKey: "AK_NEW", CreatedAt: "2026-05-09T11:00:00Z"},
 		}, nil
@@ -401,7 +792,10 @@ func TestRotateAndPrune_PruneFirst_DefaultTrue(t *testing.T) {
 
 	origBoot := bootstrapSecrets
 	defer func() { bootstrapSecrets = origBoot }()
-	bootstrapSecrets = func(_ context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		if err := runStubbedCredentialPreparation(ctx); err != nil {
+			return nil, nil, err
+		}
 		return map[string]string{}, []RotationResult{
 			{Key: "canonical-name", Source: "digitalocean.spaces", AccessKey: "AK_NEW", CreatedAt: "2026-05-09T11:00:00Z"},
 		}, nil
@@ -525,7 +919,10 @@ func TestRotateAndPrune_PruneFirst_PreservesCanonicalName(t *testing.T) {
 
 	origBoot := bootstrapSecrets
 	defer func() { bootstrapSecrets = origBoot }()
-	bootstrapSecrets = func(_ context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+		if err := runStubbedCredentialPreparation(ctx); err != nil {
+			return nil, nil, err
+		}
 		return map[string]string{}, []RotationResult{
 			{Key: "canonical-name", Source: "digitalocean.spaces", AccessKey: "AK_NEW", CreatedAt: "2026-05-09T11:00:00Z"},
 		}, nil
