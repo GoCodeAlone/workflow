@@ -82,6 +82,33 @@ var resolveIaCProvider = discoverAndLoadIaCProvider
 // same seam pattern used by currentApplyIncludeFlag and applyAllowReplaceSet.
 var currentInfraPluginDir string
 
+const defaultIaCPluginLifecycleTimeout = 30 * time.Second
+
+var iacPluginLifecycleTimeout = defaultIaCPluginLifecycleTimeout
+
+type iacExternalPluginManager interface {
+	StageCredentialResolvers() error
+	LoadPluginContext(context.Context, string) (*external.ExternalPluginAdapter, error)
+	ShutdownContext(context.Context) error
+}
+
+var newIaCExternalPluginManager = func(pluginDir string, logger *log.Logger) iacExternalPluginManager {
+	return external.NewExternalPluginManager(pluginDir, logger)
+}
+
+func withIaCPluginLifecycleTimeout(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, iacPluginLifecycleTimeout)
+}
+
+func shutdownIaCPluginManager(parent context.Context, manager iacExternalPluginManager) error {
+	shutdownCtx, cancel := withIaCPluginLifecycleTimeout(parent)
+	defer cancel()
+	return manager.ShutdownContext(shutdownCtx)
+}
+
 // iacPluginManifest is the minimal shape needed to read both:
 //   - capabilities.iacProvider.name — used by findIaCPluginDir to
 //     match a plugin to a desired provider name; AND
@@ -232,20 +259,72 @@ func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg ma
 		log.Printf("plugin %q: deprecation — manifest iacProvider.computePlanVersion=\"v1\"; update to \"v2\" (workflow#699). Note: runtime enforcement reads the typed CapabilitiesResponse.compute_plan_version, not this manifest field; an out-of-date manifest with v2 in Capabilities will still load.", pName)
 	}
 
-	mgr := external.NewExternalPluginManager(pluginDir, nil)
-	adapter, loadErr := mgr.LoadPlugin(pName)
-	if loadErr != nil {
-		mgr.Shutdown()
-		return nil, nil, fmt.Errorf("load plugin %q for provider %q: %w", pName, providerName, loadErr)
+	managerLogger := log.New(io.Discard, "", 0)
+	mgr := newIaCExternalPluginManager(pluginDir, managerLogger)
+	// This loader is command-scoped. Discover resolver declarations for parity,
+	// but never activate them in the process-global application resolver chain.
+	if err := mgr.StageCredentialResolvers(); err != nil {
+		_ = shutdownIaCPluginManager(ctx, mgr)
+		return nil, nil, fmt.Errorf("stage unrelated credential resolvers before IaC provider discovery: %w", err)
 	}
-	closer := closerFunc(func() error { mgr.Shutdown(); return nil })
+	startupCtx, cancelStartup := withIaCPluginLifecycleTimeout(ctx)
+	adapter, loadErr := mgr.LoadPluginContext(startupCtx, pName)
+	if loadErr != nil {
+		cancelStartup()
+		_ = shutdownIaCPluginManager(ctx, mgr)
+		return nil, nil, fmt.Errorf("load plugin %q for provider %q failed; provider error text suppressed", pName, providerName)
+	}
+	closer := closerFunc(func() error { return shutdownIaCPluginManager(ctx, mgr) })
 
-	typed, err := buildTypedIaCAdapterFrom(ctx, providerName, pName, cfg, adapter)
+	typed, err := buildTypedIaCAdapterFromFn(startupCtx, providerName, pName, cfg, adapter)
+	cancelStartup()
 	if err != nil {
 		_ = closer.Close()
-		return nil, nil, err
+		return nil, nil, sanitizeIaCPluginInitializationError(pName, providerName, err)
 	}
 	return typed, closer, nil
+}
+
+type actionableIaCLoadError struct{ err error }
+
+func (e *actionableIaCLoadError) Error() string { return e.err.Error() }
+func (e *actionableIaCLoadError) Unwrap() error { return e.err }
+
+type providerControlledIaCLoadError struct {
+	operation string
+	cause     error
+	rendered  error
+}
+
+func (e *providerControlledIaCLoadError) Error() string { return e.rendered.Error() }
+func (e *providerControlledIaCLoadError) Unwrap() error { return e.cause }
+
+type computePlanVersionV2Error struct {
+	pluginName string
+	value      string
+}
+
+func (e *computePlanVersionV2Error) Error() string {
+	return fmt.Sprintf(
+		"plugin %q declares CapabilitiesResponse.compute_plan_version = %q; workflow v0.56.0+ requires \"v2\" (see workflow#699 — upgrade plugin to v2.0.0 or higher)",
+		e.pluginName, e.value,
+	)
+}
+
+func sanitizeIaCPluginInitializationError(pluginName, providerName string, err error) error {
+	var actionable *actionableIaCLoadError
+	if errors.As(err, &actionable) {
+		return actionable
+	}
+	var versionMismatch *computePlanVersionV2Error
+	if errors.As(err, &versionMismatch) {
+		return fmt.Errorf("plugin %q for provider %q requires CapabilitiesResponse.compute_plan_version=\"v2\"; provider-declared value suppressed — upgrade plugin to v2.0.0 or higher (see workflow#699)", pluginName, providerName)
+	}
+	var providerControlled *providerControlledIaCLoadError
+	if errors.As(err, &providerControlled) {
+		return fmt.Errorf("plugin %q for provider %q: %w", pluginName, providerName, providerCapabilityTransportError(providerControlled.operation, providerControlled.cause))
+	}
+	return fmt.Errorf("initialize plugin %q for provider %q failed; provider error text suppressed", pluginName, providerName)
 }
 
 // capabilitiesWithContexter is the seam typedIaCAdapter satisfies for the
@@ -266,7 +345,11 @@ var enforceCapabilitiesV2Gate = func(ctx context.Context, p capabilitiesWithCont
 	defer capsCancel()
 	capsResp, capsErr := p.CapabilitiesWithContext(capsCtx)
 	if capsErr != nil {
-		return fmt.Errorf("plugin %q: Capabilities RPC failed: %w (see workflow#699)", pluginName, capsErr)
+		return &providerControlledIaCLoadError{
+			operation: "IaCProvider.Capabilities",
+			cause:     capsErr,
+			rendered:  fmt.Errorf("plugin %q: Capabilities RPC failed: %w (see workflow#699)", pluginName, capsErr),
+		}
 	}
 	return verifyComputePlanVersionV2(capsResp.GetComputePlanVersion(), pluginName)
 }
@@ -280,11 +363,7 @@ func verifyComputePlanVersionV2(cpv, pluginName string) error {
 	if cpv == "v2" {
 		return nil
 	}
-	return fmt.Errorf(
-		"plugin %q declares CapabilitiesResponse.compute_plan_version = %q; "+
-			"workflow v0.56.0+ requires \"v2\" (see workflow#699 — upgrade plugin to v2.0.0 or higher)",
-		pluginName, cpv,
-	)
+	return &computePlanVersionV2Error{pluginName: pluginName, value: cpv}
 }
 
 // iacAdapterAccessor is the slice of *external.ExternalPluginAdapter the
@@ -300,6 +379,8 @@ type iacAdapterAccessor interface {
 	ContractRegistryError() error
 }
 
+var buildTypedIaCAdapterFromFn = buildTypedIaCAdapterFrom
+
 // buildTypedIaCAdapterFrom is the post-LoadPlugin half of
 // discoverAndLoadIaCProvider, factored out so it's unit-testable in
 // isolation against an in-process gRPC server. Returns the typed
@@ -308,7 +389,7 @@ type iacAdapterAccessor interface {
 func buildTypedIaCAdapterFrom(ctx context.Context, providerName, pName string, cfg map[string]any, adapter iacAdapterAccessor) (interfaces.IaCProvider, error) {
 	conn := adapter.Conn()
 	if conn == nil {
-		return nil, fmt.Errorf("plugin %q does not expose a gRPC connection (host adapter missing PluginClient.Conn) — upgrade with: wfctl plugin update %s", pName, pName)
+		return nil, &actionableIaCLoadError{err: fmt.Errorf("plugin %q does not expose a gRPC connection (host adapter missing PluginClient.Conn) — upgrade with: wfctl plugin update %s", pName, pName)}
 	}
 
 	// Surface a ContractRegistry RPC failure FIRST. Without this guard,
@@ -318,17 +399,25 @@ func buildTypedIaCAdapterFrom(ctx context.Context, providerName, pName string, c
 	// "does not register the required service" message — masking the
 	// real cause. Per Copilot finding on PR #609.
 	if regErr := adapter.ContractRegistryError(); regErr != nil {
-		return nil, fmt.Errorf("plugin %q ContractRegistry RPC failed: %w — upgrade with: wfctl plugin update %s", pName, regErr, pName)
+		return nil, &providerControlledIaCLoadError{
+			operation: "PluginService.GetContractRegistry",
+			cause:     regErr,
+			rendered:  fmt.Errorf("plugin %q ContractRegistry RPC failed: %w — upgrade with: wfctl plugin update %s", pName, regErr, pName),
+		}
 	}
 
 	registered := registeredIaCServices(adapter.ContractRegistry())
 	if !registered[iacServiceRequired] {
-		return nil, fmt.Errorf("plugin %q does not register the required %q gRPC service — upgrade with: wfctl plugin update %s", pName, iacServiceRequired, pName)
+		return nil, &actionableIaCLoadError{err: fmt.Errorf("plugin %q does not register the required %q gRPC service — upgrade with: wfctl plugin update %s", pName, iacServiceRequired, pName)}
 	}
 
 	typed := newTypedIaCAdapter(conn, registered)
 	if initErr := typed.Initialize(ctx, cfg); initErr != nil {
-		return nil, fmt.Errorf("initialize provider %q: %w", providerName, initErr)
+		return nil, &providerControlledIaCLoadError{
+			operation: "IaCProvider.Initialize",
+			cause:     initErr,
+			rendered:  fmt.Errorf("initialize provider %q: %w", providerName, initErr),
+		}
 	}
 	// workflow#699 load-time gate: enforce ComputePlanVersion="v2" via the
 	// typed CapabilitiesResponse. 10s timeout bounds a hung handshake;

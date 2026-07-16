@@ -22,7 +22,8 @@ import (
 type grpcServer struct {
 	pb.UnimplementedPluginServiceServer
 
-	provider PluginProvider
+	provider         PluginProvider
+	providerServices providerServices
 
 	mu              sync.RWMutex
 	modules         map[string]ModuleInstance
@@ -266,15 +267,11 @@ func (s *grpcServer) GetModuleSchemas(_ context.Context, _ *emptypb.Empty) (*pb.
 }
 
 func (s *grpcServer) GetContractRegistry(_ context.Context, _ *emptypb.Empty) (*pb.ContractRegistry, error) {
-	cp, ok := s.provider.(ContractProvider)
-	if !ok {
-		return &pb.ContractRegistry{}, nil
+	var registry *pb.ContractRegistry
+	if cp, ok := s.provider.(ContractProvider); ok {
+		registry = cp.ContractRegistry()
 	}
-	registry := cp.ContractRegistry()
-	if registry == nil {
-		return &pb.ContractRegistry{}, nil
-	}
-	return registry, nil
+	return mergeProviderServiceContracts(registry, &s.providerServices), nil
 }
 
 // --- Module lifecycle RPCs ---

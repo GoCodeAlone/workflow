@@ -942,8 +942,13 @@ func TestNewExternalPluginAdapterDiskManifestNilStillWorks(t *testing.T) {
 // and the disk-manifest overlay must populate the cached manifest so
 // EngineManifest()/Validate() can succeed downstream.
 func TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion(t *testing.T) {
+	declarations := []plugin.KubernetesBackendDecl{
+		{Name: "managed-a", ResourceType: "infra.k8s_cluster"},
+		{Name: "managed-b", ResourceType: "infra.managed_cluster"},
+	}
 	disk := &plugin.PluginManifest{
 		Name: "x", Version: "1.0.11", Author: "GoCodeAlone", Description: "DO IaC",
+		KubernetesBackends: declarations,
 	}
 	a, err := NewExternalPluginAdapter("x", &PluginClient{client: &adapterTestPluginServiceClient{
 		manifestResp: &pb.Manifest{Name: "x", Version: ""},
@@ -957,6 +962,9 @@ func TestNewExternalPluginAdapterDiskOverlayWhenGRPCReturnsEmptyVersion(t *testi
 	em := a.EngineManifest()
 	if em.Author != "GoCodeAlone" {
 		t.Fatalf("EngineManifest().Author = %q, want GoCodeAlone (disk overlay)", em.Author)
+	}
+	if len(em.KubernetesBackends) != 2 || em.KubernetesBackends[0] != declarations[0] || em.KubernetesBackends[1] != declarations[1] {
+		t.Fatalf("EngineManifest kubernetes backends = %+v, want exact disk declarations %+v", em.KubernetesBackends, declarations)
 	}
 }
 
@@ -1136,6 +1144,157 @@ func TestEngineManifestValidatesAfterDiskOverlay(t *testing.T) {
 	}
 	if err := em.Validate(); err != nil {
 		t.Fatalf("EngineManifest().Validate(): %v", err)
+	}
+}
+
+type kubernetesBackendIaCServer struct {
+	minimalIaCProviderServer
+	resourceTypes []string
+}
+
+func (s *kubernetesBackendIaCServer) Capabilities(context.Context, *pb.CapabilitiesRequest) (*pb.CapabilitiesResponse, error) {
+	capabilities := make([]*pb.IaCCapabilityDeclaration, 0, len(s.resourceTypes))
+	for _, resourceType := range s.resourceTypes {
+		capabilities = append(capabilities, &pb.IaCCapabilityDeclaration{ResourceType: resourceType})
+	}
+	return &pb.CapabilitiesResponse{Capabilities: capabilities}, nil
+}
+
+func newKubernetesBackendTestAdapter(
+	t *testing.T,
+	declarations []plugin.KubernetesBackendDecl,
+	advertiseResourceDriver bool,
+	runtimeResourceTypes []string,
+) *ExternalPluginAdapter {
+	t.Helper()
+	lis := bufconn.Listen(4 << 20)
+	t.Cleanup(func() { _ = lis.Close() })
+	srv := grpc.NewServer()
+	pb.RegisterIaCProviderRequiredServer(srv, &kubernetesBackendIaCServer{resourceTypes: runtimeResourceTypes})
+	if advertiseResourceDriver {
+		pb.RegisterResourceDriverServer(srv, &minimalResourceDriverServer{})
+	}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	registry := &pb.ContractRegistry{}
+	if advertiseResourceDriver {
+		registry.Contracts = []*pb.ContractDescriptor{{
+			Kind:        pb.ContractKind_CONTRACT_KIND_SERVICE,
+			ServiceName: resourceDriverServiceName,
+		}}
+	}
+	return &ExternalPluginAdapter{
+		name:             "kubernetes-provider",
+		manifest:         &pb.Manifest{Name: "kubernetes-provider"},
+		diskManifest:     &plugin.PluginManifest{KubernetesBackends: declarations},
+		contractRegistry: registry,
+		client:           &PluginClient{conn: conn},
+	}
+}
+
+func TestKubernetesBackendClientsRegistersEveryManifestDeclaration(t *testing.T) {
+	declarations := []plugin.KubernetesBackendDecl{
+		{Name: "managed-a", ResourceType: "infra.k8s_cluster"},
+		{Name: "managed-b", ResourceType: "infra.managed_cluster"},
+	}
+	a := newKubernetesBackendTestAdapter(t, declarations, true, []string{
+		"infra.k8s_cluster",
+		"infra.managed_cluster",
+	})
+
+	clients, err := a.KubernetesBackendClients()
+	if err != nil {
+		t.Fatalf("KubernetesBackendClients: %v", err)
+	}
+	if len(clients) != 2 || clients["managed-a"] == nil || clients["managed-b"] == nil {
+		t.Fatalf("clients = %v, want declared managed-a and managed-b backends", clients)
+	}
+	if clients["gke"] != nil {
+		t.Fatalf("clients must use manifest names, got hardcoded gke entry: %v", clients)
+	}
+}
+
+func TestKubernetesBackendClientsRejectsDuplicateManifestNames(t *testing.T) {
+	a := newKubernetesBackendTestAdapter(t, []plugin.KubernetesBackendDecl{
+		{Name: "managed", ResourceType: "infra.cluster_a"},
+		{Name: "managed", ResourceType: "infra.cluster_b"},
+	}, true, []string{"infra.cluster_a", "infra.cluster_b"})
+
+	_, err := a.KubernetesBackendClients()
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("error = %v, want duplicate kubernetes backend rejection", err)
+	}
+}
+
+func TestKubernetesBackendClientsRejectsMissingResourceDriverAdvertisement(t *testing.T) {
+	a := newKubernetesBackendTestAdapter(t, []plugin.KubernetesBackendDecl{
+		{Name: "managed", ResourceType: "infra.managed_cluster"},
+	}, false, []string{"infra.managed_cluster"})
+
+	_, err := a.KubernetesBackendClients()
+	if err == nil || !strings.Contains(err.Error(), "ResourceDriver") {
+		t.Fatalf("error = %v, want missing ResourceDriver advertisement rejection", err)
+	}
+}
+
+func TestKubernetesBackendClientsRejectsMissingRuntimeResourceType(t *testing.T) {
+	a := newKubernetesBackendTestAdapter(t, []plugin.KubernetesBackendDecl{
+		{Name: "managed", ResourceType: "infra.managed_cluster"},
+	}, true, []string{"infra.other_cluster"})
+
+	_, err := a.KubernetesBackendClients()
+	if err == nil || !strings.Contains(err.Error(), "infra.managed_cluster") {
+		t.Fatalf("error = %v, want missing runtime resource type rejection", err)
+	}
+}
+
+func TestKubernetesBackendClientsRejectsCoreReservedNames(t *testing.T) {
+	for _, name := range []string{"kind", "k3s"} {
+		t.Run(name, func(t *testing.T) {
+			a := newKubernetesBackendTestAdapter(t, []plugin.KubernetesBackendDecl{
+				{Name: name, ResourceType: "infra.managed_cluster"},
+			}, true, []string{"infra.managed_cluster"})
+
+			_, err := a.KubernetesBackendClients()
+			if err == nil || !strings.Contains(err.Error(), "reserved") {
+				t.Fatalf("error = %v, want reserved backend %q rejection", err, name)
+			}
+		})
+	}
+}
+
+func TestKubernetesBackendClientsRejectsNonCanonicalNames(t *testing.T) {
+	tests := []struct {
+		name         string
+		declarations []plugin.KubernetesBackendDecl
+		want         string
+	}{
+		{"kind with whitespace", []plugin.KubernetesBackendDecl{{Name: " kind ", ResourceType: "infra.managed_cluster"}}, "reserved"},
+		{"k3s with whitespace", []plugin.KubernetesBackendDecl{{Name: "k3s ", ResourceType: "infra.managed_cluster"}}, "reserved"},
+		{"canonical duplicate", []plugin.KubernetesBackendDecl{
+			{Name: "foo", ResourceType: "infra.managed_cluster"},
+			{Name: " foo ", ResourceType: "infra.managed_cluster"},
+		}, "duplicate kubernetes backend"},
+		{"resource type with whitespace", []plugin.KubernetesBackendDecl{{Name: "foo", ResourceType: " infra.managed_cluster "}}, "surrounding whitespace"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runtimeTypes := []string{"infra.managed_cluster", " infra.managed_cluster "}
+			adapter := newKubernetesBackendTestAdapter(t, tt.declarations, true, runtimeTypes)
+			_, err := adapter.KubernetesBackendClients()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want non-canonical declaration rejection", err)
+			}
+		})
 	}
 }
 

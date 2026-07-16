@@ -49,6 +49,95 @@ Every plugin's source repository MUST:
    )
    ```
 5. **Release tag is publish-grade semver**: `^v[0-9]+\.[0-9]+\.[0-9]+$`. Pre-release strings (`-rc1`, `-alpha.1`, `-feat-foo`, `+meta`) are rejected by both `wfctl plugin validate-contract --for-publish` and `workflow-registry`. Pre-release publishing is deferred to a separate design that updates `ParseSemver` end-to-end.
+6. **Consumed Workflow contracts are explicit**: every Workflow provider
+   contract used by the plugin is listed in root `plugin.json` under
+   `consumesContracts[]`, with its inclusive protocol range. Workflow's
+   cross-repository compatibility gate reads this field; repository names are
+   never used to infer contracts.
+
+## Contract-consumer compatibility gate
+
+Workflow keeps `.github/contract-consumers.json` as a generated cache of public,
+released consumers. Each record binds a plugin repository and `vSEMVER` tag to
+an exact commit SHA, source-manifest and GoReleaser-config SHA-256, release
+entrypoint and binary basename, accepted first-build environment and release
+targets, complete release ldflags, version ldflag targets, and the manifest's
+`consumesContracts[]`. The authoritative input is always a clean checkout whose
+`HEAD`, local release tag, and GitHub origin match that released commit.
+
+After publishing a plugin release that adds or changes a consumed contract,
+regenerate the complete cache from exact checkouts. Pass every current consumer
+in one invocation. Omission alone cannot retire a consumer:
+
+```bash
+.github/workflows/scripts/generate-contract-consumers.sh \
+  --output .github/contract-consumers.json \
+  --consumer GoCodeAlone/workflow-plugin-foo v1.2.3 \
+    <40-character-release-commit> ../workflow-plugin-foo
+
+# CI/parity form: exits non-zero if the committed bytes are stale.
+.github/workflows/scripts/generate-contract-consumers.sh \
+  --check .github/contract-consumers.json \
+  --consumer GoCodeAlone/workflow-plugin-foo v1.2.3 \
+    <40-character-release-commit> ../workflow-plugin-foo
+```
+
+The generator reads the first GoReleaser build from that checkout so the cache
+uses the entrypoint, exact static binary basename, reproducible environment,
+and full `{{.Version}}` ldflags the released plugin actually ships; it does not
+assume a `cmd/<repository-name>` layout. Accepted environment entries are limited to
+`CGO_ENABLED` and the canonical public `GOPRIVATE=github.com/GoCodeAlone/*`
+setting. The parsed release target must include Linux/AMD64, and the runner
+builds only when its actual `GOOS`/`GOARCH` is among the released targets. The
+supported first-build keys are `id`, `main`, `binary`, `env`, `goos`, `goarch`,
+and `ldflags`; every other parsed key and environment entry fails closed until
+the runner explicitly supports it. A release must contain exactly one of
+`.goreleaser.yaml` or `.goreleaser.yml`; dual configs, duplicate YAML mapping
+keys, and aliases fail closed.
+
+`.github/contract-path-map.json` maps known Workflow contract paths to contract
+IDs and their current protocol versions. Every production selection freezes
+the complete canonical path map, candidate cache, and Git-derived changed paths
+in parent-shell memory and checks the map plus protocol-test source against the
+trusted selector digests. The authoritative selection job never sets up or
+executes candidate Go. A separate output-free wire-validation job compiles all
+four valid provider services, emits the complete protocol map returned by the
+runtime `ContractRegistry` path, and compares that record with its frozen map;
+an affected consumer whose inclusive range excludes that version fails
+selection. SDK, loader, shared-protobuf, rename deletions, all `.github` changes,
+and unknown code changes select every relevant cached consumer;
+documentation-only changes select none. Selection is deterministic, uses at
+most ten consumers per shard, and uploads its evidence JSON on every pull
+request. Early validation failures retain the exact cache and path-map inputs
+plus a structured evidence record with the selector exit status and changed
+paths; candidate symlinks are rejected before any input is copied into the
+artifact. Incompatibility failures keep the selector's consumer, contract, and
+decision details. A pull request may add or update cache records for runner
+rederivation, but cannot change repository identity, regress an existing
+repository's release, rebind an existing tag to a different commit, or remove a
+trusted-base consumer by omission. Retirement
+requires one reviewed change that removes the cache record and adds its exact
+`owner/repository` to the digest-bound path map's `retiredRepositories` list;
+the selector rejects both an unlisted removal and a retired repository that
+remains cached.
+
+For each selected consumer, public CI anonymously fetches the exact tag,
+verifies its commit and cached release-metadata hashes, regenerates the complete
+cache record from that checkout and requires byte equality, applies a local Go
+module replacement to the Workflow pull-request checkout, compiles the release
+entrypoint to its exact release basename with the accepted build environment
+and complete release ldflags, and runs
+`wfctl plugin verify-capabilities` against its real binary. This gate never uses
+cloud secrets, OIDC, provider APIs, provider CLIs, or self-hosted runners. A
+plugin whose startup or capability RPC requires live provider access is not a
+valid public contract consumer.
+
+The public-workflow policy hash-binds the selector, runner, and orchestration
+regression. The runner also binds the exact generator digest before
+regeneration, so every PR-supplied shell executable is inside the same reviewed
+trust boundary. The regression always sends a hermetic SDK release through the
+production runner and a real local `wfctl` plugin handshake, even while the
+committed consumer cache is empty.
 
 ## release.yml two-step gate
 
@@ -250,7 +339,6 @@ wfctl plugin verify-capabilities --binary /tmp/p .
 ### Non-goals
 
 - Does NOT walk per-type RPCs (`GetModuleTypes`/`GetStepTypes`/`GetTriggerTypes`) — IaC bridge returns Unimplemented.
-- Does NOT diff `GetContractRegistry` — deferred to workflow#766 (requires `capabilities.iacServices` schema first).
 - Does NOT build the binary — operator's responsibility.
 - Does NOT verify `minEngineVersion` at runtime (not on `pb.Manifest`).
 

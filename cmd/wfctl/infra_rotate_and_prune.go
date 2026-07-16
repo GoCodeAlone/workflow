@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/mattn/go-isatty"
 )
 
 // rotateAndPruneStdout / rotateAndPruneStderr seam variables mirror the
@@ -56,6 +57,7 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	_ = fs.String("preserve-names", "", "Regex of names to preserve during prune")
 	_ = fs.Bool("confirm", false, "Confirmation flag")
 	_ = fs.Bool("non-interactive", false, "Skip y/N prompt")
+	_ = fs.Bool("ack-single-writer", false, "Acknowledge exclusive credential issuance for single-writer sources")
 	// --prune-first declared here so flag.Parse doesn't error on the dispatcher
 	// pre-scan; the inner runInfraRotateAndPrune re-parses against the same
 	// args slice (Go's flag package is idempotent) and reads the value there.
@@ -71,10 +73,12 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	currentInfraPluginDir = pluginDirFlag
 	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
-	ctx := context.Background()
+	ctx, stopProviderCommand := boundedProviderCommandContext(providerCommandOperationTimeout)
+	defer stopProviderCommand()
+	ctx = withProviderCapabilityDiagnosticsSuppressed(ctx)
 	providers, closers, err := rotateAndPruneLoadProviders(ctx, fs, configFile, envName)
 	if err != nil {
-		return fmt.Errorf("load providers: %w", err)
+		return fmt.Errorf("load providers failed; provider error text suppressed")
 	}
 	defer func() {
 		for _, c := range closers {
@@ -82,7 +86,7 @@ func runInfraRotateAndPruneCmd(args []string) error {
 				continue
 			}
 			if cerr := c.Close(); cerr != nil {
-				fmt.Fprintf(rotateAndPruneStderr, "warning: provider shutdown: %v\n", cerr)
+				fmt.Fprintln(rotateAndPruneStderr, "warning: provider shutdown failed; provider error text suppressed")
 			}
 		}
 	}()
@@ -108,7 +112,7 @@ func runInfraRotateAndPruneCmd(args []string) error {
 	// probe error is loud (auth, network, malformed input) and aborts
 	// rotation before any state is mutated. Only fail if NO provider
 	// can serve the resource type.
-	var lastUnimpl error
+	var lastUnimplProvider string
 	var anyEnumerator bool
 	for _, p := range providers {
 		if _, ok := p.(interfaces.EnumeratorAll); !ok {
@@ -125,13 +129,10 @@ func runInfraRotateAndPruneCmd(args []string) error {
 		// `provider` is what we hand to runInfraRotateAndPrune. By default
 		// it's the raw adapter; when we successfully probed EnumerateAll
 		// on the probe's resourceType, we wrap in cachedPruneProvider so
-		// runInfraPrune (invoked by runInfraRotateAndPrune after rotation)
-		// serves the cached slice instead of re-issuing the cloud
-		// enumeration. This avoids the double-billed EnumerateAll on the
-		// successful path. The cache is keyed by resourceType — the
-		// freshly-rotated key is excluded by --exclude-access-key in the
-		// prune step regardless of whether enumerate sees it, so serving
-		// the pre-rotation snapshot is safe.
+		// legacy post-prune serves the cached slice instead of reissuing the
+		// cloud enumeration. Typed rotation deliberately bypasses this cache:
+		// it must find the new identifier's provider-clock timestamp in a
+		// fresh snapshot before any post-rotation delete.
 		var provider pruneProvider = adapter
 		if resourceType != "" {
 			outs, probeErr := adapter.EnumerateAll(ctx, resourceType)
@@ -141,22 +142,22 @@ func runInfraRotateAndPruneCmd(args []string) error {
 					// the bridge — try the next provider rather than
 					// aborting the whole run. No rotation has occurred
 					// yet (pre-flight is BEFORE Step 1).
-					lastUnimpl = fmt.Errorf("%s: %w", p.Name(), probeErr)
+					lastUnimplProvider = p.Name()
 					continue
 				}
-				return fmt.Errorf("rotate-and-prune pre-flight: provider %q EnumerateAll(%q) failed (rotation aborted; no state mutated): %w",
-					p.Name(), resourceType, probeErr)
+				return fmt.Errorf("rotate-and-prune pre-flight: provider %q EnumerateAll(%q) failed (rotation aborted; no state mutated); provider error text suppressed",
+					p.Name(), resourceType)
 			}
 			provider = &cachedPruneProvider{cached: outs, inner: adapter, resourceType: resourceType}
 		}
-		rc := runInfraRotateAndPrune(args, provider, rotateAndPruneStdout)
+		rc := runInfraRotateAndPruneWithContext(ctx, args, provider, rotateAndPruneStdout)
 		if rc != 0 {
 			return fmt.Errorf("rotate-and-prune exited with code %d", rc)
 		}
 		return nil
 	}
-	if anyEnumerator && lastUnimpl != nil {
-		return fmt.Errorf("rotate-and-prune pre-flight: no loaded provider implements IaCProvider.EnumerateAll bridge wiring for %q (rotation aborted; no state mutated; last probed: %w)", resourceType, lastUnimpl)
+	if anyEnumerator && lastUnimplProvider != "" {
+		return fmt.Errorf("rotate-and-prune pre-flight: no loaded provider implements IaCProvider.EnumerateAll bridge wiring for %q (rotation aborted; no state mutated; last probed: %s; provider error text suppressed)", resourceType, lastUnimplProvider)
 	}
 	return fmt.Errorf("rotate-and-prune: no loaded provider implements EnumeratorAll")
 }
@@ -263,41 +264,38 @@ func buildRotateAndPruneForceRotateSet(name string, cfg *SecretsConfig) (map[str
 // adds Source + RotatedAt for forensics. The prune reader ignores extra fields
 // — it only needs Type/Name/AccessKey/CreatedAt.
 type recoveryRecord struct {
-	Type      string    `json:"type"`
-	Name      string    `json:"name"`
-	AccessKey string    `json:"access_key"`
-	CreatedAt string    `json:"created_at"`
-	Source    string    `json:"source,omitempty"`
-	RotatedAt time.Time `json:"rotated_at,omitempty"`
+	Type                        string    `json:"type"`
+	Name                        string    `json:"name"`
+	AccessKey                   string    `json:"access_key"`
+	IdentifierSensitive         bool      `json:"identifier_sensitive,omitempty"`
+	CutoffFromExcludedInventory bool      `json:"cutoff_from_excluded_inventory,omitempty"`
+	CreatedAt                   string    `json:"created_at"`
+	Source                      string    `json:"source,omitempty"`
+	RotatedAt                   time.Time `json:"rotated_at,omitempty"`
 }
 
 // writeRecoveryRecord persists recovery JSON to defaultStateDir()/last-rotation.json
 // with 0600 file perms (sensitive credential metadata) + 0700 parent dir.
 //
 // Writes to the same path that recoveryFilePath() in infra_prune.go reads
-// from so prune --recovery-from-last-rotation finds it. Uses an atomic-ish
-// write (os.WriteFile truncates and rewrites) — no rename-on-temp pattern
-// needed since the file is per-host and per-user.
+// from so prune --recovery-from-last-rotation finds it. The shared durable
+// writer uses a private temporary file, atomic replacement, and directory
+// synchronization.
 func writeRecoveryRecord(rec recoveryRecord) error {
 	dir, err := defaultStateDir()
 	if err != nil {
 		return fmt.Errorf("rotate-and-prune: resolve state dir: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("rotate-and-prune: create state dir %s: %w", dir, err)
-	}
-	// gosec G117 false-positive: AccessKey here is the public DO Spaces
-	// access-key identifier (analogous to an AWS access key ID), NOT the
-	// credential secret-key, which is stored separately per ADR 0017
-	// split-storage. The recovery file persists the access_key intentionally
-	// so operators can recover from partial-failure prune via the
-	// --recovery-from-last-rotation flag. File perms are 0600 + parent 0700.
-	data, err := json.MarshalIndent(rec, "", "  ") //nolint:gosec // G117: access_key is a public identifier; secret_key is stored separately (ADR 0017)
+	// The recovery file intentionally persists the credential identifier so
+	// operators can recover from a partial-failure prune. Provider manifests
+	// may classify that identifier as sensitive, so it is never printed when
+	// IdentifierSensitive is true. File perms are 0600 + parent 0700.
+	data, err := json.MarshalIndent(rec, "", "  ") //nolint:gosec // G117: intentional credential recovery state in a mode-0600 file
 	if err != nil {
 		return fmt.Errorf("rotate-and-prune: marshal recovery record: %w", err)
 	}
 	path := filepath.Join(dir, "last-rotation.json")
-	if err := os.WriteFile(path, data, 0600); err != nil { //nolint:gosec // intentional 0600
+	if err := writeDurablePrivateFile(dir, path, ".last-rotation-*", data); err != nil {
 		return fmt.Errorf("rotate-and-prune: write recovery file %s: %w", path, err)
 	}
 	return nil
@@ -313,11 +311,10 @@ func writeRecoveryRecord(rec recoveryRecord) error {
 //     fails partway, an operator can recover via
 //     `wfctl infra prune --recovery-from-last-rotation` without re-rotating
 //     (which would worsen any leak by minting yet another live credential).
-//  3. DELEGATE the actual prune to runInfraPrune, passing the new key's
-//     created_at as --created-before and access_key as --exclude-access-key
-//     so only OLDER keys for the same Type are eligible for deletion. On
-//     success runInfraPrune deletes the recovery file (it's the consumer);
-//     on failure the recovery file is retained.
+//  3. DELEGATE the actual prune to runInfraPrune. Typed rotations resolve the
+//     new identifier's created_at from a fresh provider inventory snapshot;
+//     legacy rotations pass their provider-output timestamp. The new
+//     identifier is always excluded. On failure the recovery file is retained.
 //
 // Same two-key opt-in as runInfraPrune: --confirm flag + WFCTL_CONFIRM_PRUNE=1
 // env var. Both required, otherwise the command refuses to run.
@@ -333,10 +330,17 @@ func writeRecoveryRecord(rec recoveryRecord) error {
 //     prune failed (recovery file retained in the prune-failed case)
 //   - 2: argument parse error or missing required --type / --name
 func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) int {
+	ctx, stopProviderCommand := boundedProviderCommandContext(providerCommandOperationTimeout)
+	defer stopProviderCommand()
+	ctx = withProviderCapabilityDiagnosticsSuppressed(ctx)
+	return runInfraRotateAndPruneWithContext(ctx, args, provider, w)
+}
+
+func runInfraRotateAndPruneWithContext(ctx context.Context, args []string, provider pruneProvider, w io.Writer) int {
 	fs := flag.NewFlagSet("infra rotate-and-prune", flag.ContinueOnError)
 	fs.SetOutput(w)
-	var resourceType, name, configFile, preserveNames string
-	var confirm, nonInteractive, pruneFirst bool
+	var resourceType, name, configFile, preserveNames, pluginDir string
+	var confirm, nonInteractive, pruneFirst, ackSingleWriter bool
 	fs.StringVar(&resourceType, "type", "", "Resource type (required, e.g. infra.spaces_key)")
 	fs.StringVar(&name, "name", "", "Canonical credential name to rotate (required)")
 	fs.StringVar(&configFile, "config", "infra.yaml", "Config file")
@@ -349,6 +353,8 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	fs.StringVar(&preserveNames, "preserve-names", "", "Regex of resource names to preserve during prune")
 	fs.BoolVar(&confirm, "confirm", false, "Required: explicit confirmation flag")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Skip the prune y/N prompt")
+	fs.BoolVar(&ackSingleWriter, "ack-single-writer", false, "Acknowledge exclusive credential issuance for single-writer sources")
+	fs.StringVar(&pluginDir, "plugin-dir", "", "Plugin directory (overrides WFCTL_PLUGIN_DIR and default data/plugins)")
 	// --prune-first defaults TRUE (per ADR 0023): the safer behavior is the
 	// new default. When the cloud account is at quota (e.g., DO Spaces 200-key
 	// limit), Step 1 (rotate = mint new key) fails before Step 2 (prune) gets
@@ -374,31 +380,45 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 		return 1
 	}
 
-	ctx := context.Background()
-
-	// Pre-prune (Step 0, when --prune-first=true / ADR 0023 default): delete
-	// orphans BEFORE rotation so the cloud account has free quota for the
-	// `Create` call that mints the new canonical key. Skips the canonical
-	// `--name` (it might still be valid; if it's old we replace it in the
-	// rotate step below) and any name matching `--preserve-names`. This
-	// closes the at-quota chicken-and-egg: when the cloud is at quota,
-	// rotation alone fails because Create returns "quota exceeded", and
-	// the operator can't get to the post-rotation prune step that would
-	// have freed the quota.
-	if pruneFirst {
-		fmt.Fprintf(w, "Step 0 (--prune-first): pruning orphan %s resources before rotation...\n", resourceType)
-		if code := runPreRotationPrune(ctx, provider, resourceType, name, preserveNames, nonInteractive, w); code != 0 {
-			fmt.Fprintf(w, "\nrotate-and-prune: pre-rotation prune failed (code=%d). No rotation attempted; no state mutated.\n", code)
-			return code
-		}
+	issuerStateDir, err := credentialOperationStateDirForConfig(configFile)
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: resolve credential operation state directory: %v\n", err)
+		return 1
 	}
+	issuerLockDir, err := credentialOperationLockDir()
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: resolve credential operation lock directory: %v\n", err)
+		return 1
+	}
+	releaseRecoveryLock, err := acquireCredentialOperationLock(issuerLockDir, "wfctl.rotate-and-prune-recovery", "global")
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: acquire global recovery-state lock: %v\n", err)
+		return 1
+	}
+	defer releaseRecoveryLock()
+	if _, statErr := os.Lstat(recoveryFilePath()); statErr == nil {
+		fmt.Fprintf(w, "rotate-and-prune: retained recovery state exists at %s; refusing to rotate until recovery prune succeeds\n", recoveryFilePath())
+		fmt.Fprintf(w, "rotate-and-prune: run `wfctl infra prune --type %s --recovery-from-last-rotation --confirm`\n", resourceType)
+		return 1
+	} else if !os.IsNotExist(statErr) {
+		fmt.Fprintf(w, "rotate-and-prune: inspect retained recovery state: %v\n", statErr)
+		return 1
+	}
+	issuerOptions := credentialIssuerOptions{
+		Enabled:         true,
+		PluginDir:       providerPluginDir(pluginDir),
+		StateDir:        issuerStateDir,
+		LockDir:         issuerLockDir,
+		PreparationKey:  fmt.Sprintf("%s\x00%s\x00%s\x00%t", resourceType, name, preserveNames, pruneFirst),
+		AckSingleWriter: ackSingleWriter,
+		NonInteractive:  nonInteractive || !isatty.IsTerminal(os.Stdin.Fd()),
+	}
+	ctx = withCredentialIssuerOptions(ctx, issuerOptions)
 
 	// Step 1: rotate the canonical credential via bootstrapSecrets's
 	// force-rotate path. parseSecretsConfig + resolveSecretsProvider +
 	// resolveCredentialRevoker are the existing helpers from
 	// cmd/wfctl/infra_secrets.go and infra_bootstrap.go.
-	fmt.Fprintf(w, "\nStep 1: rotating credential %q (type %s)...\n", name, resourceType)
-
 	cfg, err := parseSecretsConfig(configFile)
 	if err != nil {
 		fmt.Fprintf(w, "rotate-and-prune: load config %s: %v\n", configFile, err)
@@ -425,39 +445,86 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 		fmt.Fprintf(w, "rotate-and-prune: %v\n", err)
 		return 1
 	}
-	revoker, closer := resolveCredentialRevoker(ctx, configFile, cfg, forceRotate)
+	revoker, closer, err := resolveCredentialRevokerForCapabilitiesFn(ctx, configFile, issuerOptions.PluginDir, cfg, forceRotate)
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: select credential revocation path: %v\n", err)
+		return 1
+	}
 	if closer != nil {
 		defer closer.Close()
 	}
 
-	_, rotations, err := bootstrapSecrets(ctx, secretsProvider, cfg, forceRotate, revoker)
-	if err != nil {
-		fmt.Fprintf(w, "rotate-and-prune: rotate: %v\n", err)
+	// Pre-prune is a pre-Issue preparation, not an outer orchestration step.
+	// Typed issuers invoke it only after exact capability selection, runtime
+	// parity, acknowledgement, host-global locking, and durable preparation
+	// state all succeed. A zero-match legacy source invokes the same callback
+	// immediately before its generator. This keeps destructive deletes behind
+	// every safety gate that applies to the selected issuance path.
+	prePruneInvoked := !pruneFirst
+	if pruneFirst {
+		issuerOptions.BeforeIssue = func(preparationCtx context.Context, identifierSensitive bool) error {
+			prePruneInvoked = true
+			fmt.Fprintf(w, "Step 0 (--prune-first): pruning orphan %s resources before rotation...\n", resourceType)
+			if code := runPreRotationPrune(preparationCtx, provider, resourceType, name, preserveNames, nonInteractive, identifierSensitive, w); code != 0 {
+				fmt.Fprintf(w, "\nrotate-and-prune: pre-rotation prune failed (code=%d). No credential issuance attempted; preparation state retained for retry.\n", code)
+				return fmt.Errorf("pre-rotation prune failed with code %d", code)
+			}
+			fmt.Fprintf(w, "\nStep 1: rotating credential %q (type %s)...\n", name, resourceType)
+			return nil
+		}
+		ctx = withCredentialIssuerOptions(ctx, issuerOptions)
+	} else {
+		fmt.Fprintf(w, "\nStep 1: rotating credential %q (type %s)...\n", name, resourceType)
+	}
+
+	_, rotations, rotateErr := bootstrapSecrets(ctx, secretsProvider, cfg, forceRotate, revoker)
+	// A returned rotation is post-commit evidence: the upstream credential and
+	// all declared secret outputs were stored. Persist recovery before handling
+	// a later cancellation or issuer-state bookkeeping failure, then stop before
+	// any prune. Otherwise the committed credential could become untracked.
+	var rotated RotationResult
+	recoveryWritten := false
+	if len(rotations) == 1 {
+		rotated = rotations[0]
+		if err := writeRotationRecovery(resourceType, name, rotated); err != nil {
+			fmt.Fprintf(w, "rotate-and-prune: %v\n", err)
+			if rotateErr != nil {
+				fmt.Fprintf(w, "rotate-and-prune: rotate also failed after committing outputs: %v\n", rotateErr)
+			}
+			return 1
+		}
+		recoveryWritten = true
+		fmt.Fprintf(w, "  recovery file written to %s\n", recoveryFilePath())
+	}
+	if rotateErr != nil {
+		fmt.Fprintf(w, "rotate-and-prune: rotate: %v\n", rotateErr)
+		return 1
+	}
+	if !prePruneInvoked {
+		fmt.Fprintln(w, "rotate-and-prune: rotate path returned without executing required pre-Issue prune preparation")
 		return 1
 	}
 	if len(rotations) != 1 {
 		fmt.Fprintf(w, "rotate-and-prune: expected 1 rotation result, got %d\n", len(rotations))
 		return 1
 	}
-	rotated := rotations[0]
-	fmt.Fprintf(w, "  new access_key=%s, created_at=%s\n", rotated.AccessKey, rotated.CreatedAt)
+	cutoffDescription := rotated.CreatedAt
+	if rotated.CutoffFromInventory {
+		cutoffDescription = "[derive from provider inventory]"
+	}
+	fmt.Fprintf(w, "  new access_key=%s, created_at=%s\n", credentialIdentifierForLog(rotated.AccessKey, rotated.IdentifierSensitive), cutoffDescription)
 
 	// Persist recovery record BEFORE the prune step. Treated as a sub-step
 	// of Step 1 (rotate) — operationally invisible from the user's vantage
 	// (no Fprintf header), only the resulting path is surfaced for ops use.
-	rec := recoveryRecord{
-		Type:      resourceType,
-		Name:      name,
-		AccessKey: rotated.AccessKey,
-		CreatedAt: rotated.CreatedAt,
-		Source:    rotated.Source,
-		RotatedAt: time.Now().UTC(),
-	}
-	if err := writeRecoveryRecord(rec); err != nil {
-		fmt.Fprintf(w, "rotate-and-prune: %v\n", err)
+	if !recoveryWritten {
+		fmt.Fprintln(w, "rotate-and-prune: committed rotation is missing durable recovery state")
 		return 1
 	}
-	fmt.Fprintf(w, "  recovery file written to %s\n", recoveryFilePath())
+	if err := ctx.Err(); err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: command canceled after rotation; recovery file retained at %s\n", recoveryFilePath())
+		return 1
+	}
 
 	// Step 2 (user-visible): delegate to prune with the new key as the
 	// exclusion target. Step numbering matches the banners the user sees:
@@ -475,9 +542,11 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	}
 	pruneArgs := []string{
 		"--type", resourceType,
-		"--created-before", rotated.CreatedAt,
 		"--exclude-access-key", rotated.AccessKey,
 		"--confirm",
+	}
+	if !rotated.CutoffFromInventory {
+		pruneArgs = append(pruneArgs, "--created-before", rotated.CreatedAt)
 	}
 	if nonInteractive {
 		pruneArgs = append(pruneArgs, "--non-interactive")
@@ -485,7 +554,11 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 	if preserveNames != "" {
 		pruneArgs = append(pruneArgs, "--preserve-names", preserveNames)
 	}
-	code := runInfraPrune(pruneArgs, provider, w)
+	code := runInfraPruneWithOptions(pruneArgs, provider, w, infraPruneOptions{
+		IdentifierSensitive:         rotated.IdentifierSensitive,
+		CutoffFromExcludedInventory: rotated.CutoffFromInventory,
+		Context:                     ctx,
+	})
 	if code != 0 {
 		fmt.Fprintf(w, "\nrotate-and-prune: prune step failed (code=%d). Recovery file retained at %s.\n", code, recoveryFilePath())
 		fmt.Fprintf(w, "Re-run prune with: wfctl infra prune --type %s --recovery-from-last-rotation --confirm\n", resourceType)
@@ -506,6 +579,19 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 		fmt.Fprintf(w, "rotate-and-prune: hint: this file is no longer needed; remove with `rm %s` once safe.\n", recPath)
 	}
 	return 0
+}
+
+func writeRotationRecovery(resourceType, name string, rotated RotationResult) error {
+	return writeRecoveryRecord(recoveryRecord{
+		Type:                        resourceType,
+		Name:                        name,
+		AccessKey:                   rotated.AccessKey,
+		IdentifierSensitive:         rotated.IdentifierSensitive,
+		CutoffFromExcludedInventory: rotated.CutoffFromInventory,
+		CreatedAt:                   rotated.CreatedAt,
+		Source:                      rotated.Source,
+		RotatedAt:                   time.Now().UTC(),
+	})
 }
 
 // runPreRotationPrune deletes orphan resources of `resourceType` BEFORE the
@@ -533,7 +619,7 @@ func runInfraRotateAndPrune(args []string, provider pruneProvider, w io.Writer) 
 // failure, regex compile failure, or any individual delete failure.
 //
 //nolint:cyclop // intentional: deletion-loop + filter logic + interactive prompt are tightly coupled
-func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceType, name, preserveNames string, nonInteractive bool, w io.Writer) int {
+func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceType, name, preserveNames string, nonInteractive, identifierSensitive bool, w io.Writer) int {
 	if os.Getenv("WFCTL_CONFIRM_PRUNE") != "1" {
 		fmt.Fprintln(w, "rotate-and-prune: pre-rotation prune requires WFCTL_CONFIRM_PRUNE=1 (defensive re-check)")
 		return 1
@@ -551,7 +637,12 @@ func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceTy
 
 	outs, err := provider.EnumerateAll(ctx, resourceType)
 	if err != nil {
-		fmt.Fprintf(w, "rotate-and-prune: pre-rotation enumerate: %v\n", err)
+		fmt.Fprintln(w, "rotate-and-prune: pre-rotation enumerate failed; provider error text suppressed")
+		return 1
+	}
+	outs, err = normalizePruneInventory(resourceType, outs)
+	if err != nil {
+		fmt.Fprintf(w, "rotate-and-prune: pre-rotation %v\n", err)
 		return 1
 	}
 
@@ -588,7 +679,7 @@ func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceTy
 			ak, _ = o.Outputs["access_key"].(string)
 		}
 		ca, _ := o.Outputs["created_at"].(string)
-		fmt.Fprintf(w, "  - %s (access_key=%s, created=%s)\n", resName, ak, ca)
+		fmt.Fprintf(w, "  - %s (access_key=%s, created=%s)\n", resName, credentialIdentifierForLog(ak, identifierSensitive), ca)
 	}
 
 	if len(toDelete) == 0 {
@@ -608,9 +699,13 @@ func runPreRotationPrune(ctx context.Context, provider pruneProvider, resourceTy
 
 	var failed int
 	for _, o := range toDelete {
+		if err := ctx.Err(); err != nil {
+			fmt.Fprintln(w, "rotate-and-prune: command cancelled before remaining pre-rotation deletes")
+			return 1
+		}
 		ref := interfaces.ResourceRef{Type: o.Type, Name: o.Name, ProviderID: o.ProviderID}
 		if delErr := provider.DeleteResource(ctx, ref); delErr != nil {
-			fmt.Fprintf(w, "rotate-and-prune: pre-rotation delete %s: %v\n", o.Name, delErr)
+			fmt.Fprintf(w, "rotate-and-prune: pre-rotation delete %s failed; provider error text suppressed\n", o.Name)
 			failed++
 			continue
 		}

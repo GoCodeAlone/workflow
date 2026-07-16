@@ -83,7 +83,9 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 	currentInfraPluginDir = pluginDirFlag
 	defer func() { currentInfraPluginDir = prevInfraPluginDir }()
 
-	ctx := context.Background()
+	ctx, stopProviderCommand := boundedProviderCommandContext(providerCommandOperationTimeout)
+	defer stopProviderCommand()
+	ctx = withProviderCapabilityDiagnosticsSuppressed(ctx)
 	providers, closers, err := cleanupLoadProviders(ctx, fs, configFile, envName)
 	if err != nil {
 		return fmt.Errorf("load providers: %w", err)
@@ -101,6 +103,9 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 
 	var totalErrs []error
 	for _, p := range providers {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(errors.Join(totalErrs...), err)
+		}
 		// Per Task 17 of the strict-contracts force-cutover (ADR-0028):
 		// pure typed-pb dispatch — no interfaces.X fallback. Production
 		// always yields *typedIaCAdapter via discoverAndLoadIaCProvider
@@ -129,6 +134,9 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 			// ADR-0028 §Per-site dispatch UX) — the translation just
 			// preserves classification for any retry / wrapper logic.
 			err = translateRPCErr(err)
+			if providerCapabilityDiagnosticsSuppressed(ctx) {
+				err = providerCapabilityTransportError("IaCProvider.EnumerateByTag", err)
+			}
 			fmt.Fprintf(cleanupStderr, "%s: enumerate by tag %q: %v\n", p.Name(), *tag, err)
 			totalErrs = append(totalErrs, fmt.Errorf("%s: enumerate: %w", p.Name(), err))
 			continue
@@ -143,15 +151,29 @@ func runInfraCleanup(args []string) error { //nolint:cyclop
 				fmt.Fprintf(cleanupStdout, "[dry-run] would delete %s/%s (provider: %s)\n", ref.Type, ref.Name, p.Name())
 				continue
 			}
+			if err := ctx.Err(); err != nil {
+				totalErrs = append(totalErrs, err)
+				break
+			}
 			drv, drvErr := p.ResourceDriver(ref.Type)
 			if drvErr != nil {
-				err := fmt.Errorf("%s: resolve driver for %s/%s: %w", p.Name(), ref.Type, ref.Name, drvErr)
+				var err error
+				if providerCapabilityDiagnosticsSuppressed(ctx) {
+					err = fmt.Errorf("%s: resolve driver for %s/%s failed; provider error text suppressed", p.Name(), ref.Type, ref.Name)
+				} else {
+					err = fmt.Errorf("%s: resolve driver for %s/%s: %w", p.Name(), ref.Type, ref.Name, drvErr)
+				}
 				fmt.Fprintln(cleanupStderr, err)
 				totalErrs = append(totalErrs, err)
 				continue
 			}
 			if delErr := drv.Delete(ctx, ref); delErr != nil {
-				err := fmt.Errorf("%s: delete %s/%s: %w", p.Name(), ref.Type, ref.Name, delErr)
+				var err error
+				if providerCapabilityDiagnosticsSuppressed(ctx) {
+					err = fmt.Errorf("%s: delete %s/%s: %w", p.Name(), ref.Type, ref.Name, providerCapabilityTransportError("IaCProvider.Delete", delErr))
+				} else {
+					err = fmt.Errorf("%s: delete %s/%s: %w", p.Name(), ref.Type, ref.Name, delErr)
+				}
 				fmt.Fprintln(cleanupStderr, err)
 				totalErrs = append(totalErrs, err)
 				continue
@@ -211,7 +233,11 @@ func defaultCleanupLoadProviders(ctx context.Context, fs *flag.FlagSet, cfgFile,
 		}
 		p, closer, loadErr := resolveIaCProvider(ctx, providerType, modCfg)
 		if loadErr != nil {
-			fmt.Fprintf(cleanupStderr, "warning: cleanup: load provider %q (%s): %v\n", m.Name, providerType, loadErr)
+			if providerCapabilityDiagnosticsSuppressed(ctx) {
+				fmt.Fprintf(cleanupStderr, "warning: cleanup: load provider %q (%s) failed; provider error text suppressed\n", m.Name, providerType)
+			} else {
+				fmt.Fprintf(cleanupStderr, "warning: cleanup: load provider %q (%s): %v\n", m.Name, providerType, loadErr)
+			}
 			continue
 		}
 		providers = append(providers, p)

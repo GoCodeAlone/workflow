@@ -17,13 +17,18 @@
 #   2. Which files name an SDK only in comments (false positives to ignore).
 #   3. Whether cloud_account_aws_creds.go still imports aws-sdk-go-v2
 #      (Phase B rewrite invariant: must be zero post-rewrite).
-#   4. platform_kubernetes_kind.go backend-split readiness (advisory).
+#   4. Whether production Kubernetes backend factory registrations remain
+#      limited to framework-owned kind/k3s plus temporary SDK-free eks/aks
+#      compatibility fallbacks, with the deleted GKE implementation absent.
 #
 # Exit non-zero if invoked with --check and an invariant is violated.
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WORKFLOW_ROOT=${WORKFLOW_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}
+WORKFLOW_ROOT=$(cd "$WORKFLOW_ROOT" && pwd)
+cd "$WORKFLOW_ROOT"
 
 SDK_TREES=(
   'aws-sdk-go-v2'
@@ -181,34 +186,15 @@ else
 fi
 
 echo
-echo "== Advisory: platform_kubernetes_kind.go backend split readiness =="
-KIND=module/platform_kubernetes_kind.go
-if [[ -f module/platform_kubernetes_kind.go ]]; then
-  echo "  backend types: $(grep -cE '^type .*[Bb]ackend struct' "$KIND") (expect kind/eksError/gke/aks pre-Phase-0)"
-  echo "  shared init(): $(grep -c '^func init()' "$KIND") (expect 1 pre-Phase-0; 0 here post-split — each _provider.go gets its own)"
-  echo "  real SDK imports here:"
-  for sdk in "${SDK_TREES[@]}"; do
-    real_import "$KIND" "$sdk" && echo "    REAL: $sdk"
-  done
-fi
-
-echo
-echo "== Invariant: no init() mixes core-staying + plugin-bound k8s backends =="
-# Post-Phase-0, platform_kubernetes_core.go must register ONLY kind/k3s/eks/aks
-# and platform_kubernetes_gke.go must register ONLY gke. A file registering a
-# name from the other set is a partition violation.
-CORE_K8S=module/platform_kubernetes_core.go
-GKE_K8S=module/platform_kubernetes_gke.go
-if [[ -f "$CORE_K8S" && -f "$GKE_K8S" ]]; then
-  if grep -qE 'RegisterKubernetesBackend\("gke"' "$CORE_K8S"; then
-    echo "  VIOLATION: $CORE_K8S registers the plugin-bound 'gke' backend"; FAIL=1
-  fi
-  for n in kind k3s eks aks; do
-    if grep -qE "RegisterKubernetesBackend\\(\"$n\"" "$GKE_K8S"; then
-      echo "  VIOLATION: $GKE_K8S registers the core-staying '$n' backend"; FAIL=1
-    fi
-  done
-  [[ $FAIL -eq 0 ]] && echo "  OK — init() partition clean"
+# Workflow owns only core-local kind/k3s factories plus temporary SDK-free
+# eks/aks compatibility fallbacks. Provider backends are manifest-declared and
+# resolved through the engine-scoped ResourceDriver binding registry; they must
+# never be added to this in-process factory registry.
+if K8S_AUDIT_OUTPUT=$(cd "$SCRIPT_DIR/.." && GOWORK=off go run ./scripts/kubernetes-boundary-audit --root "$WORKFLOW_ROOT" 2>&1); then
+  printf '%s\n' "$K8S_AUDIT_OUTPUT"
+else
+  printf '%s\n' "$K8S_AUDIT_OUTPUT"
+  FAIL=1
 fi
 
 echo

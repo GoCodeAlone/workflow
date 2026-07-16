@@ -698,8 +698,25 @@ func downloadIdentity(goos, goarch, url string) string {
 	return goos + "\x00" + goarch + "\x00" + url
 }
 
+var providerDeclarationManifestKeys = []string{
+	"credentialSources",
+	"credentialResolvers",
+	"kubernetesBackends",
+	"containerRegistries",
+	"secretStores",
+	"consumesContracts",
+}
+
 func syncManifestMetadataFromPluginJSON(raw, pluginJSON map[string]any) bool {
 	before, _ := json.Marshal(raw)
+
+	for _, key := range providerDeclarationManifestKeys {
+		if value, present := pluginJSON[key]; present {
+			raw[key] = value
+		} else {
+			delete(raw, key)
+		}
+	}
 
 	var caps map[string]any
 	if caps, ok := pluginJSON["capabilities"]; ok && caps != nil {

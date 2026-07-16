@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/GoCodeAlone/workflow/config"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -44,10 +45,33 @@ type Manifest struct {
 	// does not enforce shape (lowercase/hyphen rules live in plugin.PluginManifest).
 	Name string `json:"name"`
 
+	CredentialSources   []CredentialSourceDecl   `json:"credentialSources,omitempty"`
+	CredentialResolvers []CredentialResolverDecl `json:"credentialResolvers,omitempty"`
+	KubernetesBackends  []KubernetesBackendDecl  `json:"kubernetesBackends,omitempty"`
+	ContainerRegistries []ContainerRegistryDecl  `json:"containerRegistries,omitempty"`
+	SecretStores        []SecretStoreDecl        `json:"secretStores,omitempty"`
+	ConsumesContracts   []ConsumedContractDecl   `json:"consumesContracts,omitempty"`
+
 	// IaCProvider holds IaC-provider-specific manifest fields. Empty
 	// (zero-valued) when the plugin does not implement IaCProvider.
 	IaCProvider IaCProvider `json:"iacProvider"`
 }
+
+type CredentialConcurrencyMode = config.CredentialConcurrencyMode
+type ProviderDeclarations = config.ProviderDeclarations
+type CredentialSourceDecl = config.CredentialSourceDecl
+type CredentialOutputDecl = config.CredentialOutputDecl
+type CredentialResolverDecl = config.CredentialResolverDecl
+type KubernetesBackendDecl = config.KubernetesBackendDecl
+type ContainerRegistryDecl = config.ContainerRegistryDecl
+type SecretStoreDecl = config.SecretStoreDecl
+type ProtocolVersionRange = config.ProtocolVersionRange
+type ConsumedContractDecl = config.ConsumedContractDecl
+
+const (
+	CredentialConcurrencyProviderIdempotent = config.CredentialConcurrencyProviderIdempotent
+	CredentialConcurrencySingleWriter       = config.CredentialConcurrencySingleWriter
+)
 
 // IaCProvider describes IaC-provider-specific manifest fields.
 type IaCProvider struct {
@@ -130,5 +154,19 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("manifest: decode: %w", err)
 	}
+	if err := m.providerDeclarations().Validate(); err != nil {
+		return nil, fmt.Errorf("manifest: provider declarations: %w", err)
+	}
 	return &m, nil
+}
+
+func (m *Manifest) providerDeclarations() config.ProviderDeclarations {
+	return config.ProviderDeclarations{
+		CredentialSources:   m.CredentialSources,
+		CredentialResolvers: m.CredentialResolvers,
+		KubernetesBackends:  m.KubernetesBackends,
+		ContainerRegistries: m.ContainerRegistries,
+		SecretStores:        m.SecretStores,
+		ConsumesContracts:   m.ConsumesContracts,
+	}
 }

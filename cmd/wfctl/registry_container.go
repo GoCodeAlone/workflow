@@ -1,9 +1,9 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/GoCodeAlone/workflow/config"
@@ -36,7 +36,11 @@ func runRegistry(args []string) error {
 }
 
 func registryContainerUsage() error {
-	fmt.Fprintf(os.Stderr, `Usage: wfctl registry <subcommand> [options]
+	return registryContainerUsageTo(os.Stderr)
+}
+
+func registryContainerUsageTo(w io.Writer) error {
+	fmt.Fprintf(w, `Usage: wfctl registry <subcommand> [options]
 
 Manage container registries declared in ci.registries[].
 
@@ -47,8 +51,9 @@ Subcommands:
   logout  Remove stored registry credentials
 
 Options:
-  --config <file>   Config file (default: workflow.yaml)
-  --registry <name> Registry name from ci.registries[] (default: all)
+  --config <file>     Config file (default: workflow.yaml)
+  --registry <name>   Registry name from ci.registries[] (default: all)
+  --plugin-dir <dir>  Installed provider plugin directory
 
 Use 'wfctl plugin-registry' for plugin catalog management.
 `)
@@ -61,6 +66,7 @@ func runRegistryPrune(args []string) error {
 	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
 	regName := fs.String("registry", "", "Prune this registry only (default: all)")
 	dryRun := fs.Bool("dry-run", false, "Print planned commands without executing")
+	pluginDir := fs.String("plugin-dir", "", "Directory containing installed provider plugins (default: $WFCTL_PLUGIN_DIR or data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -75,13 +81,41 @@ func runRegistryPrune(args []string) error {
 		return fmt.Errorf("no registry named %q found in config", *regName)
 	}
 
-	ctx := registry.NewContext(context.Background(), os.Stdout, *dryRun)
+	baseCtx, stopProviderCommand := boundedProviderCommandContext(containerRegistryOperationTimeout)
+	defer stopProviderCommand()
+	ctx := registry.NewContext(baseCtx, os.Stdout, *dryRun)
+	requests := make([]containerRegistryOperationRequest, 0, len(regs))
 	for _, reg := range regs {
-		provider, ok := registry.Get(reg.Type)
-		if !ok {
-			return fmt.Errorf("no provider registered for registry type %q (registry: %s)", reg.Type, reg.Name)
+		requests = append(requests, containerRegistryOperationRequest{Registry: reg})
+	}
+	prepared, err := prepareContainerRegistryCapabilities(ctx, *pluginDir, "prune", requests)
+	if err != nil {
+		return err
+	}
+	defer closePreparedContainerRegistryCapabilities(prepared)
+	legacyProviders := make([]registry.RegistryProvider, len(regs))
+	for index, capability := range prepared {
+		if capability.handled {
+			continue
 		}
-		if err := provider.Prune(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
+		provider, ok := registry.Get(regs[index].Type)
+		if !ok {
+			return fmt.Errorf("no provider registered for registry type %q (registry: %s)", regs[index].Type, regs[index].Name)
+		}
+		legacyProviders[index] = provider
+	}
+	for index, reg := range regs {
+		if err := baseCtx.Err(); err != nil {
+			return err
+		}
+		handled, err := executeContainerRegistryCapability(ctx, prepared[index], *dryRun, ctx.Out())
+		if err != nil {
+			return fmt.Errorf("prune %s: %w", reg.Name, err)
+		}
+		if handled {
+			continue
+		}
+		if err := legacyProviders[index].Prune(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
 			return fmt.Errorf("prune %s: %w", reg.Name, err)
 		}
 	}
@@ -94,6 +128,7 @@ func runRegistryLogout(args []string) error {
 	cfgPath := fs.String("config", "workflow.yaml", "Path to workflow config file")
 	regName := fs.String("registry", "", "Logout from this registry only (default: all)")
 	dryRun := fs.Bool("dry-run", false, "Print planned commands without executing")
+	pluginDir := fs.String("plugin-dir", "", "Directory containing installed provider plugins (default: $WFCTL_PLUGIN_DIR or data/plugins)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -108,13 +143,41 @@ func runRegistryLogout(args []string) error {
 		return fmt.Errorf("no registry named %q found in config", *regName)
 	}
 
-	ctx := registry.NewContext(context.Background(), os.Stdout, *dryRun)
+	baseCtx, stopProviderCommand := boundedProviderCommandContext(containerRegistryOperationTimeout)
+	defer stopProviderCommand()
+	ctx := registry.NewContext(baseCtx, os.Stdout, *dryRun)
+	requests := make([]containerRegistryOperationRequest, 0, len(regs))
 	for _, reg := range regs {
-		provider, ok := registry.Get(reg.Type)
-		if !ok {
-			return fmt.Errorf("no provider registered for registry type %q (registry: %s)", reg.Type, reg.Name)
+		requests = append(requests, containerRegistryOperationRequest{Registry: reg})
+	}
+	prepared, err := prepareContainerRegistryCapabilities(ctx, *pluginDir, "logout", requests)
+	if err != nil {
+		return err
+	}
+	defer closePreparedContainerRegistryCapabilities(prepared)
+	legacyProviders := make([]registry.RegistryProvider, len(regs))
+	for index, capability := range prepared {
+		if capability.handled {
+			continue
 		}
-		if err := provider.Logout(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
+		provider, ok := registry.Get(regs[index].Type)
+		if !ok {
+			return fmt.Errorf("no provider registered for registry type %q (registry: %s)", regs[index].Type, regs[index].Name)
+		}
+		legacyProviders[index] = provider
+	}
+	for index, reg := range regs {
+		if err := baseCtx.Err(); err != nil {
+			return err
+		}
+		handled, err := executeContainerRegistryCapability(ctx, prepared[index], *dryRun, ctx.Out())
+		if err != nil {
+			return fmt.Errorf("logout %s: %w", reg.Name, err)
+		}
+		if handled {
+			continue
+		}
+		if err := legacyProviders[index].Logout(ctx, registry.ProviderConfig{Registry: reg}); err != nil {
 			return fmt.Errorf("logout %s: %w", reg.Name, err)
 		}
 	}

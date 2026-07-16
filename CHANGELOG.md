@@ -25,6 +25,18 @@ Configs that still reference the legacy types now fail to load with an actionabl
 
 ### Added
 
+- Generated, provider-neutral contract-consumer CI. Released plugins opt in by
+  declaring exact `consumesContracts[]` protocol ranges; Workflow selects them
+  from an immutable tag/commit/manifest cache, fails closed to all consumers for
+  unknown, renamed, or GitHub automation paths and incompatible protocol ranges,
+  reproduces the parsed release entrypoint, binary name, build environment,
+  targets, and ldflags against the pull-request checkout, and runs the real
+  plugin loader on GitHub-hosted runners without provider credentials or
+  live-provider access. The authoritative selection job never executes candidate
+  Go; compiled runtime-protocol parity runs in a separate output-free job.
+  Selection freezes its reviewed inputs in parent memory, preserves structured
+  failure evidence, and governs consumer retirement by exact repository identity
+  without allowing release downgrades or same-tag commit rebinding.
 - `module.PrevalidatedRollingDriver` and
   `module.PrevalidatedRollingDriverProvider` as compatibility aliases for
   providers whose deployment strategy validates a candidate image before rolling

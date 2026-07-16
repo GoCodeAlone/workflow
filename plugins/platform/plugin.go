@@ -304,10 +304,10 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 			Type:        "platform.kubernetes",
 			Label:       "Kubernetes Cluster",
 			Category:    "infrastructure",
-			Description: "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+			Description: "Kubernetes cluster managed by core-local kind/k3s or an installed plugin-declared backend",
 			ConfigFields: []schema.ConfigFieldDef{
 				{Key: "account", Label: "Cloud Account", Type: schema.FieldTypeString, Description: "Name of the cloud.account module (optional for kind)"},
-				{Key: "type", Label: "Cluster Type", Type: schema.FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
+				{Key: "type", Label: "Cluster Type", Type: schema.FieldTypeString, Required: true, Description: "kind, k3s, or the exact backend name declared by an installed provider plugin"},
 				{Key: "version", Label: "Kubernetes Version", Type: schema.FieldTypeString, Description: "e.g. 1.29"},
 				{Key: "nodeGroups", Label: "Node Groups", Type: schema.FieldTypeArray, Description: "Node group definitions"},
 			},

@@ -393,7 +393,7 @@ jobs:
         run: go test -mod=readonly ./module -run '^TestNoDigitalOceanGodoReferences$' -count=1
 
   cloud-sdk-audit:
-    name: Cloud-SDK inventory + k8s-backend init() partition + asymmetric graph audit
+    name: Cloud-SDK inventory + Kubernetes backend boundary + asymmetric graph audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -405,9 +405,13 @@ jobs:
         env:
           GOWORK: "off"
         run: go mod download
-      - name: Audit cloud-SDK imports + init() partition + Phase C asymmetric gate
+      - name: Test cloud/Kubernetes boundary audit mutations
+        run: ./scripts/test-audit-cloud-symbols.sh
+      - name: Audit cloud-SDK imports + Kubernetes backend boundary + Phase C asymmetric gate
         # The script enforces (once .phase-c-complete is armed):
         #   - module/ zero gcp/azure SDK real imports
+        #   - only core kind/k3s and temporary eks/aks factory registrations;
+        #     deleted provider-specific GKE implementation stays absent
         #   - build graph: zero Azure/azure-sdk-for-go, zero google.golang.org/api,
         #     zero cloud.google.com/go except compute/metadata (OAuth2 ADC helper
         #     legitimately pulled by provider/gcp's service-account auth).

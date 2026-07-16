@@ -1,11 +1,15 @@
 package all
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/capability"
 	"github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/builder"
+	plugincicd "github.com/GoCodeAlone/workflow/plugins/cicd"
+	plugindatastores "github.com/GoCodeAlone/workflow/plugins/datastores"
 	"github.com/GoCodeAlone/workflow/schema"
 )
 
@@ -139,6 +143,112 @@ func TestLoadAll_WithRealLoader(t *testing.T) {
 	if len(loader.TriggerFactories()) == 0 {
 		t.Error("no trigger factories registered after loading all plugins")
 	}
+}
+
+func TestPluginLoader_ProviderBuiltinCoexistence(t *testing.T) {
+	loader := plugin.NewPluginLoader(capability.NewRegistry(), schema.NewModuleSchemaRegistry())
+	for _, builtin := range []plugin.EnginePlugin{plugincicd.New(), plugindatastores.New()} {
+		if err := loader.LoadPlugin(builtin); err != nil {
+			t.Fatalf("load builtin %q: %v", builtin.Name(), err)
+		}
+	}
+	loaded := loader.LoadedPlugins()
+	if len(loaded) != 2 || loaded[0].Name() != "cicd" || loaded[1].Name() != "datastores" {
+		t.Fatalf("builtins did not load first in order: %v", pluginNames(loaded))
+	}
+
+	wantOverridable := map[string]bool{
+		"aws.codebuild":                 true,
+		"step.codebuild_create_project": true,
+		"step.codebuild_start":          true,
+		"step.codebuild_status":         true,
+		"step.codebuild_logs":           true,
+		"step.codebuild_delete_project": true,
+		"step.codebuild_list_builds":    true,
+		"nosql.dynamodb":                true,
+	}
+	gotOverridable := loader.OverridableTypes()
+	if len(gotOverridable) != len(wantOverridable) {
+		t.Fatalf("overridable types = %v, want exactly %v", gotOverridable, wantOverridable)
+	}
+	for typeName := range wantOverridable {
+		if !gotOverridable[typeName] {
+			t.Errorf("type %q is not overridable", typeName)
+		}
+	}
+
+	externalCICD := providerReplacementPlugin("external-cicd", []string{"aws.codebuild"}, []string{
+		"step.codebuild_create_project",
+		"step.codebuild_start",
+		"step.codebuild_status",
+		"step.codebuild_logs",
+		"step.codebuild_delete_project",
+		"step.codebuild_list_builds",
+	})
+	if err := loader.LoadPlugin(externalCICD); err != nil {
+		t.Fatalf("replace CodeBuild builtin types: %v", err)
+	}
+	externalDatastore := providerReplacementPlugin("external-aws", []string{"nosql.dynamodb"}, nil)
+	if err := loader.LoadPlugin(externalDatastore); err != nil {
+		t.Fatalf("replace DynamoDB builtin type: %v", err)
+	}
+
+	if got := loader.ModuleFactories()["aws.codebuild"]("test", nil); got != nil {
+		t.Fatalf("aws.codebuild factory was not replaced: got %T", got)
+	}
+	if got := loader.ModuleFactories()["nosql.dynamodb"]("test", nil); got != nil {
+		t.Fatalf("nosql.dynamodb factory was not replaced: got %T", got)
+	}
+	for typeName := range externalCICD.StepFactories() {
+		got, err := loader.StepFactories()[typeName]("test", nil, nil)
+		if err != nil {
+			t.Fatalf("invoke replacement %q: %v", typeName, err)
+		}
+		if got != "external-cicd" {
+			t.Errorf("step %q was not replaced: got %v", typeName, got)
+		}
+	}
+
+	unrelated := providerReplacementPlugin("unrelated-cicd", nil, []string{"step.shell_exec"})
+	err := loader.LoadPlugin(unrelated)
+	if err == nil || !strings.Contains(err.Error(), `step type "step.shell_exec" already registered`) {
+		t.Fatalf("unrelated duplicate error = %v", err)
+	}
+}
+
+func providerReplacementPlugin(name string, moduleTypes, stepTypes []string) *providerReplacement {
+	p := &providerReplacement{
+		BaseEnginePlugin: plugin.BaseEnginePlugin{
+			BaseNativePlugin: plugin.BaseNativePlugin{PluginName: name, PluginVersion: "1.0.0", PluginDescription: "provider replacement fixture"},
+			Manifest:         plugin.PluginManifest{Name: name, Version: "1.0.0", Author: "test", Description: "provider replacement fixture"},
+		},
+		modules: make(map[string]plugin.ModuleFactory, len(moduleTypes)),
+		steps:   make(map[string]plugin.StepFactory, len(stepTypes)),
+	}
+	for _, typeName := range moduleTypes {
+		p.modules[typeName] = func(string, map[string]any) modular.Module { return nil }
+	}
+	for _, typeName := range stepTypes {
+		p.steps[typeName] = func(string, map[string]any, modular.Application) (any, error) { return name, nil }
+	}
+	return p
+}
+
+type providerReplacement struct {
+	plugin.BaseEnginePlugin
+	modules map[string]plugin.ModuleFactory
+	steps   map[string]plugin.StepFactory
+}
+
+func (p *providerReplacement) ModuleFactories() map[string]plugin.ModuleFactory { return p.modules }
+func (p *providerReplacement) StepFactories() map[string]plugin.StepFactory     { return p.steps }
+
+func pluginNames(plugins []plugin.EnginePlugin) []string {
+	names := make([]string, 0, len(plugins))
+	for _, p := range plugins {
+		names = append(names, p.Name())
+	}
+	return names
 }
 
 func TestAllBuilderPluginsRegistered(t *testing.T) {

@@ -2,12 +2,176 @@ package main
 
 import (
 	"context"
+	"errors"
+	"log"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/plugin/external"
 )
+
+func TestDiscoverAndLoadIaCProviderCancelsStartupAndSuppressesProviderText(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable-script fixture")
+	}
+	pluginRoot := t.TempDir()
+	const pluginName = "workflow-plugin-hung-iac"
+	pluginDir := filepath.Join(pluginRoot, pluginName)
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-hung-iac","version":"1.0.0","author":"Workflow tests","description":"non-handshaking IaC fixture","capabilities":{"iacProvider":{"name":"example-iac"}},"iacProvider":{"computePlanVersion":"v2"}}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, pluginName), []byte("#!/bin/sh\necho SENTINEL_IAC_PROVIDER_SECRET >&2\nexec sleep 60\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previousPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginRoot
+	t.Cleanup(func() { currentInfraPluginDir = previousPluginDir })
+	originalTimeout := iacPluginLifecycleTimeout
+	iacPluginLifecycleTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { iacPluginLifecycleTimeout = originalTimeout })
+	ctx := context.Background()
+	started := time.Now()
+	stderr, err := captureStderr(t, func() error {
+		_, _, loadErr := discoverAndLoadIaCProvider(ctx, "example-iac", nil)
+		return loadErr
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider error text suppressed") {
+		t.Fatalf("error=%v", err)
+	}
+	if strings.Contains(err.Error(), "SENTINEL_IAC_PROVIDER_SECRET") || strings.Contains(stderr, "SENTINEL_IAC_PROVIDER_SECRET") {
+		t.Fatalf("provider text leaked: error=%v stderr=%s", err, stderr)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("canceled IaC startup took %s", elapsed)
+	}
+}
+
+type recordingIaCPluginManager struct {
+	staged      bool
+	loadCalled  bool
+	loadBounded bool
+	adapter     *external.ExternalPluginAdapter
+	loadErr     error
+}
+
+func (m *recordingIaCPluginManager) StageCredentialResolvers() error {
+	m.staged = true
+	return nil
+}
+
+func (m *recordingIaCPluginManager) LoadPluginContext(ctx context.Context, _ string) (*external.ExternalPluginAdapter, error) {
+	m.loadCalled = true
+	_, m.loadBounded = ctx.Deadline()
+	if m.loadErr == nil && m.adapter == nil {
+		m.loadErr = errors.New("simulated load failure")
+	}
+	return m.adapter, m.loadErr
+}
+
+func TestDiscoverAndLoadIaCProviderBoundsAcceptedInitializeFromBackgroundCaller(t *testing.T) {
+	pluginRoot := t.TempDir()
+	const pluginName = "workflow-plugin-initialize-hang"
+	pluginDir := filepath.Join(pluginRoot, pluginName)
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-initialize-hang","version":"1.0.0","author":"Workflow tests","description":"accepted initialize fixture","capabilities":{"iacProvider":{"name":"example-iac"}},"iacProvider":{"computePlanVersion":"v2"}}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, pluginName), []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previousPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginRoot
+	t.Cleanup(func() { currentInfraPluginDir = previousPluginDir })
+
+	manager := &recordingIaCPluginManager{adapter: &external.ExternalPluginAdapter{}}
+	originalFactory := newIaCExternalPluginManager
+	newIaCExternalPluginManager = func(string, *log.Logger) iacExternalPluginManager { return manager }
+	t.Cleanup(func() { newIaCExternalPluginManager = originalFactory })
+	originalBuilder := buildTypedIaCAdapterFromFn
+	buildTypedIaCAdapterFromFn = func(ctx context.Context, _, _ string, _ map[string]any, _ iacAdapterAccessor) (interfaces.IaCProvider, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("accepted plugin Initialize context is not bounded")
+		}
+		<-ctx.Done()
+		return nil, errors.New("SENTINEL_INITIALIZE_DETAIL")
+	}
+	t.Cleanup(func() { buildTypedIaCAdapterFromFn = originalBuilder })
+	originalTimeout := iacPluginLifecycleTimeout
+	iacPluginLifecycleTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { iacPluginLifecycleTimeout = originalTimeout })
+
+	started := time.Now()
+	_, _, err := discoverAndLoadIaCProvider(context.Background(), "example-iac", nil)
+	if err == nil || strings.Contains(err.Error(), "SENTINEL_INITIALIZE_DETAIL") || !strings.Contains(err.Error(), "provider error text suppressed") {
+		t.Fatalf("error=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("bounded accepted Initialize took %s", elapsed)
+	}
+}
+
+func (*recordingIaCPluginManager) ShutdownContext(context.Context) error { return nil }
+
+func TestDiscoverAndLoadIaCProviderAlwaysStagesResolversAndBoundsBackgroundStartup(t *testing.T) {
+	pluginRoot := t.TempDir()
+	const pluginName = "workflow-plugin-mixed-iac"
+	pluginDir := filepath.Join(pluginRoot, pluginName)
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-mixed-iac","version":"1.0.0","author":"Workflow tests","description":"mixed IaC fixture","capabilities":{"iacProvider":{"name":"example-iac"}},"iacProvider":{"computePlanVersion":"v2"}}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, pluginName), []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previousPluginDir := currentInfraPluginDir
+	currentInfraPluginDir = pluginRoot
+	t.Cleanup(func() { currentInfraPluginDir = previousPluginDir })
+
+	manager := &recordingIaCPluginManager{}
+	originalFactory := newIaCExternalPluginManager
+	newIaCExternalPluginManager = func(string, *log.Logger) iacExternalPluginManager { return manager }
+	t.Cleanup(func() { newIaCExternalPluginManager = originalFactory })
+
+	_, _, err := discoverAndLoadIaCProvider(context.Background(), "example-iac", nil)
+	if err == nil || strings.Contains(err.Error(), "simulated load failure") || !strings.Contains(err.Error(), "provider error text suppressed") || !manager.staged || !manager.loadCalled || !manager.loadBounded {
+		t.Fatalf("error=%v staged=%t loadCalled=%t loadBounded=%t", err, manager.staged, manager.loadCalled, manager.loadBounded)
+	}
+}
+
+func TestIaCPluginInitializationSanitizationPreservesOnlyHostGuidance(t *testing.T) {
+	actionable := &actionableIaCLoadError{err: errors.New("missing required service — run wfctl plugin update")}
+	if err := sanitizeIaCPluginInitializationError("plugin", "provider", actionable); !strings.Contains(err.Error(), "wfctl plugin update") {
+		t.Fatalf("actionable error=%v", err)
+	}
+
+	versionErr := &computePlanVersionV2Error{pluginName: "plugin", value: "SENTINEL_PROVIDER_VALUE"}
+	if err := sanitizeIaCPluginInitializationError("plugin", "provider", versionErr); strings.Contains(err.Error(), "SENTINEL_PROVIDER_VALUE") || !strings.Contains(err.Error(), "workflow#699") {
+		t.Fatalf("version error=%v", err)
+	}
+
+	transportErr := &providerControlledIaCLoadError{
+		operation: "IaCProvider.Initialize", cause: errors.New("SENTINEL_PROVIDER_DETAIL"), rendered: errors.New("raw provider detail"),
+	}
+	if err := sanitizeIaCPluginInitializationError("plugin", "provider", transportErr); strings.Contains(err.Error(), "SENTINEL_PROVIDER_DETAIL") || !strings.Contains(err.Error(), "provider error text suppressed") {
+		t.Fatalf("transport error=%v", err)
+	}
+}
 
 // ── discoverAndLoadIaCProvider — error propagation ────────────────────────────
 //

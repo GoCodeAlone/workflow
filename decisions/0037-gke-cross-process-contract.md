@@ -1,9 +1,13 @@
 # 0037. gke cross-process contract — fold into the existing ResourceDriver
 
-**Status:** Accepted
+**Status:** Superseded by ADR 0055
 **Date:** 2026-05-14
 **Decision-makers:** Jon (operator), autonomous pipeline
 **Related:** docs/plans/2026-05-14-cloud-sdk-extraction-design.md (Architecture §2), docs/plans/2026-05-14-cloud-sdk-extraction-bcd.md (Task 19, PR 7), decisions/0035, decisions/0026
+
+> **Superseded:** ADR 0055 replaces this GKE-specific host contract with
+> manifest-declared, provider-neutral Kubernetes backend bindings. The body
+> below is preserved as the historical rationale for reusing `ResourceDriver`.
 
 ## Context
 

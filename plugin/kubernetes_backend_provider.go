@@ -4,7 +4,7 @@ import proto "github.com/GoCodeAlone/workflow/plugin/external/proto"
 
 // KubernetesBackendProvider is the optional interface an external-plugin adapter
 // implements when its plugin serves one or more platform.kubernetes cluster-type
-// backends (e.g. "gke"). The engine type-asserts loaded plugins against it (same
+// backends. The engine type-asserts loaded plugins against it (same
 // pattern as IaCStateBackendProvider) and populates module's kubernetes backend
 // registry.
 //

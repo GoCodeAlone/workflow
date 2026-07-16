@@ -43,6 +43,7 @@ func New() *Plugin {
 					"step.nosql_delete",
 					"step.nosql_query",
 				},
+				OverridableTypes: []string{"nosql.dynamodb"},
 				Capabilities: []plugin.CapabilityDecl{
 					{Name: "nosql-store", Role: "provider", Priority: 50},
 				},

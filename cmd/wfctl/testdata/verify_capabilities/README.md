@@ -2,17 +2,19 @@
 
 Fixtures for `plugin_verify_capabilities_test.go` (workflow#765).
 
-Each scenario directory is a self-contained Go module. Tests build in-place
-with `go build -mod=readonly`; binary emitted to `t.TempDir()`.
+Most scenario directories are self-contained Go modules. The
+`kubernetes-good/` and `provider-good/` fixtures intentionally build against
+the current root module so they exercise the working-tree SDK contracts. Tests
+build in-place; binaries are emitted to `t.TempDir()`.
 
 ## Maintenance
 
-When workflow SDK adds a new transitive dep that fixtures pick up, regenerate
-each fixture's `go.sum`:
+When workflow SDK adds a new transitive dependency, regenerate the sums for
+the self-contained fixtures:
 
 ```bash
-for d in cmd/wfctl/testdata/verify_capabilities/*/; do
-  (cd "$d" && GOWORK=off go mod tidy)
+for m in cmd/wfctl/testdata/verify_capabilities/*/go.mod; do
+  (cd "${m%/go.mod}" && GOWORK=off go mod tidy)
 done
 git add cmd/wfctl/testdata/verify_capabilities/*/go.sum
 ```
@@ -28,6 +30,7 @@ DO NOT use an absolute path — it diverges across developer machines.
 - `missing-ldflag/` — plugin.json version=0.0.0, no ldflag (Version="dev" → ResolveBuildVersion returns "(devel) [@ sha]") → FAIL
 - `version-drift/` — plugin.json version=1.2.3, ldflag injects v0.9.0 → FAIL
 - `name-drift/` — plugin.json name="foo", binary advertises Name="bar" (see Task 6 — created separately) → FAIL
+- `provider-good/` — credential issuer + container registry declarations match live subprocess services → PASS
 
 ## SDK semantics
 

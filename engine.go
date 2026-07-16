@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -94,9 +95,25 @@ type StdEngine struct {
 	// block is declared in the config. Nil when no infrastructure is declared.
 	provisioner *infra.Provisioner
 
+	// kubernetesBackends is scoped to this engine and published to its
+	// modular.Application through a read-only resolver before module
+	// initialization. The mutable registry remains engine-private so backend
+	// preflight cannot be invalidated between generic loader mutation and commit.
+	kubernetesBackends       *module.KubernetesBackendRegistry
+	kubernetesBackendService *kubernetesBackendResolverService
+	pluginLoadMu             sync.Mutex
+
 	// configHash is the SHA-256 hash of the last config built via BuildFromConfig.
 	// Format: "sha256:<hex>". Empty until BuildFromConfig is called.
 	configHash string
+}
+
+type kubernetesBackendResolverService struct {
+	registry *module.KubernetesBackendRegistry
+}
+
+func (s *kubernetesBackendResolverService) ResolveKubernetesBackend(name string) (module.KubernetesBackendBinding, string, bool) {
+	return s.registry.ResolveKubernetesBackend(name)
 }
 
 // App returns the underlying modular.Application.
@@ -147,6 +164,7 @@ func (e *StdEngine) SetPluginInstaller(installer *plugin.PluginInstaller) {
 
 // NewStdEngine creates a new workflow engine
 func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
+	kubernetesBackends := module.NewKubernetesBackendRegistry()
 	e := &StdEngine{
 		app:                   app,
 		workflowHandlers:      make([]WorkflowHandler, 0),
@@ -160,6 +178,10 @@ func NewStdEngine(app modular.Application, logger modular.Logger) *StdEngine {
 		triggerTypeMap:        make(map[string]string),
 		triggerConfigWrappers: make(map[string]plugin.TriggerConfigWrapperFunc),
 		pipelineRegistry:      make(map[string]*module.Pipeline),
+		kubernetesBackends:    kubernetesBackends,
+		kubernetesBackendService: &kubernetesBackendResolverService{
+			registry: kubernetesBackends,
+		},
 	}
 	// Register the step.workflow_call factory with a closure that looks up
 	// pipelines from this engine's registry at execution time.
@@ -290,16 +312,31 @@ func (e *StdEngine) LoadPluginWithOverride(p plugin.EnginePlugin) error {
 }
 
 func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool) error {
+	// Keep backend preflight, generic loader mutation, and binding commit as one
+	// engine-local transaction. A backend collision must be rejected before any
+	// PluginLoader or engine registry observes the candidate.
+	e.pluginLoadMu.Lock()
+	defer e.pluginLoadMu.Unlock()
+
+	kubernetesBindings, hasKubernetesBackends, err := collectKubernetesBackendBindings(p)
+	if err != nil {
+		return err
+	}
+	if hasKubernetesBackends {
+		if err := e.kubernetesBackends.Preflight(p.EngineManifest().Name, kubernetesBindings); err != nil {
+			return fmt.Errorf("load plugin %q: kubernetes backends: %w", p.EngineManifest().Name, err)
+		}
+	}
 	transportSnapshot := module.SnapshotDefaultTransport()
 	loader := e.PluginLoader()
-	var err error
+	var loadErr error
 	if allowOverride {
-		err = loader.LoadPluginWithOverride(p)
+		loadErr = loader.LoadPluginWithOverride(p)
 	} else {
-		err = loader.LoadPlugin(p)
+		loadErr = loader.LoadPlugin(p)
 	}
-	if err != nil {
-		return fmt.Errorf("load plugin: %w", err)
+	if loadErr != nil {
+		return fmt.Errorf("load plugin: %w", loadErr)
 	}
 	if module.DetectTransportMutation(transportSnapshot) {
 		pluginName := p.EngineManifest().Name
@@ -374,24 +411,56 @@ func (e *StdEngine) loadPluginInternal(p plugin.EnginePlugin, allowOverride bool
 			}
 		}
 	}
-	// Register any platform.kubernetes backends the plugin serves into module's
-	// package-level registry, so `platform.kubernetes` configs with a
-	// plugin-provided `type:` (e.g. gke) dispatch to the plugin-served
-	// ResourceDriver-backed backend. Per ADR 0037 — folds into the existing
-	// ResourceDriver contract, no new proto surface.
-	if kb, ok := p.(plugin.KubernetesBackendProvider); ok {
-		clients, err := kb.KubernetesBackendClients()
-		if err != nil {
+	if hasKubernetesBackends {
+		if err := e.kubernetesBackends.Register(p.EngineManifest().Name, kubernetesBindings); err != nil {
 			return fmt.Errorf("load plugin %q: kubernetes backends: %w", p.EngineManifest().Name, err)
-		}
-		for name, client := range clients {
-			if err := module.RegisterKubernetesBackendClient(name, client); err != nil {
-				return fmt.Errorf("load plugin %q: %w", p.EngineManifest().Name, err)
-			}
 		}
 	}
 	e.enginePlugins = append(e.enginePlugins, p)
 	return nil
+}
+
+func collectKubernetesBackendBindings(p plugin.EnginePlugin) ([]module.KubernetesBackendBinding, bool, error) {
+	manifest := p.EngineManifest()
+	provider, implementsProvider := p.(plugin.KubernetesBackendProvider)
+	if !implementsProvider {
+		if len(manifest.KubernetesBackends) > 0 {
+			return nil, false, fmt.Errorf("load plugin %q: manifest declares kubernetes backends but plugin does not provide runtime clients", manifest.Name)
+		}
+		return nil, false, nil
+	}
+
+	clients, err := provider.KubernetesBackendClients()
+	if err != nil {
+		return nil, false, fmt.Errorf("load plugin %q: kubernetes backends: %w", manifest.Name, err)
+	}
+	if len(manifest.KubernetesBackends) == 0 {
+		if len(clients) > 0 {
+			return nil, false, fmt.Errorf("load plugin %q: kubernetes backend clients have no manifest declarations", manifest.Name)
+		}
+		return nil, false, nil
+	}
+
+	bindings := make([]module.KubernetesBackendBinding, 0, len(manifest.KubernetesBackends))
+	declared := make(map[string]struct{}, len(manifest.KubernetesBackends))
+	for _, declaration := range manifest.KubernetesBackends {
+		client, ok := clients[declaration.Name]
+		if !ok {
+			return nil, false, fmt.Errorf("load plugin %q: kubernetes backend %q has no runtime client", manifest.Name, declaration.Name)
+		}
+		declared[declaration.Name] = struct{}{}
+		bindings = append(bindings, module.KubernetesBackendBinding{
+			Name:         declaration.Name,
+			ResourceType: declaration.ResourceType,
+			Client:       client,
+		})
+	}
+	for name := range clients {
+		if _, ok := declared[name]; !ok {
+			return nil, false, fmt.Errorf("load plugin %q: runtime kubernetes backend %q is not declared in the manifest", manifest.Name, name)
+		}
+	}
+	return bindings, true, nil
 }
 
 // validateRequirements checks declared capabilities and plugin versions.
@@ -663,6 +732,13 @@ func (e *StdEngine) BuildFromConfig(cfg *config.WorkflowConfig) error {
 				return fmt.Errorf("pre-init wiring hook %q failed: %w", hook.Name, err)
 			}
 		}
+	}
+	if existing, exists := e.app.SvcRegistry()[module.KubernetesBackendRegistryServiceName]; exists {
+		if existing != e.kubernetesBackendService {
+			return fmt.Errorf("application service %q is already registered by another owner", module.KubernetesBackendRegistryServiceName)
+		}
+	} else if err := e.app.RegisterService(module.KubernetesBackendRegistryServiceName, e.kubernetesBackendService); err != nil {
+		return fmt.Errorf("register engine kubernetes backend registry: %w", err)
 	}
 	if err := e.app.Init(); err != nil {
 		return fmt.Errorf("failed to initialize modules: %w", err)

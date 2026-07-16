@@ -1,0 +1,23 @@
+{
+  "name": "verify-provider",
+  "version": "0.0.0",
+  "author": "test fixture",
+  "description": "Provider capability declarations match runtime services",
+  "credentialSources": [
+    {
+      "source": "example.source",
+      "concurrencyMode": "provider_idempotent",
+      "outputs": [
+        {"key": "identifier", "sensitive": false},
+        {"key": "secret", "sensitive": true}
+      ],
+      "identifierKey": "identifier"
+    }
+  ],
+  "credentialResolvers": [
+    {"provider": "aws", "credentialTypes": ["static"]}
+  ],
+  "containerRegistries": [
+    {"type": "example-registry", "operations": ["login", "logout", "push", "prune"]}
+  ]
+}

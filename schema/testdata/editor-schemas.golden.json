@@ -2819,7 +2819,7 @@
       "type": "platform.kubernetes",
       "label": "Kubernetes Cluster",
       "category": "infrastructure",
-      "description": "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+      "description": "Kubernetes cluster managed by core-local kind/k3s or an installed plugin-declared backend",
       "outputs": [
         {
           "name": "cluster",
@@ -2838,7 +2838,7 @@
           "key": "type",
           "label": "Cluster Type",
           "type": "string",
-          "description": "eks | gke | aks | kind | k3s",
+          "description": "kind, k3s, or the exact backend name declared by an installed provider plugin",
           "required": true
         },
         {

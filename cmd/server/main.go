@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -87,8 +88,120 @@ func defaultEnginePlugins() []plugin.EnginePlugin {
 	return allplugins.DefaultPlugins()
 }
 
+type externalPluginLifecycleManager interface {
+	LoadPlugin(string) (*pluginexternal.ExternalPluginAdapter, error)
+	UnloadPlugin(string) error
+}
+
+type externalPluginEngineLoader interface {
+	LoadPlugin(plugin.EnginePlugin) error
+}
+
+const (
+	externalPluginManagerLifecycleModuleName = "internal-external-plugin-manager-lifecycle"
+	externalPluginManagerServiceName         = "internal-external-plugin-manager"
+	engineCleanupTimeout                     = 30 * time.Second
+	engineOperationTimeout                   = 2 * time.Minute
+)
+
+type externalPluginManagerLifecycleModule struct {
+	manager  *pluginexternal.ExternalPluginManager
+	shutdown func(context.Context) error
+}
+
+func newExternalPluginManagerLifecycleModule(manager *pluginexternal.ExternalPluginManager) *externalPluginManagerLifecycleModule {
+	lifecycle := &externalPluginManagerLifecycleModule{manager: manager}
+	if manager != nil {
+		lifecycle.shutdown = manager.ShutdownContext
+	}
+	return lifecycle
+}
+
+func (m *externalPluginManagerLifecycleModule) Name() string {
+	return externalPluginManagerLifecycleModuleName
+}
+
+func (m *externalPluginManagerLifecycleModule) Init(app modular.Application) error {
+	if m == nil || m.manager == nil {
+		return fmt.Errorf("external plugin manager lifecycle: manager is nil")
+	}
+	if err := registerExternalPluginManagerService(app, externalPluginManagerServiceName, m.manager); err != nil {
+		return fmt.Errorf("register external plugin manager service: %w", err)
+	}
+	if err := registerExternalPluginManagerService(app, module.ExternalCredentialResolverRegistrationProviderServiceName, m.manager); err != nil {
+		return fmt.Errorf("register application-scoped credential resolver service: %w", err)
+	}
+	return nil
+}
+
+func registerExternalPluginManagerService(app modular.Application, name string, manager *pluginexternal.ExternalPluginManager) error {
+	if existing, exists := app.SvcRegistry()[name]; exists {
+		if existing != manager {
+			return fmt.Errorf("service %q is already registered with %T", name, existing)
+		}
+		return nil
+	}
+	return app.RegisterService(name, manager)
+}
+
+func (m *externalPluginManagerLifecycleModule) Stop(ctx context.Context) error {
+	if m != nil && m.shutdown != nil {
+		return m.shutdown(ctx)
+	}
+	return nil
+}
+
+func externalPluginManagerFromApplication(app modular.Application) (*pluginexternal.ExternalPluginManager, error) {
+	if app == nil {
+		return nil, fmt.Errorf("external plugin manager application is nil")
+	}
+	service, exists := app.SvcRegistry()[externalPluginManagerServiceName]
+	if !exists {
+		return nil, fmt.Errorf("external plugin manager service is unavailable")
+	}
+	manager, ok := service.(*pluginexternal.ExternalPluginManager)
+	if !ok || manager == nil {
+		return nil, fmt.Errorf("external plugin manager service has unexpected type %T", service)
+	}
+	return manager, nil
+}
+
+func newExternalPluginAdminMux(app modular.Application) (http.Handler, error) {
+	manager, err := externalPluginManagerFromApplication(app)
+	if err != nil {
+		return nil, err
+	}
+	handler := pluginexternal.NewPluginHandler(manager)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+	return mux, nil
+}
+
+func loadExternalPluginIntoEngine(manager externalPluginLifecycleManager, engine externalPluginEngineLoader, name string) (*pluginexternal.ExternalPluginAdapter, error) {
+	adapter, err := manager.LoadPlugin(name)
+	if err != nil {
+		return nil, fmt.Errorf("load external plugin %q: %w", name, err)
+	}
+	if err := engine.LoadPlugin(adapter); err != nil {
+		registrationErr := fmt.Errorf("register external plugin %q: %w", name, err)
+		if rollbackErr := manager.UnloadPlugin(name); rollbackErr != nil {
+			return nil, errors.Join(registrationErr, fmt.Errorf("rollback external plugin %q: %w", name, rollbackErr))
+		}
+		return nil, registrationErr
+	}
+	return adapter, nil
+}
+
 // buildEngine creates the workflow engine with all handlers registered and built from config.
 func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+	return buildEngineWithResolverMode(context.Background(), cfg, logger, false)
+}
+
+func buildCandidateEngineContext(ctx context.Context, cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
+	return buildEngineWithResolverMode(ctx, cfg, logger, true)
+}
+
+func buildEngineWithResolverMode(ctx context.Context, cfg *config.WorkflowConfig, logger *slog.Logger, stageCredentialResolvers bool) (*workflow.StdEngine, *dynamic.Loader, *dynamic.ComponentRegistry, error) {
 	app := modular.NewStdApplication(nil, logger)
 	engine := workflow.NewStdEngine(app, logger)
 
@@ -119,7 +232,18 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	// External plugins run as separate processes communicating over gRPC.
 	// Failures are non-fatal — the engine works fine with only builtin plugins.
 	extMgr := pluginexternal.NewExternalPluginManager(extPluginDir, log.Default())
+	if stageCredentialResolvers {
+		if err := extMgr.StageCredentialResolvers(); err != nil {
+			return nil, nil, nil, fmt.Errorf("stage external plugin credential resolvers: %w", err)
+		}
+	}
 	extMgr.SetCallbackServer(newExternalCallbackServer(engine))
+	extLifecycle := newExternalPluginManagerLifecycleModule(extMgr)
+	if err := extLifecycle.Init(app); err != nil {
+		extMgr.Shutdown()
+		return nil, nil, nil, fmt.Errorf("initialize external plugin manager lifecycle: %w", err)
+	}
+	app.RegisterModule(extLifecycle)
 	discovered, discoverErr := extMgr.DiscoverPlugins()
 	if discoverErr != nil {
 		logger.Warn("Failed to discover external plugins", "error", discoverErr)
@@ -127,13 +251,9 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	if len(discovered) > 0 {
 		logger.Info("Discovered external plugins", "count", len(discovered), "plugins", discovered)
 		for _, name := range discovered {
-			adapter, loadErr := extMgr.LoadPlugin(name)
+			_, loadErr := loadExternalPluginIntoEngine(extMgr, engine, name)
 			if loadErr != nil {
 				logger.Warn("Failed to load external plugin", "plugin", name, "error", loadErr)
-				continue
-			}
-			if err := engine.LoadPlugin(adapter); err != nil {
-				logger.Warn("Failed to register external plugin", "plugin", name, "error", err)
 				continue
 			}
 			logger.Info("Loaded external plugin", "plugin", name)
@@ -160,11 +280,207 @@ func buildEngine(cfg *config.WorkflowConfig, logger *slog.Logger) (*workflow.Std
 	engine.SetPluginInstaller(installer)
 
 	// Build engine from config
-	if err := engine.BuildFromConfig(cfg); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to build workflow: %w", err)
+	if err := buildEngineFromConfig(ctx, engine, cfg, extMgr.Shutdown); err != nil {
+		return nil, nil, nil, err
 	}
 
 	return engine, loader, registry, nil
+}
+
+func activateEngineCredentialResolvers(engine *workflow.StdEngine) error {
+	manager, err := externalPluginManagerFromApplication(engine.GetApp())
+	if err != nil {
+		return err
+	}
+	if err := manager.ActivateCredentialResolvers(); err != nil {
+		return fmt.Errorf("activate candidate credential resolvers: %w", err)
+	}
+	return nil
+}
+
+type engineConfigBuildLifecycle interface {
+	BuildFromConfig(*config.WorkflowConfig) error
+	Stop(context.Context) error
+}
+
+type engineStartStopLifecycle interface {
+	Start(context.Context) error
+	Stop(context.Context) error
+}
+
+type engineStopLifecycle interface {
+	Stop(context.Context) error
+}
+
+func contextWithFiniteDeadline(parent context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	if deadline, ok := parent.Deadline(); ok && time.Until(deadline) <= maximum {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, maximum)
+}
+
+func detachedCleanupContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	deadline, hasDeadline := parent.Deadline()
+	detached := context.WithoutCancel(parent)
+	if hasDeadline && time.Until(deadline) > 0 && time.Until(deadline) <= engineCleanupTimeout {
+		return context.WithDeadline(detached, deadline)
+	}
+	return context.WithTimeout(detached, engineCleanupTimeout)
+}
+
+func detachedOperationContext(parent context.Context, maximum time.Duration) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), maximum)
+}
+
+func cleanupEngineAfterFailure(ctx context.Context, engine engineStopLifecycle, cause error, cleanupLabel string) error {
+	cleanupCtx, cancel := detachedCleanupContext(ctx)
+	defer cancel()
+	if stopErr := engine.Stop(cleanupCtx); stopErr != nil {
+		return errors.Join(cause, fmt.Errorf("%s: %w", cleanupLabel, stopErr))
+	}
+	return cause
+}
+
+func startEngineWithCleanup(ctx context.Context, engine engineStartStopLifecycle, failureLabel string) error {
+	if err := engine.Start(ctx); err != nil {
+		return cleanupEngineAfterFailure(ctx, engine, fmt.Errorf("%s: %w", failureLabel, err), "clean up failed engine start")
+	}
+	return nil
+}
+
+func runPostStartHooksWithCleanup(ctx context.Context, engine engineStopLifecycle, hooks []func() error) error {
+	for _, hook := range hooks {
+		if err := hook(); err != nil {
+			return cleanupEngineAfterFailure(ctx, engine, fmt.Errorf("post-start hook failed: %w", err), "clean up failed post-start hook")
+		}
+	}
+	return nil
+}
+
+type candidateCommitPhase string
+
+const (
+	candidateCommitPhaseRetire    candidateCommitPhase = "retire"
+	candidateCommitPhaseStart     candidateCommitPhase = "start"
+	candidateCommitPhasePostStart candidateCommitPhase = "post-start"
+	candidateCommitPhaseActivate  candidateCommitPhase = "activate"
+)
+
+type candidateCommitError struct {
+	phase candidateCommitPhase
+	err   error
+}
+
+func (e *candidateCommitError) Error() string { return e.err.Error() }
+func (e *candidateCommitError) Unwrap() error { return e.err }
+
+func cleanupCandidateCommitFailure(ctx context.Context, phase candidateCommitPhase, candidate engineStopLifecycle, cause error, cleanupLabel string) error {
+	return &candidateCommitError{
+		phase: phase,
+		err:   cleanupEngineAfterFailure(ctx, candidate, cause, cleanupLabel),
+	}
+}
+
+func rollbackCommitFailureLabel(err error) string {
+	var commitErr *candidateCommitError
+	if !errors.As(err, &commitErr) {
+		return "rollback commit failed"
+	}
+	switch commitErr.phase {
+	case candidateCommitPhaseRetire:
+		return "rollback retirement failed"
+	case candidateCommitPhaseStart:
+		return "rollback start failed"
+	case candidateCommitPhasePostStart:
+		return "rollback post-start acceptance failed"
+	case candidateCommitPhaseActivate:
+		return "rollback credential resolver activation failed"
+	default:
+		return "rollback commit failed"
+	}
+}
+
+// commitCandidateEngine retires the old engine, starts the staged candidate,
+// completes application-specific acceptance, and only then publishes its
+// credential resolvers. Any failure closes the candidate before returning.
+func commitCandidateEngine(
+	ctx context.Context,
+	oldEngine engineStopLifecycle,
+	candidate engineStartStopLifecycle,
+	afterStart func() error,
+	activateCredentialResolvers func() error,
+) error {
+	lifecycleCtx, cancel := contextWithFiniteDeadline(ctx, engineOperationTimeout)
+	defer cancel()
+	if oldEngine != nil {
+		if err := oldEngine.Stop(lifecycleCtx); err != nil {
+			return cleanupCandidateCommitFailure(
+				lifecycleCtx,
+				candidateCommitPhaseRetire,
+				candidate,
+				fmt.Errorf("retire current engine before candidate acceptance: %w", err),
+				"clean up candidate after current engine retirement failure",
+			)
+		}
+	}
+	if err := candidate.Start(lifecycleCtx); err != nil {
+		return cleanupCandidateCommitFailure(
+			lifecycleCtx,
+			candidateCommitPhaseStart,
+			candidate,
+			fmt.Errorf("candidate engine start failed: %w", err),
+			"clean up candidate after failed reload start",
+		)
+	}
+	if afterStart != nil {
+		if err := afterStart(); err != nil {
+			return cleanupCandidateCommitFailure(
+				lifecycleCtx,
+				candidateCommitPhasePostStart,
+				candidate,
+				fmt.Errorf("candidate post-start acceptance failed: %w", err),
+				"clean up candidate after post-start acceptance failure",
+			)
+		}
+	}
+	if activateCredentialResolvers != nil {
+		if err := activateCredentialResolvers(); err != nil {
+			return cleanupCandidateCommitFailure(
+				lifecycleCtx,
+				candidateCommitPhaseActivate,
+				candidate,
+				fmt.Errorf("candidate credential resolver activation failed: %w", err),
+				"clean up candidate after credential resolver activation failure",
+			)
+		}
+	}
+	return nil
+}
+
+func buildEngineFromConfig(ctx context.Context, engine engineConfigBuildLifecycle, cfg *config.WorkflowConfig, cleanup func()) error {
+	if err := engine.BuildFromConfig(cfg); err != nil {
+		buildErr := fmt.Errorf("failed to build workflow: %w", err)
+		cleanupCtx, cancel := detachedCleanupContext(ctx)
+		stopErr := engine.Stop(cleanupCtx)
+		cancel()
+		if cleanup != nil {
+			cleanup()
+		}
+		if stopErr != nil {
+			return errors.Join(buildErr, fmt.Errorf("clean up failed workflow build: %w", stopErr))
+		}
+		return buildErr
+	}
+	return nil
 }
 
 func newExternalCallbackServer(engine *workflow.StdEngine) *pluginexternal.CallbackServer {
@@ -287,27 +603,29 @@ type mgmtComponents struct {
 // execution subsystem. These are registered with each new Application
 // instance after an engine reload.
 type serviceComponents struct {
-	v1Handler        http.Handler          // V1 API handler (dashboard)
-	executionTracker executionTrackerIface // CQRS execution tracking
-	runtimeManager   runtimeLifecycle      // filesystem-loaded workflow instances
-	reporter         observabilityReporter // background observability reporter
-	timelineMux      http.Handler          // timeline handler mux
-	replayMux        http.Handler          // replay handler mux
-	backfillMux      http.Handler          // backfill/mock/diff handler mux
-	dlqMux           http.Handler          // DLQ handler mux
-	billingMux       http.Handler          // billing handler mux
-	nativeHandler    http.Handler          // native plugin handler
-	envMux           http.Handler          // environment management mux
-	cloudMux         http.Handler          // cloud providers mux
-	pluginRegMux     http.Handler          // plugin registry mux
-	runtimeMux       http.Handler          // runtime instances API
-	ingestMux        http.Handler          // ingest API for remote workers
+	v1Handler         http.Handler          // V1 API handler (dashboard)
+	executionTracker  executionTrackerIface // CQRS execution tracking
+	runtimeManager    runtimeLifecycle      // filesystem-loaded workflow instances
+	reporter          observabilityReporter // background observability reporter
+	timelineMux       http.Handler          // timeline handler mux
+	replayMux         http.Handler          // replay handler mux
+	backfillMux       http.Handler          // backfill/mock/diff handler mux
+	dlqMux            http.Handler          // DLQ handler mux
+	billingMux        http.Handler          // billing handler mux
+	nativeHandler     http.Handler          // native plugin handler
+	envMux            http.Handler          // environment management mux
+	cloudMux          http.Handler          // cloud providers mux
+	externalPluginMux http.Handler          // current engine's external plugin manager mux
+	pluginRegMux      http.Handler          // plugin registry mux
+	runtimeMux        http.Handler          // runtime instances API
+	ingestMux         http.Handler          // ingest API for remote workers
 }
 
 // serverApp holds all components needed to run the server. Persistent resources
 // (stores, handlers, muxes) are stored here so they survive engine reloads.
 // Only the engine itself (modules, handlers, triggers) is recreated on reload.
 type serverApp struct {
+	reloadMu       sync.Mutex
 	engine         *workflow.StdEngine
 	engineManager  *workflow.WorkflowEngineManager
 	pgStore        *evstore.PGStore // multi-workflow mode PG connection
@@ -319,6 +637,12 @@ type serverApp struct {
 	mgmt           mgmtComponents
 	services       serviceComponents
 	currentConfig  *config.WorkflowConfig // last loaded config, used by dynamic config watcher
+}
+
+func (app *serverApp) withReloadTransaction(operation func() error) error {
+	app.reloadMu.Lock()
+	defer app.reloadMu.Unlock()
+	return operation()
 }
 
 // ReconfigureModules delegates to the current engine, ensuring the reloader
@@ -834,23 +1158,6 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 	}
 
 	// -----------------------------------------------------------------------
-	// External plugin management handler
-	// -----------------------------------------------------------------------
-
-	extPluginDir2 := filepath.Join(*dataDir, "plugins")
-	extPluginMgr := pluginexternal.NewExternalPluginManager(extPluginDir2, log.Default())
-	extPluginMgr.SetCallbackServer(newExternalCallbackServer(engine))
-	extPluginHandler := pluginexternal.NewPluginHandler(extPluginMgr)
-	extPluginMux := http.NewServeMux()
-	extPluginHandler.RegisterRoutes(extPluginMux)
-
-	engine.GetApp().RegisterModule(module.NewServiceModule("admin-external-plugins", extPluginMux))
-	if regErr := engine.GetApp().RegisterService("admin-external-plugins", extPluginMux); regErr != nil {
-		logger.Warn("Failed to register external plugin service", "error", regErr)
-	}
-	logger.Info("Registered external plugin management API")
-
-	// -----------------------------------------------------------------------
 	// Plugin composite registry
 	// -----------------------------------------------------------------------
 
@@ -910,7 +1217,7 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		if startErr := eng.Start(context.Background()); startErr != nil {
+		if startErr := startEngineWithCleanup(context.Background(), eng, "start runtime workflow engine"); startErr != nil {
 			return nil, startErr
 		}
 		return func(ctx context.Context) error {
@@ -954,6 +1261,11 @@ func (app *serverApp) initStores(logger *slog.Logger) error {
 // only the Application's service registry is re-populated.
 func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 	engine := app.engine
+	externalPluginMux, err := newExternalPluginAdminMux(engine.GetApp())
+	if err != nil {
+		return fmt.Errorf("create external plugin management API: %w", err)
+	}
+	app.services.externalPluginMux = externalPluginMux
 
 	// Wire EventRecorder adapter to the pipeline handler so pipeline
 	// executions emit events to the event store. The handler is discovered
@@ -981,17 +1293,18 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 
 	// Register all delegate service modules with the new Application
 	delegateServices := map[string]http.Handler{
-		"admin-timeline-mgmt":   app.services.timelineMux,
-		"admin-replay-mgmt":     app.services.replayMux,
-		"admin-backfill-mgmt":   app.services.backfillMux,
-		"admin-dlq-mgmt":        app.services.dlqMux,
-		"admin-billing-mgmt":    app.services.billingMux,
-		"admin-native-plugins":  app.services.nativeHandler,
-		"admin-env-mgmt":        app.services.envMux,
-		"admin-cloud-providers": app.services.cloudMux,
-		"admin-plugin-registry": app.services.pluginRegMux,
-		"admin-ingest-mgmt":     app.services.ingestMux,
-		"admin-runtime-mgmt":    app.services.runtimeMux,
+		"admin-timeline-mgmt":    app.services.timelineMux,
+		"admin-replay-mgmt":      app.services.replayMux,
+		"admin-backfill-mgmt":    app.services.backfillMux,
+		"admin-dlq-mgmt":         app.services.dlqMux,
+		"admin-billing-mgmt":     app.services.billingMux,
+		"admin-native-plugins":   app.services.nativeHandler,
+		"admin-env-mgmt":         app.services.envMux,
+		"admin-cloud-providers":  app.services.cloudMux,
+		"admin-external-plugins": app.services.externalPluginMux,
+		"admin-plugin-registry":  app.services.pluginRegMux,
+		"admin-ingest-mgmt":      app.services.ingestMux,
+		"admin-runtime-mgmt":     app.services.runtimeMux,
 	}
 	for name, handler := range delegateServices {
 		if handler == nil {
@@ -1057,73 +1370,85 @@ func (app *serverApp) registerPostStartServices(logger *slog.Logger) error {
 
 // reloadEngine implements a safe try-activate reload:
 //  1. Build candidate engine from newCfg (no ports bound, current engine stays live).
-//  2. Stop current engine only after the candidate has been built successfully.
-//  3. Start candidate engine; on failure rebuild from the previous config and
-//     restart it (rollback).
+//  2. Retire the current engine after the candidate has built successfully.
+//  3. Start and accept the candidate while its credential resolvers remain
+//     application-scoped.
+//  4. Publish candidate resolvers only after the engine is fully accepted;
+//     rebuild and restart the previous config on any failed commit step.
 //
 // Stores, handlers, and database connections stored on serverApp survive
 // every reload cycle.
 func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
+	return app.withReloadTransaction(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), engineOperationTimeout)
+		defer cancel()
+		return app.reloadEngineContext(ctx, newCfg)
+	})
+}
+
+func (app *serverApp) reloadEngineContext(ctx context.Context, newCfg *config.WorkflowConfig) error {
 	logger := app.logger
 
 	// Stage 1: Build candidate. Current engine is still live; if this fails
 	// the old engine continues serving without interruption.
-	newEngine, _, _, buildErr := buildEngine(newCfg, logger)
+	newEngine, _, _, buildErr := buildCandidateEngineContext(ctx, newCfg, logger)
 	if buildErr != nil {
 		return fmt.Errorf("failed to build candidate engine (current engine unchanged): %w", buildErr)
 	}
-
-	// Stage 2: Stop the current engine now that a viable candidate exists.
 	oldEngine := app.engine
 	oldConfig := app.currentConfig
-	if stopErr := oldEngine.Stop(context.Background()); stopErr != nil {
-		logger.Warn("Error stopping engine during reload", "error", stopErr)
+	candidateFailure := commitCandidateEngine(
+		ctx,
+		oldEngine,
+		newEngine,
+		func() error {
+			// Register service consumers only after Start succeeds. Resolver
+			// promotion remains the final acceptance step below.
+			app.engine = newEngine
+			app.currentConfig = newCfg
+			registerManagementServices(logger, app)
+			if app.stores.v1Store != nil {
+				return app.registerPostStartServices(logger)
+			}
+			return nil
+		},
+		func() error { return activateEngineCredentialResolvers(newEngine) },
+	)
+	if candidateFailure == nil {
+		logger.Info("Engine reloaded successfully — all services preserved")
+		return nil
 	}
 
-	// Update references before registering services (registerManagementServices
-	// reads app.engine to reach the Application registry).
-	app.engine = newEngine
-	app.currentConfig = newCfg
-	registerManagementServices(logger, app)
-
-	// Stage 3: Activate candidate.
-	if startErr := newEngine.Start(context.Background()); startErr != nil {
-		logger.Error("Candidate engine failed to start; attempting rollback to previous config", "error", startErr)
-		if stopErr := newEngine.Stop(context.Background()); stopErr != nil {
-			logger.Warn("Failed to stop candidate engine after failed reload start", "error", stopErr)
-		}
-
-		// Rollback: rebuild from previous config and restart.
-		rollbackEngine, _, _, rollbackBuildErr := buildEngine(oldConfig, logger)
-		if rollbackBuildErr != nil {
-			app.currentConfig = oldConfig // keep old config pointer for diagnostics
-			return fmt.Errorf("reload failed AND rollback build failed — process is degraded: candidate=%w, rollback=%v", startErr, rollbackBuildErr)
-		}
-		app.engine = rollbackEngine
+	logger.Error("Candidate engine commit failed; attempting rollback to previous config", "error", candidateFailure)
+	rollbackCtx, rollbackCancel := detachedOperationContext(ctx, engineOperationTimeout)
+	defer rollbackCancel()
+	rollbackEngine, _, _, rollbackBuildErr := buildCandidateEngineContext(rollbackCtx, oldConfig, logger)
+	if rollbackBuildErr != nil {
+		app.engine = oldEngine
 		app.currentConfig = oldConfig
 		registerManagementServices(logger, app)
-		if rollbackStartErr := rollbackEngine.Start(context.Background()); rollbackStartErr != nil {
-			return fmt.Errorf("reload failed AND rollback start failed — process is degraded: candidate=%w, rollback=%v", startErr, rollbackStartErr)
-		}
-		if app.stores.v1Store != nil {
-			if regErr := app.registerPostStartServices(logger); regErr != nil {
-				logger.Warn("Failed to re-register post-start services during rollback", "error", regErr)
+		return errors.Join(candidateFailure, fmt.Errorf("rollback build failed — process is degraded: %w", rollbackBuildErr))
+	}
+	rollbackFailure := commitCandidateEngine(
+		rollbackCtx,
+		nil,
+		rollbackEngine,
+		func() error {
+			app.engine = rollbackEngine
+			app.currentConfig = oldConfig
+			registerManagementServices(logger, app)
+			if app.stores.v1Store != nil {
+				return app.registerPostStartServices(logger)
 			}
-		}
-		logger.Info("Engine reload rolled back to previous config")
-		return fmt.Errorf("reload failed (rolled back to previous config): %w", startErr)
+			return nil
+		},
+		func() error { return activateEngineCredentialResolvers(rollbackEngine) },
+	)
+	if rollbackFailure != nil {
+		return errors.Join(candidateFailure, fmt.Errorf("%s — process is degraded: %w", rollbackCommitFailureLabel(rollbackFailure), rollbackFailure))
 	}
-
-	// Stage 4: Re-register post-start services with the new Application's
-	// service registry (stores are already initialized, just need re-wiring).
-	if app.stores.v1Store != nil {
-		if regErr := app.registerPostStartServices(logger); regErr != nil {
-			return fmt.Errorf("failed to re-register post-start services: %w", regErr)
-		}
-	}
-
-	logger.Info("Engine reloaded successfully — all services preserved")
-	return nil
+	logger.Info("Engine reload rolled back to previous config")
+	return fmt.Errorf("reload failed (rolled back to previous config): %w", candidateFailure)
 }
 
 // tryActivateEngine builds a candidate engine from cfg without stopping the
@@ -1131,7 +1456,9 @@ func (app *serverApp) reloadEngine(newCfg *config.WorkflowConfig) error {
 // that returns a structured result describing what the candidate would expose.
 // If the build fails, the current engine is completely unaffected.
 func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.TryActivateResult, error) {
-	candidateEngine, _, _, buildErr := buildEngine(cfg, app.logger)
+	ctx, cancel := context.WithTimeout(context.Background(), engineOperationTimeout)
+	defer cancel()
+	candidateEngine, _, _, buildErr := buildCandidateEngineContext(ctx, cfg, app.logger)
 	if buildErr != nil {
 		return &module.TryActivateResult{
 			Status: "build_failed",
@@ -1139,12 +1466,27 @@ func (app *serverApp) tryActivateEngine(cfg *config.WorkflowConfig) (*module.Try
 		}, buildErr
 	}
 
-	// Collect registered module/step/trigger type names from the candidate.
+	return inspectAndStopCandidateEngine(ctx, candidateEngine)
+}
+
+type inspectableCandidateEngine interface {
+	RegisteredModuleTypes() []string
+	RegisteredStepTypes() []string
+	RegisteredTriggerTypes() []string
+	Stop(context.Context) error
+}
+
+func inspectAndStopCandidateEngine(ctx context.Context, candidate inspectableCandidateEngine) (*module.TryActivateResult, error) {
 	result := &module.TryActivateResult{
 		Status:       "build_ok",
-		ModuleTypes:  candidateEngine.RegisteredModuleTypes(),
-		StepTypes:    candidateEngine.RegisteredStepTypes(),
-		TriggerTypes: candidateEngine.RegisteredTriggerTypes(),
+		ModuleTypes:  candidate.RegisteredModuleTypes(),
+		StepTypes:    candidate.RegisteredStepTypes(),
+		TriggerTypes: candidate.RegisteredTriggerTypes(),
+	}
+	cleanupCtx, cancel := detachedCleanupContext(ctx)
+	defer cancel()
+	if err := candidate.Stop(cleanupCtx); err != nil {
+		return result, fmt.Errorf("clean up inspected candidate engine: %w", err)
 	}
 	return result, nil
 }
@@ -1259,15 +1601,15 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 	// configured address. The management mux (AI, dynamic components, workflow UI)
 	// listens on a separate management port to avoid conflicts.
 	if app.engine != nil {
-		if err := app.engine.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start workflow engine: %w", err)
+		if err := startEngineWithCleanup(ctx, app.engine, "failed to start workflow engine"); err != nil {
+			return err
 		}
 	}
 
 	// Run post-start hooks (e.g., wiring handlers that depend on started modules)
-	for _, fn := range app.postStartFuncs {
-		if err := fn(); err != nil {
-			return fmt.Errorf("post-start hook failed: %w", err)
+	if app.engine != nil {
+		if err := runPostStartHooksWithCleanup(ctx, app.engine, app.postStartFuncs); err != nil {
+			return err
 		}
 	}
 
@@ -1348,18 +1690,20 @@ func run(ctx context.Context, app *serverApp, listenAddr string) error {
 		app.logger.Info("Stopped observability reporter")
 	}
 
+	shutdownCtx, shutdownCancel := detachedCleanupContext(ctx)
+	defer shutdownCancel()
 	if app.services.runtimeManager != nil {
-		if err := app.services.runtimeManager.StopAll(context.Background()); err != nil {
+		if err := app.services.runtimeManager.StopAll(shutdownCtx); err != nil {
 			app.logger.Error("Runtime manager shutdown error", "error", err)
 		}
 	}
 	if app.engineManager != nil {
-		if err := app.engineManager.StopAll(context.Background()); err != nil {
+		if err := app.engineManager.StopAll(shutdownCtx); err != nil {
 			app.logger.Error("Engine manager shutdown error", "error", err)
 		}
 	}
 	if app.engine != nil {
-		if err := app.engine.Stop(context.Background()); err != nil {
+		if err := app.engine.Stop(shutdownCtx); err != nil {
 			app.logger.Error("Engine shutdown error", "error", err)
 		}
 	}
@@ -1700,13 +2044,13 @@ func runMultiWorkflow(logger *slog.Logger) error {
 
 	// Start admin engine (background — handles admin UI on :8081)
 	if app.engine != nil {
-		if err := app.engine.Start(ctx); err != nil {
-			return fmt.Errorf("start admin engine: %w", err)
+		if err := startEngineWithCleanup(ctx, app.engine, "start admin engine"); err != nil {
+			return err
 		}
 	}
-	for _, fn := range app.postStartFuncs {
-		if err := fn(); err != nil {
-			logger.Warn("Post-start hook failed", "error", err)
+	if app.engine != nil {
+		if err := runPostStartHooksWithCleanup(ctx, app.engine, app.postStartFuncs); err != nil {
+			return err
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -189,6 +190,11 @@ func TestManifestValidate(t *testing.T) {
 		{"missing dep constraint", func(m *PluginManifest) {
 			m.Dependencies = []Dependency{{Name: "dep", Constraint: ""}}
 		}},
+		{"invalid provider declarations", func(m *PluginManifest) {
+			m.CredentialSources = []CredentialSourceDecl{{
+				Source: "issuer", Outputs: []CredentialOutputDecl{{Key: "id"}}, IdentifierKey: "id",
+			}}
+		}},
 	}
 
 	for _, tt := range tests {
@@ -221,6 +227,55 @@ func TestManifestValidateWithContract(t *testing.T) {
 	}
 	if err := m.Validate(); err != nil {
 		t.Fatalf("expected valid manifest with contract, got: %v", err)
+	}
+}
+
+func TestProviderManifestRoundTripFullManifest(t *testing.T) {
+	_ = PluginManifest{CredentialSources: []CredentialSourceDecl{{Source: "literal-api"}}}
+	raw := providerManifestRoundTripFixture()
+	var manifest PluginManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal provider manifest: %v", err)
+	}
+	out, err := json.Marshal(&manifest)
+	if err != nil {
+		t.Fatalf("marshal provider manifest: %v", err)
+	}
+	assertProviderManifestFieldsPreserved(t, raw, out)
+}
+
+func providerManifestRoundTripFixture() []byte {
+	return []byte(`{
+		"name":"provider-plugin","version":"1.0.0","author":"Test","description":"provider declarations",
+		"credentialSources":[{"source":"digitalocean.spaces","concurrencyMode":"provider_idempotent","outputs":[{"key":"accessKeyId","sensitive":false},{"key":"secretAccessKey"}],"identifierKey":"accessKeyId"}],
+		"credentialResolvers":[{"provider":"aws","credentialTypes":["static","env"]}],
+		"kubernetesBackends":[{"name":"gke","resourceType":"infra.gke_cluster"}],
+		"containerRegistries":[{"type":"ghcr","operations":["login","logout","push","prune"]}],
+		"secretStores":[{"type":"aws-secrets-manager","operations":["get","list","stat_all","check_access"],"scopes":["account","region"]}],
+		"consumesContracts":[{"id":"workflow.provider.credential-issuer","protocol":{"min":1,"max":2}}]
+	}`)
+}
+
+func assertProviderManifestFieldsPreserved(t *testing.T, wantJSON, gotJSON []byte) {
+	t.Helper()
+	var want, got map[string]json.RawMessage
+	if err := json.Unmarshal(wantJSON, &want); err != nil {
+		t.Fatalf("decode expected manifest: %v", err)
+	}
+	if err := json.Unmarshal(gotJSON, &got); err != nil {
+		t.Fatalf("decode round-trip manifest: %v", err)
+	}
+	for _, field := range []string{"credentialSources", "credentialResolvers", "kubernetesBackends", "containerRegistries", "secretStores", "consumesContracts"} {
+		var wantValue, gotValue any
+		if err := json.Unmarshal(want[field], &wantValue); err != nil {
+			t.Fatalf("decode expected %s: %v", field, err)
+		}
+		if err := json.Unmarshal(got[field], &gotValue); err != nil {
+			t.Fatalf("decode round-trip %s: %v", field, err)
+		}
+		if !reflect.DeepEqual(gotValue, wantValue) {
+			t.Errorf("%s not preserved: got %s, want %s", field, got[field], want[field])
+		}
 	}
 }
 

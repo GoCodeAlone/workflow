@@ -3,8 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/workflow/config"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/secrets"
 )
 
@@ -17,6 +25,36 @@ type writeOnlyProvider struct {
 	listCalls int
 	listOK    bool
 	name      string
+}
+
+type cancelAfterFirstSecretMutationProvider struct {
+	cancel      context.CancelFunc
+	cancelAfter int
+	setCalls    []string
+	deleteCalls []string
+}
+
+func (*cancelAfterFirstSecretMutationProvider) Name() string { return "cancel-after-first" }
+func (*cancelAfterFirstSecretMutationProvider) Get(context.Context, string) (string, error) {
+	return "", secrets.ErrNotFound
+}
+func (p *cancelAfterFirstSecretMutationProvider) Set(_ context.Context, key, _ string) error {
+	p.setCalls = append(p.setCalls, key)
+	cancelAfter := p.cancelAfter
+	if cancelAfter == 0 {
+		cancelAfter = 1
+	}
+	if len(p.setCalls) == cancelAfter && p.cancel != nil {
+		p.cancel()
+	}
+	return nil
+}
+func (p *cancelAfterFirstSecretMutationProvider) Delete(_ context.Context, key string) error {
+	p.deleteCalls = append(p.deleteCalls, key)
+	return nil
+}
+func (*cancelAfterFirstSecretMutationProvider) List(context.Context) ([]string, error) {
+	return nil, nil
 }
 
 func (p *writeOnlyProvider) Name() string {
@@ -58,6 +96,549 @@ func withStubGenerator(t *testing.T, fn func(ctx context.Context, genType string
 	prev := generateSecret
 	generateSecret = fn
 	t.Cleanup(func() { generateSecret = prev })
+}
+
+func TestBootstrapSecretsStopsBeforeNextGeneratorMutationAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := &cancelAfterFirstSecretMutationProvider{cancel: cancel}
+	withStubGenerator(t, func(context.Context, string, map[string]any) (string, error) { return "generated", nil })
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{
+		{Key: "FIRST", Type: "random_hex"},
+		{Key: "SECOND", Type: "random_hex"},
+	}}, nil)
+	if !errors.Is(err, context.Canceled) || len(provider.setCalls) != 1 || provider.setCalls[0] != "FIRST" {
+		t.Fatalf("error=%v set calls=%v", err, provider.setCalls)
+	}
+}
+
+func TestBootstrapSecretsLegacyPreparationCancellationStopsBeforeGenerator(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	generatorCalls := 0
+	withStubGenerator(t, func(context.Context, string, map[string]any) (string, error) {
+		generatorCalls++
+		return `{"access_key":"new-id","secret_key":"new-secret"}`, nil
+	})
+	ctx = withCredentialIssuerOptions(ctx, credentialIssuerOptions{
+		BeforeIssue: func(context.Context, bool) error {
+			cancel()
+			return nil
+		},
+	})
+	provider := &transactionalSecretProvider{stored: map[string]string{
+		"SPACES_access_key": "old-id", "SPACES_secret_key": "old-secret",
+	}}
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "SPACES", Type: "provider_credential", Source: "digitalocean.spaces",
+	}}}, map[string]bool{"SPACES": true}, nil)
+	if !errors.Is(err, context.Canceled) || generatorCalls != 0 {
+		t.Fatalf("error=%v generator calls=%d", err, generatorCalls)
+	}
+}
+
+func TestBootstrapSecretsStopsBeforeNextTypedOutputAfterCancellation(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := &cancelAfterFirstSecretMutationProvider{cancel: cancel}
+	ctx = withCredentialIssuerOptions(ctx, credentialIssuerOptions{
+		Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+	})
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if !errors.Is(err, context.Canceled) || len(provider.setCalls) != 1 || len(provider.deleteCalls) != 0 || client.deleteCalls != 0 {
+		t.Fatalf("error=%v set calls=%v delete calls=%v issuer deletes=%d", err, provider.setCalls, provider.deleteCalls, client.deleteCalls)
+	}
+}
+
+func TestBootstrapSecretsUsesInstalledTypedCredentialIssuer(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	issuerOptions := credentialIssuerOptions{Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true}
+	withStubGenerator(t, func(context.Context, string, map[string]any) (string, error) {
+		t.Fatal("legacy generator called despite installed typed credential source")
+		return "", nil
+	})
+
+	provider := &writeOnlyProvider{listOK: true}
+	ctx := withCredentialIssuerOptions(context.Background(), issuerOptions)
+	generated, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generated["EXAMPLE_id"] != "credential-123" || generated["EXAMPLE_secret"] != "sensitive-value" {
+		t.Fatalf("generated=%v", generated)
+	}
+	state, err := loadCredentialOperationState(issuerOptions.StateDir, "example.source", "deploy-key")
+	if err != nil || state.Status != credentialOperationStored {
+		t.Fatalf("operation state=%+v error=%v", state, err)
+	}
+}
+
+func TestBootstrapSecretsPreservesTypedCredentialOutputBytes(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{issueResponse: &pb.CredentialIssueResponse{
+		Outputs: []*pb.CredentialOutput{
+			{Key: "id", Value: []byte("credential-123"), Sensitive: true},
+			{Key: "secret", Value: []byte{0xff, 0x00, 0x7f}, Sensitive: true},
+		},
+		Identifier:          "credential-123",
+		IdentifierSensitive: true,
+		ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+	}}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	provider := &transactionalSecretProvider{}
+	ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+		Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+	})
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []byte(provider.stored["EXAMPLE_secret"]); !slices.Equal(got, []byte{0xff, 0x00, 0x7f}) {
+		t.Fatalf("stored typed bytes=%x, want ff007f", got)
+	}
+}
+
+func TestCredentialIdentifierForLogRedactsSensitiveValues(t *testing.T) {
+	if got := credentialIdentifierForLog("credential-123", true); strings.Contains(got, "credential-123") {
+		t.Fatalf("sensitive identifier leaked: %q", got)
+	}
+	if got := credentialIdentifierForLog("metadata-id", false); got != "metadata-id" {
+		t.Fatalf("non-sensitive identifier=%q", got)
+	}
+}
+
+func TestBootstrapSecretsTypedIssuerRollsBackUpstreamAndPartialStore(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{
+		issueResponse: confirmedCredentialIssueResponse(),
+		deleteResponse: &pb.CredentialDeleteResponse{
+			Identifier: "credential-123", IdentifierSensitive: true,
+			ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+		},
+	}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	issuerOptions := credentialIssuerOptions{Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true}
+	ctx := withCredentialIssuerOptions(context.Background(), issuerOptions)
+	provider := &failOnSetProvider{failKey: "EXAMPLE_secret"}
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if err == nil {
+		t.Fatal("want secret-store failure")
+	}
+	if client.deleteCalls != 1 || client.deleteIdentifier != "credential-123" {
+		t.Fatalf("typed rollback calls=%d identifier=%q", client.deleteCalls, client.deleteIdentifier)
+	}
+	sort.Strings(provider.deleted)
+	if got := strings.Join(provider.deleted, ","); got != "EXAMPLE_id,EXAMPLE_secret" {
+		t.Fatalf("partial store cleanup=%q", got)
+	}
+	state, loadErr := loadCredentialOperationState(issuerOptions.StateDir, "example.source", "deploy-key")
+	if loadErr != nil || state.Status != credentialOperationRolledBack {
+		t.Fatalf("state=%+v error=%v", state, loadErr)
+	}
+}
+
+func TestBootstrapSecretsTypedIssuerRejectsOpaqueSecretStoreBeforeIssue(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	provider := &writeOnlyProvider{
+		existing: []string{"EXAMPLE_id"},
+		listOK:   false,
+	}
+	ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+		Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+	})
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot safely") {
+		t.Fatalf("error=%v, want fail-closed opaque-store diagnostic", err)
+	}
+	if client.issueCalls != 0 || len(provider.stored) != 0 {
+		t.Fatalf("opaque store mutated: Issue=%d stored=%v", client.issueCalls, provider.stored)
+	}
+}
+
+func TestBootstrapSecretsTypedForceRotateRevokesOldCredentialThroughSelectedIssuer(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"},{"key":"created_at"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{
+		issueResponse: confirmedCredentialIssueResponse(),
+		deleteResponse: &pb.CredentialDeleteResponse{
+			Identifier: "old-credential", IdentifierSensitive: true,
+			ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+		},
+	}
+	client.issueResponse.Outputs = append(client.issueResponse.Outputs, &pb.CredentialOutput{
+		Key: "created_at", Value: []byte("provider-owned-non-rfc3339-value"), Sensitive: true,
+	})
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}, {Key: "created_at"}}, IdentifierKey: "id",
+	})
+	issuerOptions := credentialIssuerOptions{Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true}
+	provider := &transactionalSecretProvider{stored: map[string]string{
+		"EXAMPLE_id": "old-credential", "EXAMPLE_secret": "old-secret",
+	}}
+	legacyRevoker := &recordingRevoker{}
+	ctx := withCredentialIssuerOptions(context.Background(), issuerOptions)
+	_, rotations, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, map[string]bool{"EXAMPLE": true}, legacyRevoker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.deleteCalls != 1 || client.deleteIdentifier != "old-credential" || client.deleteOperationID != client.operationID+"-delete-previous" {
+		t.Fatalf("selected issuer Delete calls=%d operation=%q identifier=%q", client.deleteCalls, client.deleteOperationID, client.deleteIdentifier)
+	}
+	if len(legacyRevoker.calls) != 0 {
+		t.Fatalf("typed rotation crossed into legacy revoker: %+v", legacyRevoker.calls)
+	}
+	if provider.stored["EXAMPLE_id"] != "credential-123" || provider.stored["EXAMPLE_secret"] != "sensitive-value" {
+		t.Fatalf("stored values=%v", provider.stored)
+	}
+	if len(rotations) != 1 {
+		t.Fatalf("rotations=%+v", rotations)
+	}
+	if !rotations[0].CutoffFromInventory || rotations[0].CreatedAt != "" {
+		t.Fatalf("typed rotation cutoff metadata=%+v", rotations[0])
+	}
+}
+
+func TestBootstrapSecretsTypedForceRotateRestoresStoredOutputsAfterEverySetFailure(t *testing.T) {
+	for _, failKey := range []string{"EXAMPLE_id", "EXAMPLE_secret"} {
+		t.Run(failKey, func(t *testing.T) {
+			pluginDir := t.TempDir()
+			installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+			if err := os.MkdirAll(installedDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+			if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			client := &recordingCredentialIssuerClient{
+				issueResponse: confirmedCredentialIssueResponse(),
+				deleteResponse: &pb.CredentialDeleteResponse{
+					Identifier: "credential-123", IdentifierSensitive: true,
+					ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+				},
+			}
+			withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+				Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+				Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+			})
+			provider := &transactionalSecretProvider{
+				stored: map[string]string{
+					"EXAMPLE_id": "old-credential", "EXAMPLE_secret": "old-secret",
+				},
+				failKey: failKey,
+			}
+			if failKey == "EXAMPLE_id" {
+				provider.failValue = "credential-123"
+			} else {
+				provider.failValue = "sensitive-value"
+			}
+			legacyRevoker := &recordingRevoker{}
+			ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+				Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+			})
+			_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+				Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+			}}}, map[string]bool{"EXAMPLE": true}, legacyRevoker)
+			if err == nil {
+				t.Fatal("want secret-store failure")
+			}
+			if provider.stored["EXAMPLE_id"] != "old-credential" || provider.stored["EXAMPLE_secret"] != "old-secret" {
+				t.Fatalf("failed rotation destroyed working values: %v", provider.stored)
+			}
+			if client.deleteCalls != 1 || client.deleteIdentifier != "credential-123" || client.deleteOperationID != client.operationID+"-rollback" {
+				t.Fatalf("new credential rollback calls=%d operation=%q identifier=%q", client.deleteCalls, client.deleteOperationID, client.deleteIdentifier)
+			}
+			if len(legacyRevoker.calls) != 0 {
+				t.Fatalf("typed rollback crossed into legacy revoker: %+v", legacyRevoker.calls)
+			}
+		})
+	}
+}
+
+func TestBootstrapSecretsTypedPartialRegenerationRestoresStoredOutputsAfterEverySetFailure(t *testing.T) {
+	for _, failKey := range []string{"EXAMPLE_id", "EXAMPLE_secret"} {
+		t.Run(failKey, func(t *testing.T) {
+			pluginDir := t.TempDir()
+			installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+			if err := os.MkdirAll(installedDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+			if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			client := &recordingCredentialIssuerClient{
+				issueResponse: confirmedCredentialIssueResponse(),
+				deleteResponse: &pb.CredentialDeleteResponse{
+					Identifier: "credential-123", IdentifierSensitive: true,
+					ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+				},
+			}
+			withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+				Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+				Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+			})
+			provider := &transactionalSecretProvider{
+				stored:    map[string]string{"EXAMPLE_id": "old-credential"},
+				failKey:   failKey,
+				failValue: map[string]string{"EXAMPLE_id": "credential-123", "EXAMPLE_secret": "sensitive-value"}[failKey],
+			}
+			ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+				Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+			})
+			_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+				Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+			}}}, nil)
+			if err == nil {
+				t.Fatal("want secret-store failure")
+			}
+			if got := provider.stored["EXAMPLE_id"]; got != "old-credential" {
+				t.Fatalf("partial regeneration destroyed existing identifier: stored=%v", provider.stored)
+			}
+			if _, exists := provider.stored["EXAMPLE_secret"]; exists {
+				t.Fatalf("partial regeneration retained newly introduced secret: stored=%v", provider.stored)
+			}
+			if client.deleteCalls != 1 || client.deleteIdentifier != "credential-123" || client.deleteOperationID != client.operationID+"-rollback" {
+				t.Fatalf("new credential rollback calls=%d operation=%q identifier=%q", client.deleteCalls, client.deleteOperationID, client.deleteIdentifier)
+			}
+		})
+	}
+}
+
+func TestBootstrapSecretsTypedPartialRegenerationRevokesReplacedCredentialAfterStore(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{
+		issueResponse: confirmedCredentialIssueResponse(),
+		deleteResponse: &pb.CredentialDeleteResponse{
+			Identifier:          "old-credential",
+			ReconciliationState: pb.CredentialReconciliationState_CREDENTIAL_RECONCILIATION_STATE_CONFIRMED,
+		},
+	}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	provider := &transactionalSecretProvider{stored: map[string]string{"EXAMPLE_id": "old-credential"}}
+	ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+		Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+	})
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.stored["EXAMPLE_id"] != "credential-123" || provider.stored["EXAMPLE_secret"] != "sensitive-value" {
+		t.Fatalf("stored values=%v", provider.stored)
+	}
+	if client.deleteCalls != 1 || client.deleteIdentifier != "old-credential" || client.deleteOperationID != client.operationID+"-delete-previous" {
+		t.Fatalf("replaced credential cleanup calls=%d operation=%q identifier=%q", client.deleteCalls, client.deleteOperationID, client.deleteIdentifier)
+	}
+}
+
+func TestBootstrapSecretsTypedPartialRegenerationRejectsWriteOnlyStoreBeforeIssue(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	provider := &writeOnlyProvider{existing: []string{"EXAMPLE_id"}, listOK: true}
+	ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+		Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+	})
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "write-only") {
+		t.Fatalf("error=%v, want safe write-only partial-regeneration rejection", err)
+	}
+	if client.issueCalls != 0 || len(provider.stored) != 0 {
+		t.Fatalf("unsafe partial regeneration mutated state: Issue=%d stored=%v", client.issueCalls, provider.stored)
+	}
+}
+
+func TestBootstrapSecretsTypedForceRotateRejectsWriteOnlyStoreBeforeIssue(t *testing.T) {
+	pluginDir := t.TempDir()
+	installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+	if err := os.MkdirAll(installedDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"provider_idempotent","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+	if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+	withCredentialIssuerResolver(t, client, config.CredentialSourceDecl{
+		Source: "example.source", ConcurrencyMode: config.CredentialConcurrencyProviderIdempotent,
+		Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+	})
+	provider := &writeOnlyProvider{existing: []string{"EXAMPLE_id", "EXAMPLE_secret"}, listOK: true}
+	ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+		Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(), NonInteractive: true,
+	})
+	_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+		Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+	}}}, map[string]bool{"EXAMPLE": true})
+	if err == nil || !strings.Contains(err.Error(), "write-only") {
+		t.Fatalf("error=%v, want safe write-only rotation rejection", err)
+	}
+	if client.issueCalls != 0 || len(provider.stored) != 0 {
+		t.Fatalf("unsafe rotation mutated state: Issue=%d stored=%v", client.issueCalls, provider.stored)
+	}
+}
+
+func TestBootstrapSecretsTypedForceRotatePreflightFailurePreservesStoredOutputs(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        config.CredentialConcurrencyMode
+		resolveErr  error
+		acknowledge bool
+	}{
+		{name: "single writer acknowledgement", mode: config.CredentialConcurrencySingleWriter},
+		{name: "runtime parity", mode: config.CredentialConcurrencyProviderIdempotent, resolveErr: errFakeStoreUnavailable},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pluginDir := t.TempDir()
+			installedDir := filepath.Join(pluginDir, "workflow-plugin-example")
+			if err := os.MkdirAll(installedDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			manifest := `{"name":"workflow-plugin-example","version":"1.2.3","author":"Workflow tests","description":"provider capability fixture","credentialSources":[{"source":"example.source","concurrencyMode":"` + string(test.mode) + `","outputs":[{"key":"id"},{"key":"secret"}],"identifierKey":"id"}]}`
+			if err := os.WriteFile(filepath.Join(installedDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			client := &recordingCredentialIssuerClient{issueResponse: confirmedCredentialIssueResponse()}
+			oldResolve := resolveCredentialIssuerCapability
+			resolveCredentialIssuerCapability = func(context.Context, string, string) (pb.CredentialIssuerClient, func(), config.CredentialSourceDecl, string, string, bool, error) {
+				declaration := config.CredentialSourceDecl{
+					Source: "example.source", ConcurrencyMode: test.mode,
+					Outputs: []config.CredentialOutputDecl{{Key: "id"}, {Key: "secret"}}, IdentifierKey: "id",
+				}
+				if test.resolveErr != nil {
+					return nil, nil, config.CredentialSourceDecl{}, "", "", false, test.resolveErr
+				}
+				return client, func() {}, declaration, "workflow-plugin-example", "1.2.3", true, nil
+			}
+			t.Cleanup(func() { resolveCredentialIssuerCapability = oldResolve })
+
+			provider := &transactionalSecretProvider{stored: map[string]string{
+				"EXAMPLE_id": "old-credential", "EXAMPLE_secret": "old-secret",
+			}}
+			ctx := withCredentialIssuerOptions(context.Background(), credentialIssuerOptions{
+				Enabled: true, PluginDir: pluginDir, StateDir: t.TempDir(),
+				NonInteractive: true, AckSingleWriter: test.acknowledge,
+			})
+			_, _, err := bootstrapSecrets(ctx, provider, &SecretsConfig{Generate: []SecretGen{{
+				Key: "EXAMPLE", Type: "provider_credential", Source: "example.source", Name: "deploy-key",
+			}}}, map[string]bool{"EXAMPLE": true})
+			if err == nil {
+				t.Fatal("want issuer preflight failure")
+			}
+			if client.issueCalls != 0 || len(provider.deleted) != 0 || len(provider.setCalls) != 0 {
+				t.Fatalf("preflight failure mutated state: Issue=%d Delete=%v Set=%v", client.issueCalls, provider.deleted, provider.setCalls)
+			}
+			if provider.stored["EXAMPLE_id"] != "old-credential" || provider.stored["EXAMPLE_secret"] != "old-secret" {
+				t.Fatalf("preflight failure changed stored outputs: %v", provider.stored)
+			}
+		})
+	}
 }
 
 // TestBootstrapSecrets_WriteOnlyProviderSkipsExisting verifies that when the
@@ -308,6 +889,47 @@ func TestBootstrapSecrets_ProviderCredentialProbeIgnoresBareKey(t *testing.T) {
 type failOnSetProvider struct {
 	failKey  string
 	setCalls []string
+	deleted  []string
+}
+
+type transactionalSecretProvider struct {
+	stored    map[string]string
+	failKey   string
+	failValue string
+	setCalls  []string
+	deleted   []string
+}
+
+func (p *transactionalSecretProvider) Name() string { return "transactional-fake" }
+func (p *transactionalSecretProvider) Get(_ context.Context, key string) (string, error) {
+	value, ok := p.stored[key]
+	if !ok {
+		return "", secrets.ErrNotFound
+	}
+	return value, nil
+}
+func (p *transactionalSecretProvider) Set(_ context.Context, key, value string) error {
+	p.setCalls = append(p.setCalls, key)
+	if key == p.failKey && value == p.failValue {
+		return errFakeStoreUnavailable
+	}
+	if p.stored == nil {
+		p.stored = make(map[string]string)
+	}
+	p.stored[key] = value
+	return nil
+}
+func (p *transactionalSecretProvider) Delete(_ context.Context, key string) error {
+	p.deleted = append(p.deleted, key)
+	delete(p.stored, key)
+	return nil
+}
+func (p *transactionalSecretProvider) List(_ context.Context) ([]string, error) {
+	keys := make([]string, 0, len(p.stored))
+	for key := range p.stored {
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 func (p *failOnSetProvider) Name() string { return "fail-on-set" }
@@ -321,9 +943,12 @@ func (p *failOnSetProvider) Set(_ context.Context, key, _ string) error {
 	}
 	return nil
 }
-func (p *failOnSetProvider) Delete(_ context.Context, _ string) error { return nil }
+func (p *failOnSetProvider) Delete(_ context.Context, key string) error {
+	p.deleted = append(p.deleted, key)
+	return nil
+}
 func (p *failOnSetProvider) List(_ context.Context) ([]string, error) {
-	return nil, secrets.ErrUnsupported
+	return nil, nil
 }
 
 // recordingRevoker captures RevokeProviderCredential calls so the test

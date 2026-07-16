@@ -393,8 +393,11 @@ func TestInfraRotateAndPruneCmd_MultiProvider_ContinuesPastUnimplemented(t *test
 	origBoot := bootstrapSecrets
 	t.Cleanup(func() { bootstrapSecrets = origBoot })
 	bootRan := false
-	bootstrapSecrets = func(_ context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
+	bootstrapSecrets = func(ctx context.Context, _ secrets.Provider, _ *SecretsConfig, _ map[string]bool, _ ...interfaces.ProviderCredentialRevoker) (map[string]string, []RotationResult, error) {
 		bootRan = true
+		if err := runStubbedCredentialPreparation(ctx); err != nil {
+			return nil, nil, err
+		}
 		return map[string]string{}, []RotationResult{
 			{AccessKey: "AK_NEW", CreatedAt: "2026-05-09T00:00:00Z", Source: "digitalocean.spaces"},
 		}, nil

@@ -2,11 +2,125 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/GoCodeAlone/workflow/plugin/sdk/manifest_schema.json",
   "title": "Plugin SDK manifest",
-  "description": "Schema for the SDK-level plugin manifest (plugin.json) consumed by wfctl. Pure-additive; existing manifests without iacProvider remain valid. The root object permits additional properties so existing plugin.json files (with name/version/author/etc.) parse cleanly. The iacProvider sub-object is strict so typos like 'computeplanversion' or unknown keys are rejected at parse time, not silently downgraded to v1 dispatch.",
+  "description": "Schema for the SDK-level plugin manifest (plugin.json) consumed by wfctl. Pure-additive; existing manifests without provider declarations or iacProvider remain valid. The root object permits additional properties so existing plugin.json files (with name/version/author/etc.) parse cleanly. Provider declaration entries and iacProvider are strict so typos and unknown keys fail at parse time.",
   "type": "object",
   "properties": {
     "name": {
       "type": "string"
+    },
+    "credentialSources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "concurrencyMode", "outputs", "identifierKey"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "concurrencyMode": {
+            "type": "string",
+            "enum": ["provider_idempotent", "single_writer_required"]
+          },
+          "outputs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key"],
+              "properties": {
+                "key": { "type": "string", "minLength": 1 },
+                "sensitive": { "type": "boolean" }
+              }
+            }
+          },
+          "identifierKey": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "credentialResolvers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "credentialTypes"],
+        "properties": {
+          "provider": { "type": "string", "minLength": 1 },
+          "credentialTypes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "kubernetesBackends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "resourceType"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "resourceType": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "containerRegistries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "operations"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "operations": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "enum": ["login", "logout", "push", "prune"] }
+          }
+        }
+      }
+    },
+    "secretStores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "operations", "scopes"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "operations": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "enum": ["get", "list", "stat_all", "check_access"] }
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "consumesContracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "protocol"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "protocol": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["min", "max"],
+            "properties": {
+              "min": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+              "max": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+            }
+          }
+        }
+      }
     },
     "iacProvider": {
       "type": "object",

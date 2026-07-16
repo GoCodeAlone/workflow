@@ -2766,11 +2766,11 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 		Type:        "platform.kubernetes",
 		Label:       "Kubernetes Cluster",
 		Category:    "infrastructure",
-		Description: "Managed Kubernetes cluster (kind/k3s for local, EKS/GKE/AKS stubs for cloud)",
+		Description: "Kubernetes cluster managed by core-local kind/k3s or an installed plugin-declared backend",
 		Outputs:     []ServiceIODef{{Name: "cluster", Type: "JSON", Description: "Kubernetes cluster endpoint and kubeconfig"}},
 		ConfigFields: []ConfigFieldDef{
 			{Key: "account", Label: "Cloud Account", Type: FieldTypeString, Description: "Name of the cloud.account module"},
-			{Key: "type", Label: "Cluster Type", Type: FieldTypeString, Required: true, Description: "eks | gke | aks | kind | k3s"},
+			{Key: "type", Label: "Cluster Type", Type: FieldTypeString, Required: true, Description: "kind, k3s, or the exact backend name declared by an installed provider plugin"},
 			{Key: "version", Label: "Kubernetes Version", Type: FieldTypeString, Description: "e.g. 1.29"},
 			{Key: "nodeGroups", Label: "Node Groups", Type: FieldTypeArray, Description: "Node group definitions"},
 		},

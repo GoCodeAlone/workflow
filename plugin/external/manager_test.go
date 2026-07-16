@@ -2,16 +2,135 @@ package external
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
+
+func TestExternalPluginManagerContextCancelsStartupHandshake(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable-script fixture")
+	}
+	pluginRoot := t.TempDir()
+	const name = "hung-plugin"
+	pluginDir := filepath.Join(pluginRoot, name)
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"hung-plugin","version":"1.0.0","author":"Workflow tests","description":"non-handshaking cancellation fixture"}`
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, name), []byte("#!/bin/sh\nexec sleep 60\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewExternalPluginManager(pluginRoot, log.New(io.Discard, "", 0))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := manager.LoadPluginContext(ctx, name)
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Fatalf("startup error=%v, want context cancellation", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("canceled startup took %s", elapsed)
+	}
+}
+
+func TestExternalPluginManagerReleasedStartupContextDoesNotKillAcceptedPlugin(t *testing.T) {
+	pluginsDir := t.TempDir()
+	const pluginName = "accepted-context-fixture"
+	prepareContainerRegistryFixture(t, pluginsDir, pluginName, true, false)
+
+	manager := NewExternalPluginManager(pluginsDir, log.New(io.Discard, "", 0))
+	t.Cleanup(manager.Shutdown)
+	startupCtx, releaseStartup := context.WithCancel(context.Background())
+	adapter, err := manager.LoadPluginContext(startupCtx, pluginName)
+	if err != nil {
+		t.Fatalf("load plugin: %v", err)
+	}
+	releaseStartup()
+
+	callCtx, cancelCall := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelCall()
+	response, err := adapter.client.ContainerRegistryClient().DescribeRegistries(callCtx, &pb.ContainerRegistryDeclarationsRequest{})
+	if err != nil || len(response.GetRegistries()) == 0 {
+		t.Fatalf("accepted plugin died with released startup context: response=%v error=%v", response, err)
+	}
+}
+
+func TestExternalPluginManagerRejectsLifecycleMutationsAfterShutdown(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*ExternalPluginManager) error
+	}{
+		{
+			name: "load",
+			mutate: func(manager *ExternalPluginManager) error {
+				_, err := manager.LoadPluginContext(context.Background(), "orphan")
+				return err
+			},
+		},
+		{
+			name: "reload",
+			mutate: func(manager *ExternalPluginManager) error {
+				_, err := manager.ReloadPluginContext(context.Background(), "orphan")
+				return err
+			},
+		},
+		{name: "unload", mutate: func(manager *ExternalPluginManager) error {
+			return manager.UnloadPluginContext(context.Background(), "orphan")
+		}},
+		{name: "stage resolvers", mutate: func(manager *ExternalPluginManager) error {
+			return manager.StageCredentialResolvers()
+		}},
+		{name: "activate resolvers", mutate: func(manager *ExternalPluginManager) error {
+			return manager.ActivateCredentialResolvers()
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := NewExternalPluginManager(t.TempDir(), log.Default())
+			if err := manager.ShutdownContext(context.Background()); err != nil {
+				t.Fatalf("initial ShutdownContext: %v", err)
+			}
+			startCalls := 0
+			manager.startPlugin = func(string) (*pluginLaunch, error) {
+				startCalls++
+				return &pluginLaunch{client: &goplugin.Client{}, adapter: &ExternalPluginAdapter{}}, nil
+			}
+
+			err := test.mutate(manager)
+			if !errors.Is(err, ErrExternalPluginManagerClosed) {
+				t.Fatalf("mutation after shutdown error = %v, want terminal shutdown error", err)
+			}
+			if startCalls != 0 {
+				t.Fatalf("mutation after shutdown started %d plugin candidates", startCalls)
+			}
+			if manager.IsLoaded("orphan") || len(manager.LoadedPlugins()) != 0 {
+				t.Fatal("mutation after shutdown published plugin state")
+			}
+			if _, err := manager.DiscoverPlugins(); err != nil {
+				t.Fatalf("read-only discovery after shutdown: %v", err)
+			}
+			if err := manager.ShutdownContext(context.Background()); err != nil {
+				t.Fatalf("idempotent ShutdownContext: %v", err)
+			}
+		})
+	}
+}
 
 func TestPluginStderrForwarderPrefixesPluginLines(t *testing.T) {
 	var out bytes.Buffer
