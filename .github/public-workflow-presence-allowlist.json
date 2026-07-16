@@ -104,5 +104,11 @@
     "path": ".github/workflows/create-release.yml",
     "state": "active",
     "presence": "absent"
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
+    "state": "staged",
+    "presence": "present"
   }
 ]
