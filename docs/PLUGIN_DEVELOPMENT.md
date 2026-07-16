@@ -4,6 +4,40 @@ This guide covers how to create **built-in engine plugins** — compiled-in Go p
 
 > For **external** (gRPC-based, process-isolated) plugins, see [PLUGIN_DEVELOPMENT_GUIDE.md](PLUGIN_DEVELOPMENT_GUIDE.md).
 
+## External contract consumers
+
+External plugins declare the Workflow contracts they compile against in their
+root `plugin.json`; Workflow does not maintain a provider-name matrix:
+
+```json
+{
+  "consumesContracts": [
+    {
+      "id": "workflow.provider.credential-issuer",
+      "protocol": { "min": 1, "max": 1 }
+    }
+  ]
+}
+```
+
+Each entry names an exact contract and an inclusive protocol range. A plugin
+release that consumes more than one contract declares every contract. Keep the
+array in the source manifest even when its committed `version` remains the
+`0.0.0` release sentinel.
+
+Workflow's public compatibility workflow generates its consumer matrix from
+released, exact-tag checkouts and these declarations. It compiles each selected
+plugin against the Workflow pull-request checkout and exercises the real plugin
+handshake with `wfctl plugin verify-capabilities`. An affected release fails the
+gate when Workflow's current contract protocol falls outside its declared
+inclusive range. The job is GitHub-hosted and credential-free: plugin startup
+and capability discovery must not contact a provider API or require provider
+credentials.
+
+Provider-specific conformance belongs in the provider plugin repository. Public
+CI should use committed fakes or local emulators; any approved live-provider
+exercise must be manual and isolated from public pull-request workflows.
+
 ## Overview
 
 The workflow engine is decomposed into a minimal core and a set of plugins. The core handles YAML parsing, module lifecycle, service registry, workflow dispatch, pipeline execution, and plugin loading. Everything else — HTTP, messaging, state machines, storage, auth, observability — lives in plugins under `plugins/`.

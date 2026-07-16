@@ -1,36 +1,12 @@
-name: cross-plugin-build-test
+name: Contract Consumer Compatibility
+
 on:
   pull_request:
-    paths:
-      # rev4 — cycle-3 minor: only run on IaC-touching PRs to save ~5min/docs-PR.
-      # T9.2 quality-review fix: include go.mod/go.sum so transitive dep bumps
-      # (a frequent source of downstream-plugin compile breakage) trigger the gate
-      # even when interfaces/iac/platform/plugin code is untouched.
-      - 'interfaces/**'
-      - 'iac/**'
-      - 'platform/**'
-      - 'plugin/sdk/**'
-      # Strict-contracts cutover Task 6 — typed IaC contract + adapters live
-      # under plugin/external/{proto,sdk}; downstream IaC dispatch + remote-
-      # plugin orchestration code lives elsewhere under plugin/external/.
-      # Both surfaces affect the iac-typed-e2e job (cross-plugin gRPC wire
-      # behavior + handshake/loader changes); use the broad gate on
-      # plugin/external/** so any structural change to the external-plugin
-      # boundary triggers the cross-plugin smoke. CI cost is bounded —
-      # changes outside this dir already skip via the rest of the filter.
-      - 'plugin/external/**'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/cross-plugin-build-test.yml'
 
-# T9.2 quality-review fix: cancel older in-flight runs when a PR is updated.
-# Standard CI hygiene; saves CI minutes on rapid push cycles.
 concurrency:
-  group: cross-plugin-build-${{ github.ref }}
+  group: contract-consumers-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# R2 review: explicit minimal token permissions per CodeQL workflow-permissions
-# scan; this gate only needs to read the workflow + plugin checkouts.
 permissions:
   contents: read
 
@@ -39,60 +15,158 @@ defaults:
     shell: bash
 
 jobs:
-  cross-plugin-build:
+  select-contract-consumers:
+    name: Select contract consumers
     runs-on: ubuntu-latest
-    strategy:
-      # T9.2 quality-review fix: matches codeql.yml + release.yml precedent.
-      # The whole point of a cross-plugin gate is to surface ALL three plugins'
-      # breakage in a single CI run; default fail-fast: true would cancel the
-      # other two on first failure and force iterative re-runs to debug.
-      fail-fast: false
-      matrix:
-        plugin: [workflow-plugin-aws, workflow-plugin-gcp, workflow-plugin-azure]
+    outputs:
+      count: ${{ steps.select.outputs.count }}
+      matrix: ${{ steps.select.outputs.matrix }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with: { path: workflow }
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Check out the Workflow pull request
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          repository: GoCodeAlone/${{ matrix.plugin }}
-          path: ${{ matrix.plugin }}
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with: { go-version-file: workflow/go.mod }
-      # The replace directive points the plugin's go.mod at THIS PR's checkout
-      # of workflow (../workflow), NOT at workflow main. The gate exercises
-      # whether the PR's interface changes break AWS/GCP/Azure compilation —
-      # which is precisely the per-PR signal we want.
-      - run: |
-          cd ${{ matrix.plugin }}
-          go mod edit -replace github.com/GoCodeAlone/workflow=../workflow
-          go mod tidy
-          go build ./...
-          # NOTE: not `go test` — those plugins have their own CI; we just verify compile-compat
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
-  # Strict-contracts force-cutover Task 6: typed-IaC E2E integration test.
-  #
-  # The cross-plugin-build job above only verifies `go build` against AWS/GCP/
-  # Azure plugins. For the typed IaC contract introduced by the strict-
-  # contracts cutover (PR 2 of the plan), `go build` is necessary but not
-  # sufficient — wire incompat between workflow and plugin grpc-go versions
-  # would slip through (per cycle 1 I-2 + cycle 2 I-1-NEW).
-  #
-  # This job runs the workflow-side in-process E2E test built with
-  # -tags=integration. The same test exercises the typed gRPC services
-  # registered via sdk.RegisterAllIaCProviderServices through a real bufconn
-  # gRPC channel, asserting the typed roundtrip preserves shape (including
-  # the map<string,bool> sensitive field that the legacy structpb path
-  # silently dropped).
-  #
-  # The subprocess wire-test variant against the real DO plugin v1.0.0 binary
-  # is added once that plugin ships — see plan §PR 3 (Task 7+).
-  iac-typed-e2e:
+      - name: Select released consumers from changed contract paths
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GIT_ASKPASS: /bin/false
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: 1
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          rm -rf contract-selection
+          mkdir -p contract-selection
+          selection_succeeded=false
+          record_selection_failure() {
+            selector_status=$?
+            if [[ "$selection_succeeded" == true ]]; then
+              return
+            fi
+            set +e
+            ./.github/workflows/scripts/select-contract-consumers.sh augment-evidence \
+              --evidence contract-selection/evidence.json \
+              --status failed \
+              --selector-exit-code "$selector_status" \
+              --base-sha "$BASE_SHA" \
+              --head-sha "$HEAD_SHA" \
+              --changed-paths contract-selection/changed-paths.txt
+            evidence_status=$?
+            if ((evidence_status != 0)); then
+              echo "failed to augment contract-selection evidence" >&2
+            fi
+            exit "$selector_status"
+          }
+          trap record_selection_failure EXIT
+          for input in .github/contract-consumers.json .github/contract-path-map.json; do
+            if [[ ! -f "$input" || -L "$input" ]]; then
+              echo "artifact input must be a regular, non-symlink file: $input" >&2
+              exit 1
+            fi
+          done
+          cp .github/contract-consumers.json contract-selection/contract-consumers.json
+          cp .github/contract-path-map.json contract-selection/contract-path-map.json
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "pull request SHAs must be exactly 40 lowercase hexadecimal characters" >&2
+            exit 1
+          fi
+          if [[ ! "$BASE_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]]; then
+            echo "pull request base repository must be an exact GitHub owner/name" >&2
+            exit 1
+          fi
+          git remote add base "https://github.com/${BASE_REPOSITORY}.git"
+          git -c credential.helper= \
+            -c core.askPass=/bin/false \
+            -c credential.interactive=never \
+            -c http.https://github.com/.extraheader= \
+            fetch --no-tags base "$BASE_SHA"
+          ./.github/workflows/scripts/select-contract-consumers.sh \
+            --cache .github/contract-consumers.json \
+            --path-map .github/contract-path-map.json \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --changed-paths contract-selection/changed-paths.txt \
+            --output contract-selection/matrix.json \
+            --evidence contract-selection/evidence.json
+          echo "count=$(jq -r '.count' contract-selection/matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -c '{include}' contract-selection/matrix.json)" >> "$GITHUB_OUTPUT"
+          selection_succeeded=true
+          trap - EXIT
+
+      - name: Upload contract-selection evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contract-selection-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: contract-selection/
+          if-no-files-found: error
+          retention-days: 14
+
+  contract-consumer-compatibility:
+    name: Consumer shard ${{ matrix.shard }}
+    needs: select-contract-consumers
+    if: ${{ needs.select-contract-consumers.outputs.count != '0' }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.select-contract-consumers.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with: { go-version-file: go.mod }
-      - name: Typed-IaC E2E test (in-process gRPC roundtrip)
+      - name: Check out the Workflow pull request
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: workflow
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: workflow/go.mod
+
+      - name: Compile and load released contract consumers
+        env:
+          CONSUMERS_JSON: ${{ toJSON(matrix.consumers) }}
+          GIT_ASKPASS: /bin/false
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: 1
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          workflow_dir="$GITHUB_WORKSPACE/workflow"
+          mkdir -p "$GITHUB_WORKSPACE/bin"
+          (
+            cd "$workflow_dir"
+            GOWORK=off go build -o "$GITHUB_WORKSPACE/bin/wfctl" ./cmd/wfctl
+            ./.github/workflows/scripts/run-contract-consumer-shard.sh \
+              --workflow-dir "$workflow_dir" \
+              --wfctl "$GITHUB_WORKSPACE/bin/wfctl" \
+              --consumers-json "$CONSUMERS_JSON"
+          )
+
+  contract-wire-e2e:
+    name: In-process contract wire test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the Workflow pull request
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - name: Validate contract consumer orchestration
+        run: |
+          ./.github/workflows/scripts/test-select-contract-consumers.sh
+      - name: Exercise the real typed contract wire
         run: GOWORK=off go test -tags=integration ./plugin/external/sdk/... -run TestIaC_EndToEnd -count=1 -v

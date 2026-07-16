@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "retiredRepositories": [],
+  "contractProtocols": {
+    "workflow.provider.container-registry": 1,
+    "workflow.provider.credential-issuer": 1,
+    "workflow.provider.credential-resolver": 1,
+    "workflow.provider.secret-store": 1
+  },
+  "rules": [
+    {
+      "pattern": "plugin/external/proto/credential_issuer*",
+      "contracts": [
+        "workflow.provider.credential-issuer"
+      ]
+    },
+    {
+      "pattern": "plugin/external/proto/credential_resolver*",
+      "contracts": [
+        "workflow.provider.credential-resolver"
+      ]
+    },
+    {
+      "pattern": "plugin/external/proto/container_registry*",
+      "contracts": [
+        "workflow.provider.container-registry"
+      ]
+    },
+    {
+      "pattern": "plugin/external/proto/secret_store*",
+      "contracts": [
+        "workflow.provider.secret-store"
+      ]
+    },
+    {
+      "pattern": "plugin/external/proto/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "plugin/external/sdk/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "plugin/external/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "plugin/sdk/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "plugin/manifest*",
+      "selectAll": true
+    },
+    {
+      "pattern": "config/plugin_manifest*",
+      "selectAll": true
+    },
+    {
+      "pattern": "interfaces/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "iac/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "infra/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "platform/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "provider/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "go.mod",
+      "selectAll": true
+    },
+    {
+      "pattern": "go.sum",
+      "selectAll": true
+    },
+    {
+      "pattern": ".github/contract-consumers.json",
+      "selectAll": true
+    },
+    {
+      "pattern": ".github/contract-path-map.json",
+      "selectAll": true
+    },
+    {
+      "pattern": ".github/workflows/scripts/*contract-consumers.sh",
+      "selectAll": true
+    },
+    {
+      "pattern": ".github/workflows/scripts/run-contract-consumer-shard.sh",
+      "selectAll": true
+    },
+    {
+      "pattern": ".github/workflows/cross-plugin-build-test.yml",
+      "selectAll": true
+    },
+    {
+      "pattern": "docs/**",
+      "nonContract": true
+    },
+    {
+      "pattern": ".github/**",
+      "selectAll": true
+    },
+    {
+      "pattern": "*.md",
+      "nonContract": true
+    }
+  ]
+}
