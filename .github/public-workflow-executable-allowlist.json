@@ -62,5 +62,29 @@
     "state": "staged",
     "sha256": "7d209bb35ff3a7a46b22f9a10a920eb30218c3403726d1dac72e0bffd1d914a4",
     "rationale": "Staged v0.86 CI authority. Exercises fail-closed public workflow policy mutations in CI."
+  },
+  {
+    "path": ".github/workflows/scripts/select-contract-consumers.sh",
+    "workflowPath": ".github/workflows/cross-plugin-build-test.yml",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "sha256": "b2b85a11b27246bef525a78c23b3a10fe99d34ee31d29f7e92722778bc6596ad",
+    "rationale": "Selects released contract consumers without executing candidate Go."
+  },
+  {
+    "path": ".github/workflows/scripts/run-contract-consumer-shard.sh",
+    "workflowPath": ".github/workflows/cross-plugin-build-test.yml",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "sha256": "cedc17a1193bb42e191e96db7f024cf0c9c985b8ef60328fda6e8e35d9e40563",
+    "rationale": "Builds and loads immutable public contract-consumer releases without provider authority."
+  },
+  {
+    "path": ".github/workflows/scripts/test-select-contract-consumers.sh",
+    "workflowPath": ".github/workflows/cross-plugin-build-test.yml",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "sha256": "47c43498b33e4ab9f410e2eeff5eb124cd953fe657d81fbcd004133a41408c3c",
+    "rationale": "Exercises hermetic contract selection, provenance, runtime parity, and real local loading."
   }
 ]

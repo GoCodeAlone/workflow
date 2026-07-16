@@ -110,5 +110,11 @@
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
     "state": "staged",
     "presence": "present"
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "presence": "present"
   }
 ]

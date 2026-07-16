@@ -622,5 +622,53 @@
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
     "state": "staged",
     "rationale": "Staged v0.86 CI authority. Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "e0b5e84df1e7033b6b3010f753c094203cbcd50be4df4b1b28aee9f3c99fb76d",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Pinned action for reviewed credential-free contract-consumer selection."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "3f624ba5323484d3010b31e4cf7e56131ba385fcfbe11904ea1badaf2efdd606",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Pinned action for reviewed credential-free contract-consumer evidence."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "a2bd659dbf282777d3d9f5622c07c2c3f7f9f14d34f57159b01c5abb5dd68577",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Pinned action for reviewed credential-free contract-consumer compilation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "812450ca51874d257842490fc8a072d4e7d60f8d04717ef86cddddb072b7081b",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Pinned action for reviewed credential-free contract-consumer compilation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "c8e509ab5752b2e9cac19d9aa8cefea20cd4b34861f3fef645b690dccf456d35",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Pinned action for reviewed credential-free contract wire validation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "eba9b3a4de6ba55217e7c38019b54f84dd4ede5a5736d3acb2446eeeeabb4fc1",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Pinned action for reviewed credential-free contract wire validation."
   }
 ]

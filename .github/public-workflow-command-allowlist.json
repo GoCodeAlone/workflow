@@ -2454,5 +2454,277 @@
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
     "state": "staged",
     "rationale": "Staged v0.86 CI authority. Exact reviewed true statement for ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "$assignment",
+    "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "$assignment",
+    "statementSHA256": "4c618f8d1ab23a2a817b6b1c12e946cf13e125fbdf9456c3c4b10421a259c715",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "$assignment",
+    "statementSHA256": "6ea35d706cf45fa4c01c1af9e5b34fe92958e190e72fa73496dfec33e9d599ed",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "$assignment",
+    "statementSHA256": "fb7ce4967241ab606ceb3137f5ba9727a222c1f7fb9243810cb1e2dcc85caa88",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "cd",
+    "statementSHA256": "617d0c1e7b0db83efa17ce5f0b2cb6afdbb6f96f913c49aa3ba8e56f844fa0d1",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "cp",
+    "statementSHA256": "0400d3049d1816e4463f9405ea563868fe9f3f3fa9e4652e3afc6bea4df6a11d",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "cp",
+    "statementSHA256": "71f69876cbbd64fad0550ed5810eb17d3b5385db74c1972546514a3d0c7c9664",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "echo",
+    "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "echo",
+    "statementSHA256": "26afe138ce773c4b81dcde96a74ff739c632cba6e7ba4cc047d775cf61d8f12a",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "echo",
+    "statementSHA256": "4986e55f389de3c89eaba365a5fd756ec8119650e339d354c42bd57d5a747d9c",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "echo",
+    "statementSHA256": "96af94a417e3db0bdf46ba3e34fa42fb1000794985c8402bfa63e05e4d240f39",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "echo",
+    "statementSHA256": "b85fea1f3f7a80abfefd86b95178dfbb5ec829cc0d9b21bb18e303f0a3bfbb54",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "echo",
+    "statementSHA256": "bc52e2d0df2673ad93172648def787d0d777811a9096ae8fb9155cf6058f60c5",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "exit",
+    "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "exit",
+    "statementSHA256": "96af94a417e3db0bdf46ba3e34fa42fb1000794985c8402bfa63e05e4d240f39",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "exit",
+    "statementSHA256": "b85fea1f3f7a80abfefd86b95178dfbb5ec829cc0d9b21bb18e303f0a3bfbb54",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "exit",
+    "statementSHA256": "bc52e2d0df2673ad93172648def787d0d777811a9096ae8fb9155cf6058f60c5",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "git",
+    "statementSHA256": "5e3f2a72457c9fb6661cdceb03eca9ed5df2358c30daf930b537d0df224616f7",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "git",
+    "statementSHA256": "eaf60c2e981e404f5897f8681a3c179993c9b33478331f721e181918b12a491b",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "go",
+    "statementSHA256": "617d0c1e7b0db83efa17ce5f0b2cb6afdbb6f96f913c49aa3ba8e56f844fa0d1",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "go",
+    "statementSHA256": "a65972d083c0ae1369f5d486f15a5229a7bd87f8575244efbc5616a75ef4ec72",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "jq",
+    "statementSHA256": "26afe138ce773c4b81dcde96a74ff739c632cba6e7ba4cc047d775cf61d8f12a",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "jq",
+    "statementSHA256": "4986e55f389de3c89eaba365a5fd756ec8119650e339d354c42bd57d5a747d9c",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "mkdir",
+    "statementSHA256": "4aa7ddfa24aae3483065033124fda086cb9dbc01efadfc935174afc47a037cfa",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "mkdir",
+    "statementSHA256": "b614920ded3af985a3d43760faa114f8d97c31b55cdf6d83ad6c7888edb97dba",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "return",
+    "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "rm",
+    "statementSHA256": "fa4e62c428a5272c75697f838cb03002ae82f9b48497b45321aad2c51307888a",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "run-contract-consumer-shard.sh",
+    "statementSHA256": "617d0c1e7b0db83efa17ce5f0b2cb6afdbb6f96f913c49aa3ba8e56f844fa0d1",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "select-contract-consumers.sh",
+    "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "select-contract-consumers.sh",
+    "statementSHA256": "465b598a77398f1f970a823f7c08683a2b3f38ed6a3f7e8c7bd7b2f567b1486f",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "set",
+    "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "test-select-contract-consumers.sh",
+    "statementSHA256": "c3832fac5fa1a91dd3589042edec67b5eade0b3d004465a52704561275df70db",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "trap",
+    "statementSHA256": "0e320b2fb321c3f478a90a072c8f73e488309908ec4c31f87171f79a33d58368",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
+  },
+  {
+    "path": ".github/workflows/cross-plugin-build-test.yml",
+    "command": "trap",
+    "statementSHA256": "61ae0022eb44b2485d1c2d9594dba0f5b23202fec9e4c4e6d386f1b8c4ece63a",
+    "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "rationale": "Exact reviewed command for credential-free contract-consumer compatibility."
   }
 ]
