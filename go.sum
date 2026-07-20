@@ -15,10 +15,10 @@ github.com/DataDog/datadog-go/v5 v5.8.3 h1:s58CUJ9s8lezjhTNJO/SxkPBv2qZjS3ktpRSq
 github.com/DataDog/datadog-go/v5 v5.8.3/go.mod h1:K9kcYBlxkcPP8tvvjZZKs/m1edNAUFzBbdpTUKfCsuw=
 github.com/GoCodeAlone/go-plugin v1.7.0 h1:EwnhqPlXiNmp85S+MXnKKvm3YlfA6O4NzBb4+GSlEVY=
 github.com/GoCodeAlone/go-plugin v1.7.0/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=
-github.com/GoCodeAlone/modular v1.13.5 h1:Q+AR3MMAQJctvPJzlRSmTywArbrsXiMM3gzyJN8reBs=
-github.com/GoCodeAlone/modular v1.13.5/go.mod h1:+JEPUYOxGaD332EMZ5PbJCz5rxwvFu4Tm6MrnZT0vxM=
-github.com/GoCodeAlone/modular/modules/auth v1.17.0 h1:GbKG6s/2qe6N9YZ8vtvYsNon56MLWECncPxWvAsazSc=
-github.com/GoCodeAlone/modular/modules/auth v1.17.0/go.mod h1:E9dDIxiAxIrXK8gn/rEhaqI5OYe6Aw/uGpRyI7iyxj8=
+github.com/GoCodeAlone/modular v1.13.6 h1:AIdfdR/KTPHX8T5KJBXUHMokliutUHjl6jRfkqdh/7Q=
+github.com/GoCodeAlone/modular v1.13.6/go.mod h1:Vs92YltRNqA/v3peoHdqHTCjD10ww7rY3iURf1Ju450=
+github.com/GoCodeAlone/modular/modules/auth v1.19.0 h1:ughD47BqEAhg7+3trucwcs5KzEpq9gIS/6jY4nkeGtA=
+github.com/GoCodeAlone/modular/modules/auth v1.19.0/go.mod h1:pGPazN7Irlza8kUxE7WsXri44PhURKYBGym1tlBUl+k=
 github.com/GoCodeAlone/modular/modules/cache v1.17.0 h1:1cColHYfF7aFZhxBjS4RuZ2wBOYWAIVr5GkJ3nk5VIA=
 github.com/GoCodeAlone/modular/modules/cache v1.17.0/go.mod h1:RURzRp+vpRzKR2LjZXwQ4QGc1cvE+53SYODcxY6AR3Y=
 github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 h1:2ljVafd/1LYchF47WrnA1+ji8mcmVXMJ4F5qDrhZZi4=
@@ -207,8 +207,8 @@ github.com/fxamacker/cbor/v2 v2.9.2 h1:X4Ksno9+x3cz0TZv69ec1hxP/+tymuR8PXQJyDwfh
 github.com/fxamacker/cbor/v2 v2.9.2/go.mod h1:vM4b+DJCtHn+zz7h3FFp/hDAI9WNWCsZj23V5ytsSxQ=
 github.com/github/copilot-sdk/go v0.3.0 h1:LPMpoJzUTfrPbr/5e7s5QKvi66PMmREnbZ9kRxPe6ls=
 github.com/github/copilot-sdk/go v0.3.0/go.mod h1:uGWkjVYcp2DV9DgtqYihh5tEoJjNqxIFaUNnrwY4FxM=
-github.com/go-chi/chi/v5 v5.2.5 h1:Eg4myHZBjyvJmAFjFvWgrqDTXFyOzjj7YIm3L3mu6Ug=
-github.com/go-chi/chi/v5 v5.2.5/go.mod h1:X7Gx4mteadT3eDOMTsXzmI4/rwUpOwBHLpAfupzFJP0=
+github.com/go-chi/chi/v5 v5.3.1 h1:3j4HZLGZQ3JpMCrPJF/Jl3mYJfWLKBfNJ6quurUGCf8=
+github.com/go-chi/chi/v5 v5.3.1/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
 github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
 github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/go-kit/kit v0.8.0/go.mod h1:xBxKIO96dXMWWy0MnWVtmwkA9/13aqxPnvrjFYMA2as=
