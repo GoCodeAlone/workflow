@@ -5,7 +5,7 @@ go 1.26.5
 replace github.com/GoCodeAlone/workflow => ../
 
 require (
-	github.com/GoCodeAlone/modular v1.13.5
+	github.com/GoCodeAlone/modular v1.13.6
 	github.com/GoCodeAlone/workflow v0.0.0-00010101000000-000000000000
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 )
@@ -14,7 +14,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.8.3 // indirect
 	github.com/GoCodeAlone/go-plugin v1.7.0 // indirect
-	github.com/GoCodeAlone/modular/modules/auth v1.17.0 // indirect
+	github.com/GoCodeAlone/modular/modules/auth v1.19.0 // indirect
 	github.com/GoCodeAlone/modular/modules/cache v1.17.0 // indirect
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 // indirect
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0 // indirect
