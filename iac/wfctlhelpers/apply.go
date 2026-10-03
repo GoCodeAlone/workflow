@@ -94,6 +94,9 @@ type ApplyPlanHooks struct {
 	// CurrentState seeds references to unchanged siblings that have no action.
 	// It is an in-memory dispatch source, never embedded in the plan.
 	CurrentState []interfaces.ResourceState
+	// LookupCurrentState rereads durable state at each state-aware update.
+	// CurrentState and PlanAction.Current are not authoritative update inputs.
+	LookupCurrentState func(context.Context, interfaces.ResourceRef) (*interfaces.ResourceState, error)
 	// ResolveSecret retrieves a secret key only at the dispatch boundary.
 	ResolveSecret func(context.Context, string) (string, error)
 	// ResourceDeletionComplete reads durable cloud-deletion evidence. A true
@@ -719,9 +722,9 @@ func snapshotKeys(m map[string]string) []string {
 func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) (bool, error) {
 	switch action.Action {
 	case "create":
-		return doCreate(ctx, d, action, result)
+		return doCreate(ctx, d, action, result, hooks)
 	case "update":
-		return false, doUpdate(ctx, d, action, result)
+		return false, doUpdate(ctx, d, action, result, hooks)
 	case "replace":
 		err := doReplace(ctx, d, action, result, hooks, deleteHookActive)
 		return err == nil, err
@@ -766,7 +769,7 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 //     prefix instead. This boundary is deliberate: ActionError carries
 //     the per-resource action context fields the wrap chain otherwise
 //     duplicates.
-func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) (bool, error) {
+func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks) (bool, error) {
 	out, err := d.Create(ctx, action.Resource)
 	created := err == nil
 	if errors.Is(err, interfaces.ErrResourceAlreadyExists) {
@@ -783,7 +786,7 @@ func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interface
 			return false, fmt.Errorf("upsert: resource %q found by name but ProviderID is empty: %w", ref.Name, err)
 		}
 		ref.ProviderID = existing.ProviderID
-		out, err = d.Update(ctx, ref, action.Resource)
+		out, err = updateWithCurrentState(ctx, d, ref, action.Resource, hooks)
 	}
 	if err == nil && out != nil {
 		result.Resources = append(result.Resources, *out)
@@ -798,14 +801,11 @@ func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interface
 // (the helper loop body) records them with the canonical action +
 // resource fields.
 //
-// Defensive contract: doUpdate does NOT synthesize a precondition error
-// when action.Current is nil — the driver is the authority on what an
-// empty ProviderID means. ComputePlan upstream is responsible for never
-// emitting an Update without action.Current; if it does, the driver's
-// own typed validation surfaces the bug.
-func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+// Legacy drivers remain the authority on an empty ProviderID. State-aware
+// drivers instead require matching persisted identity before dispatch.
+func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks) error {
 	ref := refFromAction(action)
-	out, err := d.Update(ctx, ref, action.Resource)
+	out, err := updateWithCurrentState(ctx, d, ref, action.Resource, hooks)
 	if err != nil {
 		return err
 	}
@@ -813,6 +813,26 @@ func doUpdate(ctx context.Context, d interfaces.ResourceDriver, action interface
 		result.Resources = append(result.Resources, *out)
 	}
 	return nil
+}
+
+func updateWithCurrentState(ctx context.Context, d interfaces.ResourceDriver, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, hooks ApplyPlanHooks) (*interfaces.ResourceOutput, error) {
+	updater, ok := d.(interfaces.ResourceStateUpdater)
+	if !ok {
+		return d.Update(ctx, ref, spec)
+	}
+	if hooks.LookupCurrentState == nil {
+		// Existing adapter callers need no new hook. State-dependent providers
+		// must reject legacy Update before mutation when prior state is absent.
+		return d.Update(ctx, ref, spec)
+	}
+	prior, err := hooks.LookupCurrentState(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("update prior state lookup: %w", err)
+	}
+	if err := interfaces.ValidateUpdatePriorState(ref, spec, prior); err != nil {
+		return nil, err
+	}
+	return updater.UpdateWithState(ctx, ref, spec, prior)
 }
 
 // DefaultReplace is the engine's default Replace dispatcher: Delete the

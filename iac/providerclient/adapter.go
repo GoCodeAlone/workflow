@@ -295,14 +295,34 @@ func (r *resourceDriverAdapter) Read(ctx context.Context, ref interfaces.Resourc
 
 // Update calls ResourceDriver.Update with the resource ref and desired spec.
 func (r *resourceDriverAdapter) Update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return r.update(ctx, ref, spec, nil)
+}
+
+// UpdateWithState sends dispatch-time persisted state on the existing Update RPC.
+func (r *resourceDriverAdapter) UpdateWithState(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
+	if err := interfaces.ValidateUpdatePriorState(ref, spec, prior); err != nil {
+		return nil, err
+	}
+	return r.update(ctx, ref, spec, prior)
+}
+
+func (r *resourceDriverAdapter) update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
 	pbSpec, err := specToPB(spec)
 	if err != nil {
 		return nil, fmt.Errorf("providerclient: encode Update spec: %w", err)
+	}
+	var pbPrior *pb.ResourceState
+	if prior != nil {
+		pbPrior, err = stateToPB(prior)
+		if err != nil {
+			return nil, fmt.Errorf("providerclient: encode Update prior state: %w", err)
+		}
 	}
 	resp, err := r.client.Update(ctx, &pb.ResourceUpdateRequest{
 		ResourceType: r.resourceType,
 		Ref:          refToPB(ref),
 		Spec:         pbSpec,
+		PriorState:   pbPrior,
 	})
 	if err != nil {
 		return nil, mapResourceDriverGRPCError(err, "Update")

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,136 @@ import (
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+type updatePriorCLIDriver struct {
+	readDriver
+	prior *interfaces.ResourceState
+	calls int
+}
+
+func (d *updatePriorCLIDriver) Update(context.Context, interfaces.ResourceRef, interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return nil, errors.New("state-aware CLI fixture used legacy Update")
+}
+
+func (d *updatePriorCLIDriver) Diff(context.Context, interfaces.ResourceSpec, *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	return nil, errors.New("saved-plan fixture called Diff")
+}
+
+func (d *updatePriorCLIDriver) UpdateWithState(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
+	d.calls++
+	d.prior = prior
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID, Outputs: prior.Outputs}, nil
+}
+
+type updatePriorCLIProvider struct {
+	applyCapture
+	driver *updatePriorCLIDriver
+}
+
+func (p *updatePriorCLIProvider) ResourceDriver(string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
+// The durable store advances immediately after the initial reference snapshot.
+// The update must reread it rather than reuse that captured slice.
+type advancingPriorStateStore struct {
+	infraStateStore
+	latest interfaces.ResourceState
+	lists  int
+}
+
+func (s *advancingPriorStateStore) ListResources(ctx context.Context) ([]interfaces.ResourceState, error) {
+	s.lists++
+	states, err := s.infraStateStore.ListResources(ctx)
+	if err == nil && s.lists == 1 {
+		err = s.SaveResource(ctx, s.latest)
+	}
+	return states, err
+}
+
+func TestApplyPrecomputedPlan_UpdateWithState_LatestPersistedState(t *testing.T) {
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "state.yaml")
+	stateDir := filepath.Join(dir, "state")
+	configData := fmt.Sprintf("modules:\n  - name: state\n    type: iac.state\n    config:\n      backend: filesystem\n      directory: %q\n", stateDir)
+	if err := os.WriteFile(configFile, []byte(configData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := resolveStateStore(configFile, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := interfaces.ResourceState{ID: "fixture", Name: "fixture", Type: "infra.fixture", Provider: "fixture", ProviderID: "fixture-id", Outputs: map[string]any{"rotation_generation": float64(1)}}
+	encoded, err := json.Marshal(interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: "update", Resource: interfaces.ResourceSpec{Name: stale.Name, Type: stale.Type}, Current: &stale}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := stale
+	current.Outputs = map[string]any{"rotation_generation": float64(7)}
+	if err := store.SaveResource(t.Context(), current); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := resolveStateStore(configFile, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := stale
+	latest.Outputs = map[string]any{"rotation_generation": float64(9)}
+	advancing := &advancingPriorStateStore{infraStateStore: restarted, latest: latest}
+	var plan interfaces.IaCPlan
+	if err := json.Unmarshal(encoded, &plan); err != nil {
+		t.Fatal(err)
+	}
+	driver := &updatePriorCLIDriver{}
+	provider := &updatePriorCLIProvider{driver: driver}
+	if err := applyPrecomputedPlanWithStore(t.Context(), plan, provider, "fixture", advancing, io.Discard, "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if driver.calls != 1 || driver.prior == nil || driver.prior.Outputs["rotation_generation"] != float64(9) || advancing.lists < 2 {
+		t.Fatal("saved-plan CLI update reused a stale plan or captured reference-state slice")
+	}
+}
+
+func TestStatePersistenceHooks_UpdateWithState_RejectsMissingOrWrongIdentity(t *testing.T) {
+	for _, name := range []string{"missing", "wrong_name", "wrong_type", "wrong_id", "duplicate"} {
+		t.Run(name, func(t *testing.T) {
+			state := interfaces.ResourceState{Name: "fixture", Type: "infra.fixture", ProviderID: "fixture-id"}
+			store := &fakeStateStore{}
+			switch name {
+			case "missing":
+			case "wrong_name":
+				state.Name = "other"
+			case "wrong_type":
+				state.Type = "infra.other"
+			case "wrong_id":
+				state.ProviderID = "other-id"
+			case "duplicate":
+				// A named backend can return ambiguous records; reject them.
+			}
+			if name != "missing" {
+				store.saved = []interfaces.ResourceState{state}
+			}
+			var lookupStore infraStateStore = store
+			if name == "duplicate" {
+				lookupStore = &duplicatePriorStateStore{state: state}
+			}
+			hooks := statePersistenceHooks(lookupStore, nil, &applyCapture{}, "fixture", "fixture-plan", nil)
+			_, err := hooks.LookupCurrentState(t.Context(), interfaces.ResourceRef{Name: "fixture", Type: "infra.fixture", ProviderID: "fixture-id"})
+			if err == nil {
+				t.Fatal("missing or mismatched state was accepted")
+			}
+		})
+	}
+}
+
+type duplicatePriorStateStore struct {
+	noopStateStore
+	state interfaces.ResourceState
+}
+
+func (s duplicatePriorStateStore) ListResources(context.Context) ([]interfaces.ResourceState, error) {
+	return []interfaces.ResourceState{s.state, s.state}, nil
+}
 
 // ── fakes ──────────────────────────────────────────────────────────────────────
 

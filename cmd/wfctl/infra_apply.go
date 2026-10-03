@@ -673,6 +673,29 @@ func statePersistenceHooks(
 	cleanupOptions ...cleanupProviderOptions,
 ) wfctlhelpers.ApplyPlanHooks {
 	hooks := wfctlhelpers.ApplyPlanHooks{
+		LookupCurrentState: func(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceState, error) {
+			states, err := store.ListResources(ctx)
+			if err != nil {
+				return nil, err
+			}
+			var prior *interfaces.ResourceState
+			for i := range states {
+				if states[i].Name != ref.Name {
+					continue
+				}
+				if prior != nil {
+					return nil, fmt.Errorf("%w: update prior resource identity is ambiguous", interfaces.ErrValidation)
+				}
+				prior = &states[i]
+			}
+			if prior == nil {
+				return nil, fmt.Errorf("%w: update prior resource state unavailable", interfaces.ErrResourceNotFound)
+			}
+			if err := interfaces.ValidateUpdatePriorState(ref, interfaces.ResourceSpec{Name: ref.Name, Type: ref.Type}, prior); err != nil {
+				return nil, err
+			}
+			return prior, nil
+		},
 		ResolveSecret: func(ctx context.Context, key string) (string, error) {
 			if value, ok := hydratedOut[key]; ok {
 				return value, nil

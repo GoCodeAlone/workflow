@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -33,7 +34,79 @@ import (
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
 )
+
+func TestTypedResourceDriver_UpdateWithState_OptionalContract(t *testing.T) {
+	driver := &typedResourceDriver{resourceType: "infra.fixture"}
+	if _, ok := any(driver).(interfaces.ResourceStateUpdater); !ok {
+		t.Fatal("wfctl driver omits the optional state-aware update contract")
+	}
+}
+
+type updateStateTypedProvider struct {
+	pb.UnimplementedIaCProviderRequiredServer
+	pb.UnimplementedResourceDriverServer
+	prior       *interfaces.ResourceState
+	stateCalls  int
+	legacyCalls int
+}
+
+func (p *updateStateTypedProvider) Update(_ context.Context, req *pb.ResourceUpdateRequest) (*pb.ResourceUpdateResponse, error) {
+	p.legacyCalls++
+	return &pb.ResourceUpdateResponse{Output: &pb.ResourceOutput{Name: req.GetRef().GetName(), Type: req.GetRef().GetType(), ProviderId: req.GetRef().GetProviderId()}}, nil
+}
+
+func (p *updateStateTypedProvider) UpdateWithState(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
+	if prior == nil {
+		p.legacyCalls++
+		return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID}, nil
+	}
+	p.stateCalls++
+	p.prior = prior
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID, Outputs: prior.Outputs}, nil
+}
+
+func TestTypedResourceDriver_UpdateWithState_SDKRoundTrip(t *testing.T) {
+	provider := &updateStateTypedProvider{}
+	srv := grpc.NewServer()
+	if err := sdk.RegisterAllIaCProviderServices(srv, provider); err != nil {
+		t.Fatal(err)
+	}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = lis.Close() })
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	adapter := newTypedIaCAdapter(conn, map[string]bool{iacServiceResourceDriver: true})
+	driver, err := adapter.ResourceDriver("infra.fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := &interfaces.ResourceState{ID: "fixture", Name: "fixture", Type: "infra.fixture", Provider: "fixture", ProviderRef: "provider-instance", ProviderID: "fixture-id", ConfigHash: "fixture-hash", AppliedConfigSource: "apply", Dependencies: []string{"dependency"}, AppliedConfig: map[string]any{"credential_ref": "secrets://fixture/credential"}, Outputs: map[string]any{"rotation_generation": float64(9)}}
+	ref := interfaces.ResourceRef{Name: prior.Name, Type: prior.Type, ProviderID: prior.ProviderID}
+	spec := interfaces.ResourceSpec{Name: prior.Name, Type: prior.Type}
+	updater := driver.(interfaces.ResourceStateUpdater)
+	out, err := updater.UpdateWithState(t.Context(), ref, spec, prior)
+	if err != nil || out == nil || !reflect.DeepEqual(provider.prior, prior) || !reflect.DeepEqual(out.Outputs, prior.Outputs) || provider.stateCalls != 1 || provider.legacyCalls != 0 {
+		t.Fatalf("wfctl/SDK state round trip failed: err=%v state_calls=%d legacy_calls=%d", err, provider.stateCalls, provider.legacyCalls)
+	}
+	wrong := *prior
+	wrong.ProviderID = "other-resource"
+	if _, err := updater.UpdateWithState(t.Context(), ref, spec, &wrong); !errors.Is(err, interfaces.ErrValidation) || provider.stateCalls != 1 {
+		t.Fatal("mismatched state reached the wfctl Update RPC")
+	}
+	if _, err := driver.Update(t.Context(), ref, spec); err != nil || provider.legacyCalls != 1 || provider.stateCalls != 1 {
+		t.Fatal("wfctl legacy Update did not preserve absent-state dispatch")
+	}
+}
 
 // TestTypedAdapter_SatisfiesIaCProvider asserts the adapter's Go
 // interface conformance at runtime so refactors that drop a method

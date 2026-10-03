@@ -2,17 +2,302 @@ package sdk_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"maps"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	goplugin "github.com/GoCodeAlone/go-plugin"
+	"github.com/GoCodeAlone/workflow/iac/providerclient"
+	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/plugin/external/contract"
+	"github.com/hashicorp/go-hclog"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
 )
+
+type updateLegacyProvider struct {
+	fullProviderStub
+	pb.UnimplementedResourceDriverServer
+	legacyCalls int
+}
+
+func (p *updateLegacyProvider) Update(_ context.Context, req *pb.ResourceUpdateRequest) (*pb.ResourceUpdateResponse, error) {
+	p.legacyCalls++
+	return &pb.ResourceUpdateResponse{Output: &pb.ResourceOutput{Name: req.GetRef().GetName(), Type: req.GetRef().GetType(), ProviderId: req.GetRef().GetProviderId()}}, nil
+}
+
+type updateStateProvider struct {
+	updateLegacyProvider
+	stateCalls int
+	prior      *interfaces.ResourceState
+	process    bool
+}
+
+func (p *updateStateProvider) UpdateWithState(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
+	if spec.Type == "infra.legacy" && prior == nil {
+		response, err := p.Update(ctx, &pb.ResourceUpdateRequest{Ref: &pb.ResourceRef{Name: ref.Name, Type: ref.Type, ProviderId: ref.ProviderID}})
+		if err != nil {
+			return nil, err
+		}
+		return &interfaces.ResourceOutput{Name: response.Output.Name, Type: response.Output.Type, ProviderID: response.Output.ProviderId}, nil
+	}
+	if err := interfaces.ValidateUpdatePriorState(ref, spec, prior); err != nil {
+		return nil, err
+	}
+	p.stateCalls++
+	p.prior = prior
+	outputs := prior.Outputs
+	if p.process {
+		outputs = maps.Clone(prior.Outputs)
+		outputs["fixture_server_pid"] = os.Getpid()
+		outputs["fixture_state_calls"] = p.stateCalls
+		outputs["fixture_legacy_calls"] = p.legacyCalls
+	}
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID, Outputs: outputs}, nil
+}
+
+func startUpdateProvider(t *testing.T, provider any) *grpc.ClientConn {
+	t.Helper()
+	srv := grpc.NewServer()
+	if err := sdk.RegisterAllIaCProviderServices(srv, provider); err != nil {
+		t.Fatal(err)
+	}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	t.Cleanup(func() { _ = lis.Close() })
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+func TestSDK_UpdateWithState_RoundTripAndLegacy(t *testing.T) {
+	provider := &updateStateProvider{}
+	conn := startUpdateProvider(t, provider)
+	adapter := providerclient.New(conn, map[string]bool{providerclient.IaCServiceResourceDriver: true})
+	driver, err := adapter.ResourceDriver("infra.fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := &interfaces.ResourceState{ID: "fixture", Name: "fixture", Type: "infra.fixture", Provider: "fixture-provider", ProviderRef: "fixture-instance", ProviderID: "fixture-id", ConfigHash: "fixture-hash", AppliedConfigSource: "apply", AppliedConfig: map[string]any{"credential_ref": "secrets://fixture/credential"}, Outputs: map[string]any{"rotation_generation": float64(9)}}
+	ref := interfaces.ResourceRef{Name: prior.Name, Type: prior.Type, ProviderID: prior.ProviderID}
+	spec := interfaces.ResourceSpec{Name: prior.Name, Type: prior.Type}
+	updater, ok := driver.(interfaces.ResourceStateUpdater)
+	if !ok {
+		t.Fatal("client omitted state-aware update")
+	}
+	out, err := updater.UpdateWithState(t.Context(), ref, spec, prior)
+	if err != nil || out == nil || provider.stateCalls != 1 || provider.legacyCalls != 0 || !reflect.DeepEqual(provider.prior, prior) {
+		t.Fatalf("SDK failed state-aware update round trip: err=%v state_calls=%d legacy_calls=%d", err, provider.stateCalls, provider.legacyCalls)
+	}
+	legacy := &updateLegacyProvider{}
+	legacyClient := pb.NewResourceDriverClient(startUpdateProvider(t, legacy))
+	_, err = legacyClient.Update(t.Context(), &pb.ResourceUpdateRequest{ResourceType: ref.Type, Ref: &pb.ResourceRef{Name: ref.Name, Type: ref.Type, ProviderId: ref.ProviderID}, Spec: &pb.ResourceSpec{Name: spec.Name, Type: spec.Type}})
+	if err != nil || legacy.legacyCalls != 1 {
+		t.Fatal("legacy Update RPC lost backward compatibility")
+	}
+	_, err = pb.NewResourceDriverClient(conn).Update(t.Context(), &pb.ResourceUpdateRequest{ResourceType: "infra.legacy", Ref: &pb.ResourceRef{Name: "legacy", Type: "infra.legacy", ProviderId: "legacy-id"}, Spec: &pb.ResourceSpec{Name: "legacy", Type: "infra.legacy"}})
+	if err != nil || provider.legacyCalls != 1 || provider.stateCalls != 1 {
+		t.Fatal("non-state-dependent legacy Update failed on a mixed state-aware provider")
+	}
+}
+
+func TestSDK_UpdateWithState_ApplyWithoutLookupPreservesLegacy(t *testing.T) {
+	for _, name := range []string{"legacy provider", "mixed legacy resource", "state-dependent resource"} {
+		t.Run(name, func(t *testing.T) {
+			legacy := &updateLegacyProvider{}
+			mixed := &updateStateProvider{}
+			var service any = legacy
+			resourceType := "infra.legacy"
+			if name != "legacy provider" {
+				service = mixed
+			}
+			if name == "state-dependent resource" {
+				resourceType = "infra.fixture"
+			}
+			provider := providerclient.New(startUpdateProvider(t, service), map[string]bool{
+				providerclient.IaCServiceResourceDriver: true,
+			})
+			state := interfaces.ResourceState{Name: "fixture", Type: resourceType, ProviderID: "fixture-id"}
+			plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{
+				Action:   "update",
+				Resource: interfaces.ResourceSpec{Name: state.Name, Type: state.Type},
+				Current:  &state,
+			}}}
+			result, err := wfctlhelpers.ApplyPlanWithHooks(t.Context(), provider, plan, wfctlhelpers.ApplyPlanHooks{})
+			if err != nil || result == nil {
+				t.Fatalf("apply without new hook: err=%v result=%v", err, result)
+			}
+			if name == "state-dependent resource" {
+				if len(result.Errors) != 1 || mixed.stateCalls != 0 || mixed.legacyCalls != 0 {
+					t.Fatal("state-dependent update without persisted state reached mutation")
+				}
+				return
+			}
+			calls := legacy.legacyCalls + mixed.legacyCalls
+			if len(result.Errors) != 0 || calls != 1 || mixed.stateCalls != 0 {
+				t.Fatalf("legacy update requires new lookup: errors=%v legacy_calls=%d native_calls=%d", result.Errors, calls, mixed.stateCalls)
+			}
+		})
+	}
+}
+
+func TestSDK_UpdateWithState_InvalidPriorNeverMutates(t *testing.T) {
+	outputs, _ := json.Marshal(map[string]any{"rotation_generation": 9})
+	valid := &pb.ResourceUpdateRequest{ResourceType: "infra.fixture", Ref: &pb.ResourceRef{Name: "fixture", Type: "infra.fixture", ProviderId: "fixture-id"}, Spec: &pb.ResourceSpec{Name: "fixture", Type: "infra.fixture"}, PriorState: &pb.ResourceState{Name: "fixture", Type: "infra.fixture", ProviderId: "fixture-id", OutputsJson: outputs}}
+	for _, name := range []string{"missing", "wrong_name", "wrong_type", "wrong_provider_id", "wrong_route_type", "invalid_outputs", "invalid_config"} {
+		t.Run(name, func(t *testing.T) {
+			provider := &updateStateProvider{}
+			client := pb.NewResourceDriverClient(startUpdateProvider(t, provider))
+			req := proto.Clone(valid).(*pb.ResourceUpdateRequest)
+			switch name {
+			case "missing":
+				req.PriorState = nil
+			case "wrong_name":
+				req.PriorState.Name = "other"
+			case "wrong_type":
+				req.PriorState.Type = "infra.other"
+			case "wrong_provider_id":
+				req.PriorState.ProviderId = "other-id"
+			case "wrong_route_type":
+				req.ResourceType = "infra.other"
+			case "invalid_outputs":
+				req.PriorState.OutputsJson = []byte(`{"secret":"sentinel-credential" broken}`)
+			case "invalid_config":
+				req.PriorState.AppliedConfigJson = []byte(`{"secret":"sentinel-credential" broken}`)
+			}
+			_, err := client.Update(t.Context(), req)
+			if status.Code(err) != codes.InvalidArgument || provider.stateCalls != 0 || provider.legacyCalls != 0 || strings.Contains(err.Error(), "sentinel-credential") {
+				t.Fatalf("invalid prior crossed mutation boundary: code=%v state_calls=%d legacy_calls=%d", status.Code(err), provider.stateCalls, provider.legacyCalls)
+			}
+		})
+	}
+}
+
+type updateConsumerPlugin struct{}
+
+func (*updateConsumerPlugin) GRPCServer(*goplugin.GRPCBroker, *grpc.Server) error {
+	return fmt.Errorf("consumer fixture is host-only")
+}
+
+func (*updateConsumerPlugin) GRPCClient(_ context.Context, _ *goplugin.GRPCBroker, conn *grpc.ClientConn) (any, error) {
+	return providerclient.New(conn, map[string]bool{providerclient.IaCServiceResourceDriver: true}), nil
+}
+
+// The child serves the real SDK; the parent uses only the public providerclient
+// and shared apply APIs against reopened filesystem state and a stale plan.
+func TestSDK_UpdateWithState_ExternalConsumerRestart(t *testing.T) {
+	if os.Getenv("WORKFLOW_IAC_UPDATE_TEST_PROCESS") == "1" {
+		sdk.ServeIaCPlugin(&updateStateProvider{process: true}, sdk.IaCServeOptions{})
+		return
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("SDK consumer executable sha256=%x", sha256.Sum256(data))
+	dir := t.TempDir()
+	configFile := filepath.Join(dir, "state.yaml")
+	stateDir := filepath.Join(dir, "state")
+	config := fmt.Sprintf("modules:\n  - name: state\n    type: iac.state\n    config:\n      backend: filesystem\n      directory: %q\n", stateDir)
+	if err := os.WriteFile(configFile, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := interfaces.ResourceState{ID: "fixture", Name: "fixture", Type: "infra.fixture", Provider: "fixture-provider", ProviderID: "fixture-id", Outputs: map[string]any{"rotation_generation": float64(1), "credential_ref": "secrets://fixture/credential"}}
+	savedPlan, err := json.Marshal(interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: "update", Resource: interfaces.ResourceSpec{Name: stale.Name, Type: stale.Type}, Current: &stale}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, generation := range []float64{7, 9} {
+		store, err := wfctlhelpers.ResolveStateStore(configFile, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		latest := stale
+		latest.Outputs = maps.Clone(stale.Outputs)
+		latest.Outputs["rotation_generation"] = generation
+		if err := store.SaveResource(ctx, latest); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		restarted, err := wfctlhelpers.ResolveStateStore(configFile, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = restarted.Close() })
+		cmd := exec.CommandContext(ctx, binary, "-test.run=^TestSDK_UpdateWithState_ExternalConsumerRestart$")
+		cmd.Dir = dir
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "TMPDIR=" + dir, "WORKFLOW_IAC_UPDATE_TEST_PROCESS=1"}
+		client := goplugin.NewClient(&goplugin.ClientConfig{HandshakeConfig: contract.Handshake, Plugins: goplugin.PluginSet{"iac": &updateConsumerPlugin{}}, Cmd: cmd, StartTimeout: 10 * time.Second, Logger: hclog.NewNullLogger()})
+		t.Cleanup(client.Kill)
+		protocol, err := client.Client()
+		if err != nil {
+			t.Fatal(err)
+		}
+		consumer, err := protocol.Dispense("iac")
+		if err != nil {
+			t.Fatal(err)
+		}
+		provider, ok := consumer.(*providerclient.Adapter)
+		if !ok {
+			t.Fatal("SDK plugin did not expose the public providerclient adapter")
+		}
+		var plan interfaces.IaCPlan
+		if err := json.Unmarshal(savedPlan, &plan); err != nil {
+			t.Fatal(err)
+		}
+		result, err := wfctlhelpers.ApplyPlanWithHooks(ctx, provider, &plan, wfctlhelpers.ApplyPlanHooks{LookupCurrentState: func(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceState, error) {
+			return restarted.GetResource(ctx, ref.Name)
+		}})
+		if err != nil || result == nil || len(result.Errors) != 0 || len(result.Resources) != 1 {
+			t.Fatalf("separate SDK process failed saved-plan dispatch: err=%v result=%v", err, result)
+		}
+		outputs := result.Resources[0].Outputs
+		if outputs["rotation_generation"] != generation || outputs["credential_ref"] != "secrets://fixture/credential" || outputs["fixture_server_pid"] != float64(cmd.Process.Pid) || outputs["fixture_state_calls"] != float64(1) || outputs["fixture_legacy_calls"] != float64(0) {
+			t.Fatal("separate SDK process did not receive latest persisted state on its exact update call")
+		}
+		client.Kill()
+		if !client.Exited() {
+			t.Fatal("owned SDK plugin process did not terminate")
+		}
+		t.Logf("SDK child pid=%d received generation=%.0f native_updates=1 legacy_updates=0; terminated=true", cmd.Process.Pid, generation)
+	}
+	state, err := os.ReadFile(filepath.Join(stateDir, "fixture.json"))
+	if err != nil || !strings.Contains(string(state), "secrets://fixture/credential") || strings.Contains(string(state), "sentinel-credential") {
+		t.Fatal("fixture state lost credential-reference-only persistence")
+	}
+}
 
 // TestRegisterAllIaCProviderServices_RequiredSatisfied_RegistersRequired
 // asserts that a provider satisfying IaCProviderRequiredServer succeeds and
