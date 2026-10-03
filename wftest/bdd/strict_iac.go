@@ -81,6 +81,10 @@ var iacServiceChecks = []iacServiceCheck{
 		_, ok := p.(pb.ResourceDriverServer)
 		return ok
 	}},
+	{"workflow.plugin.external.iac.ResourceSensitiveInputDeclarer", func(p any) bool {
+		_, ok := p.(pb.ResourceSensitiveInputDeclarerServer)
+		return ok
+	}},
 	{"workflow.plugin.external.iac.IaCStateBackend", func(p any) bool {
 		_, ok := p.(pb.IaCStateBackendServer)
 		return ok

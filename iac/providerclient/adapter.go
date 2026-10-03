@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitiveinputs"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
@@ -54,6 +55,8 @@ const (
 	// returns a per-resource-type bridge that routes Create/Read/Update/Delete/
 	// Diff/HealthCheck/Scale/SensitiveKeys through the plugin's gRPC process.
 	IaCServiceResourceDriver = "workflow.plugin.external.iac.ResourceDriver"
+	// IaCServiceSensitiveInputDeclarer declares sensitive Config leaf pointers.
+	IaCServiceSensitiveInputDeclarer = "workflow.plugin.external.iac.ResourceSensitiveInputDeclarer"
 )
 
 // RegionListerProvider is a capability-discovery interface implemented by
@@ -214,8 +217,29 @@ type ResourceDriverProvider interface {
 // resource_type field is carried on every RPC so the plugin can route to the
 // correct per-type implementation (the DO plugin's 14-driver pattern).
 type resourceDriverAdapter struct {
-	client       pb.ResourceDriverClient
-	resourceType string
+	client          pb.ResourceDriverClient
+	resourceType    string
+	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
+}
+
+var _ interfaces.ResourceSensitiveInputDeclarer = (*resourceDriverAdapter)(nil)
+
+func (r *resourceDriverAdapter) SensitiveInputPaths(ctx context.Context) ([]string, error) {
+	if r.sensitiveInputs == nil {
+		return nil, fmt.Errorf("%w: ResourceSensitiveInputDeclarer not advertised", interfaces.ErrProviderMethodUnimplemented)
+	}
+	resp, err := r.sensitiveInputs.SensitiveInputPaths(ctx, &pb.ResourceSensitiveInputPathsRequest{ResourceType: r.resourceType})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return nil, fmt.Errorf("%w: ResourceSensitiveInputDeclarer not implemented", interfaces.ErrProviderMethodUnimplemented)
+		}
+		return nil, err
+	}
+	paths := append([]string(nil), resp.GetPaths()...)
+	if err := sensitiveinputs.ValidatePaths(paths); err != nil {
+		return nil, err
+	}
+	return paths, nil
 }
 
 // Create calls ResourceDriver.Create with JSON-encoded spec.Config.
@@ -511,12 +535,13 @@ var (
 //
 // Compile-time guards are in adapter_test.go.
 type Adapter struct {
-	conn           grpc.ClientConnInterface
-	required       pb.IaCProviderRequiredClient
-	regionLister   *regionListerImpl       // nil when IaCServiceRegionLister not advertised
-	drift          *driftDetectorAdapter   // nil when IaCServiceDriftDetector not advertised
-	runner         *runnerAdapter          // nil when IaCServiceRunner not advertised
-	resourceDriver pb.ResourceDriverClient // nil when IaCServiceResourceDriver not advertised
+	conn            grpc.ClientConnInterface
+	required        pb.IaCProviderRequiredClient
+	regionLister    *regionListerImpl       // nil when IaCServiceRegionLister not advertised
+	drift           *driftDetectorAdapter   // nil when IaCServiceDriftDetector not advertised
+	runner          *runnerAdapter          // nil when IaCServiceRunner not advertised
+	resourceDriver  pb.ResourceDriverClient // nil when IaCServiceResourceDriver not advertised
+	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
 
 	// Capabilities cache. Populated on first call to fetchCapabilities via
 	// capsOnce; reused for the adapter's lifetime (capabilities don't change
@@ -576,6 +601,9 @@ func New(conn grpc.ClientConnInterface, advertisedServices map[string]bool) *Ada
 	}
 	if advertisedServices[IaCServiceResourceDriver] {
 		a.resourceDriver = pb.NewResourceDriverClient(conn)
+	}
+	if advertisedServices[IaCServiceSensitiveInputDeclarer] {
+		a.sensitiveInputs = pb.NewResourceSensitiveInputDeclarerClient(conn)
 	}
 	return a
 }
@@ -769,8 +797,9 @@ func (a *Adapter) ResourceDriver(resourceType string) (interfaces.ResourceDriver
 			interfaces.ErrProviderMethodUnimplemented)
 	}
 	return &resourceDriverAdapter{
-		client:       a.resourceDriver,
-		resourceType: resourceType,
+		client:          a.resourceDriver,
+		resourceType:    resourceType,
+		sensitiveInputs: a.sensitiveInputs,
 	}, nil
 }
 

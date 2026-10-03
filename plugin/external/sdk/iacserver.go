@@ -44,6 +44,7 @@ import (
 //	pb.IaCRequirementDiscoveryServer
 //	pb.IaCProviderRequirementMapperServer
 //	pb.IaCStateBackendServer
+//	pb.ResourceSensitiveInputDeclarerServer
 //
 // ResourceDriver:
 //
@@ -201,6 +202,9 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
 		pb.RegisterResourceDriverServer(s, v)
+	}
+	if v, ok := provider.(pb.ResourceSensitiveInputDeclarerServer); ok {
+		pb.RegisterResourceSensitiveInputDeclarerServer(s, v)
 	}
 	// Per decisions/0035 (Amendment A2): IaCStateBackend is an optional
 	// service auto-detected exactly like the IaCProvider* optionals — a

@@ -2933,3 +2933,114 @@ var IaCStateBackend_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "iac.proto",
 }
+
+const (
+	ResourceSensitiveInputDeclarer_SensitiveInputPaths_FullMethodName = "/workflow.plugin.external.iac.ResourceSensitiveInputDeclarer/SensitiveInputPaths"
+)
+
+// ResourceSensitiveInputDeclarerClient is the client API for ResourceSensitiveInputDeclarer service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ResourceSensitiveInputDeclarer is optional. Paths describe sensitive Config
+// leaves as canonical RFC 6901 pointers with one-segment '*' wildcards. No
+// Config values cross this discovery boundary. Old plugins omit this service.
+type ResourceSensitiveInputDeclarerClient interface {
+	SensitiveInputPaths(ctx context.Context, in *ResourceSensitiveInputPathsRequest, opts ...grpc.CallOption) (*ResourceSensitiveInputPathsResponse, error)
+}
+
+type resourceSensitiveInputDeclarerClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewResourceSensitiveInputDeclarerClient(cc grpc.ClientConnInterface) ResourceSensitiveInputDeclarerClient {
+	return &resourceSensitiveInputDeclarerClient{cc}
+}
+
+func (c *resourceSensitiveInputDeclarerClient) SensitiveInputPaths(ctx context.Context, in *ResourceSensitiveInputPathsRequest, opts ...grpc.CallOption) (*ResourceSensitiveInputPathsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResourceSensitiveInputPathsResponse)
+	err := c.cc.Invoke(ctx, ResourceSensitiveInputDeclarer_SensitiveInputPaths_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ResourceSensitiveInputDeclarerServer is the server API for ResourceSensitiveInputDeclarer service.
+// All implementations must embed UnimplementedResourceSensitiveInputDeclarerServer
+// for forward compatibility.
+//
+// ResourceSensitiveInputDeclarer is optional. Paths describe sensitive Config
+// leaves as canonical RFC 6901 pointers with one-segment '*' wildcards. No
+// Config values cross this discovery boundary. Old plugins omit this service.
+type ResourceSensitiveInputDeclarerServer interface {
+	SensitiveInputPaths(context.Context, *ResourceSensitiveInputPathsRequest) (*ResourceSensitiveInputPathsResponse, error)
+	mustEmbedUnimplementedResourceSensitiveInputDeclarerServer()
+}
+
+// UnimplementedResourceSensitiveInputDeclarerServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedResourceSensitiveInputDeclarerServer struct{}
+
+func (UnimplementedResourceSensitiveInputDeclarerServer) SensitiveInputPaths(context.Context, *ResourceSensitiveInputPathsRequest) (*ResourceSensitiveInputPathsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SensitiveInputPaths not implemented")
+}
+func (UnimplementedResourceSensitiveInputDeclarerServer) mustEmbedUnimplementedResourceSensitiveInputDeclarerServer() {
+}
+func (UnimplementedResourceSensitiveInputDeclarerServer) testEmbeddedByValue() {}
+
+// UnsafeResourceSensitiveInputDeclarerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ResourceSensitiveInputDeclarerServer will
+// result in compilation errors.
+type UnsafeResourceSensitiveInputDeclarerServer interface {
+	mustEmbedUnimplementedResourceSensitiveInputDeclarerServer()
+}
+
+func RegisterResourceSensitiveInputDeclarerServer(s grpc.ServiceRegistrar, srv ResourceSensitiveInputDeclarerServer) {
+	// If the following call panics, it indicates UnimplementedResourceSensitiveInputDeclarerServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ResourceSensitiveInputDeclarer_ServiceDesc, srv)
+}
+
+func _ResourceSensitiveInputDeclarer_SensitiveInputPaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResourceSensitiveInputPathsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ResourceSensitiveInputDeclarerServer).SensitiveInputPaths(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ResourceSensitiveInputDeclarer_SensitiveInputPaths_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ResourceSensitiveInputDeclarerServer).SensitiveInputPaths(ctx, req.(*ResourceSensitiveInputPathsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ResourceSensitiveInputDeclarer_ServiceDesc is the grpc.ServiceDesc for ResourceSensitiveInputDeclarer service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ResourceSensitiveInputDeclarer_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "workflow.plugin.external.iac.ResourceSensitiveInputDeclarer",
+	HandlerType: (*ResourceSensitiveInputDeclarerServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SensitiveInputPaths",
+			Handler:    _ResourceSensitiveInputDeclarer_SensitiveInputPaths_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "iac.proto",
+}

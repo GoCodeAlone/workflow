@@ -1023,3 +1023,18 @@ message UnlockResponse {}
 // plugin.json capabilities.iacStateBackends (PluginManifest.IaCStateBackends).
 message ListBackendNamesRequest  {}
 message ListBackendNamesResponse { repeated string backend_names = 1; }
+
+// ResourceSensitiveInputDeclarer is optional. Paths describe sensitive Config
+// leaves as canonical RFC 6901 pointers with one-segment '*' wildcards. No
+// Config values cross this discovery boundary. Old plugins omit this service.
+service ResourceSensitiveInputDeclarer {
+  rpc SensitiveInputPaths(ResourceSensitiveInputPathsRequest) returns (ResourceSensitiveInputPathsResponse);
+}
+
+message ResourceSensitiveInputPathsRequest {
+  string resource_type = 1;
+}
+
+message ResourceSensitiveInputPathsResponse {
+  repeated string paths = 1;
+}
