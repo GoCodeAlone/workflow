@@ -244,17 +244,9 @@ func (m *ActorPoolModule) GetGrainIdentity(ctx context.Context, identity string)
 		return nil, fmt.Errorf("actor.pool %q: actor system not started", m.name)
 	}
 
-	factory := func(_ context.Context) (actor.Grain, error) {
-		return &BridgeGrain{
-			poolName: m.name,
-			handlers: m.handlers,
-			registry: m.stepRegistry,
-			app:      m.app,
-			logger:   m.logger,
-		}, nil
-	}
-
-	return m.system.ActorSystem().GrainIdentity(ctx, identity, factory,
+	m.system.grainPools.pools.Store(m.name, m)
+	return actor.GrainOf[*BridgeGrain](ctx, m.system.ActorSystem(), identity,
+		actor.WithGrainDependencies(&grainPoolReference{poolName: m.name}),
 		actor.WithGrainDeactivateAfter(m.idleTimeout),
 	)
 }

@@ -154,8 +154,8 @@ require (
 	github.com/tidwall/btree v1.8.1 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/redcon v1.6.2 // indirect
-	github.com/tochemey/goakt/v4 v4.2.13 // indirect
-	github.com/tochemey/olric v0.3.10 // indirect
+	github.com/tochemey/goakt/v4 v4.3.1 // indirect
+	github.com/tochemey/olric v0.3.11 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

@@ -43,7 +43,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/stripe/stripe-go/v82 v82.5.1
 	github.com/tliron/glsp v0.2.2
-	github.com/tochemey/goakt/v4 v4.2.13
+	github.com/tochemey/goakt/v4 v4.3.1
 	github.com/xdg-go/scram v1.2.0
 	github.com/zalando/go-keyring v0.2.8
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
@@ -228,7 +228,7 @@ require (
 	github.com/tidwall/redcon v1.6.2 // indirect
 	github.com/tliron/commonlog v0.2.21 // indirect
 	github.com/tliron/go-kutil v0.4.0 // indirect
-	github.com/tochemey/olric v0.3.10 // indirect
+	github.com/tochemey/olric v0.3.11 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

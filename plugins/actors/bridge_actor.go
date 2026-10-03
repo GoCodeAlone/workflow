@@ -82,7 +82,25 @@ type BridgeGrain struct {
 }
 
 // OnActivate initializes grain state when the grain is loaded into memory.
-func (g *BridgeGrain) OnActivate(_ context.Context, _ *goaktactor.GrainProps) error {
+func (g *BridgeGrain) OnActivate(_ context.Context, props *goaktactor.GrainProps) error {
+	var poolName string
+	for _, dep := range props.Dependencies() {
+		if ref, ok := dep.(*grainPoolReference); ok {
+			poolName = ref.poolName
+			break
+		}
+	}
+	registry, ok := props.ActorSystem().Extension(grainPoolRegistryID).(*grainPoolRegistry)
+	if !ok || poolName == "" {
+		return fmt.Errorf("actor grain: pool configuration is missing")
+	}
+	poolValue, ok := registry.pools.Load(poolName)
+	if !ok {
+		return fmt.Errorf("actor grain: pool %q not registered", poolName)
+	}
+	pool := poolValue.(*ActorPoolModule)
+	g.poolName, g.handlers = pool.name, pool.handlers
+	g.registry, g.app, g.logger = pool.stepRegistry, pool.app, pool.logger
 	if g.state == nil {
 		g.state = make(map[string]any)
 	}
