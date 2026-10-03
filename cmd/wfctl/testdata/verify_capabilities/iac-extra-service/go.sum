@@ -6,8 +6,8 @@ github.com/GoCodeAlone/go-plugin v1.7.0 h1:EwnhqPlXiNmp85S+MXnKKvm3YlfA6O4NzBb4+
 github.com/GoCodeAlone/go-plugin v1.7.0/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=
 github.com/GoCodeAlone/modular v1.13.6 h1:AIdfdR/KTPHX8T5KJBXUHMokliutUHjl6jRfkqdh/7Q=
 github.com/GoCodeAlone/modular v1.13.6/go.mod h1:Vs92YltRNqA/v3peoHdqHTCjD10ww7rY3iURf1Ju450=
-github.com/GoCodeAlone/modular/modules/auth v1.17.0 h1:GbKG6s/2qe6N9YZ8vtvYsNon56MLWECncPxWvAsazSc=
-github.com/GoCodeAlone/modular/modules/auth v1.17.0/go.mod h1:E9dDIxiAxIrXK8gn/rEhaqI5OYe6Aw/uGpRyI7iyxj8=
+github.com/GoCodeAlone/modular/modules/auth v1.19.0 h1:ughD47BqEAhg7+3trucwcs5KzEpq9gIS/6jY4nkeGtA=
+github.com/GoCodeAlone/modular/modules/auth v1.19.0/go.mod h1:pGPazN7Irlza8kUxE7WsXri44PhURKYBGym1tlBUl+k=
 github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 h1:2ljVafd/1LYchF47WrnA1+ji8mcmVXMJ4F5qDrhZZi4=
 github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0/go.mod h1:AKLcRGsw5gp2Q1zhuK0TBnMJOsaRe3aJ2OKnLFE2O5w=
 github.com/GoCodeAlone/yaegi v0.17.2 h1:WK6Y6e0t1a6U7r+S2dN3CGWW1PizYD3zO0zneToZPxM=

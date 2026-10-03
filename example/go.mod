@@ -14,7 +14,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/DataDog/datadog-go/v5 v5.8.3 // indirect
 	github.com/GoCodeAlone/go-plugin v1.7.0 // indirect
-	github.com/GoCodeAlone/modular/modules/auth v1.17.0 // indirect
+	github.com/GoCodeAlone/modular/modules/auth v1.19.0 // indirect
 	github.com/GoCodeAlone/modular/modules/cache v1.19.0 // indirect
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 // indirect
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0 // indirect
