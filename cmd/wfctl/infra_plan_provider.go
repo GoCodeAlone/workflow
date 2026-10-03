@@ -43,7 +43,7 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 	// keeps minimal/legacy fixtures working without forcing them to
 	// declare a provider just to render a plan.
 	if len(providerDefs) == 0 {
-		return computeInfraPlan(ctx, nil, desired, current)
+		return computeDeclarativeInfraPlan(ctx, nil, desired, current, cfg, envName)
 	}
 
 	groupOrder, groups, err := groupSpecsByProviderRef(desired, providerDefs, disabledProviders, envName)
@@ -103,7 +103,7 @@ func computePlanForInfraSpecs(ctx context.Context, cfgFile, envName string, desi
 			allowProviderTypeFallback := providerTypeCounts[g.provType] == 1
 			scopedCurrent := filterCurrentStateForProvider(current, g.provType, ref, g.specs, allowProviderTypeFallback)
 
-			sub, err := computeInfraPlan(ctx, provider, g.specs, scopedCurrent)
+			sub, err := computeDeclarativeInfraPlan(ctx, provider, g.specs, scopedCurrent, cfg, envName)
 			if err != nil {
 				return nil, fmt.Errorf("provider %q: compute plan: %w", ref, err)
 			}

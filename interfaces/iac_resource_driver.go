@@ -86,6 +86,7 @@ type ResourceDriver interface {
 	HealthCheck(ctx context.Context, ref ResourceRef) (*HealthResult, error)
 	Scale(ctx context.Context, ref ResourceRef, replicas int) (*ResourceOutput, error)
 	// SensitiveKeys returns output keys whose values should be masked in logs and plan output.
+	// Sensitive Config inputs use the optional ResourceSensitiveInputDeclarer.
 	SensitiveKeys() []string
 }
 

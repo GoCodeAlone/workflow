@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitiveinputs"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
@@ -49,11 +50,15 @@ const (
 	// IaCServiceRunner is the gRPC service name for the optional
 	// IaCProviderRunner service.
 	IaCServiceRunner = "workflow.plugin.external.iac.IaCProviderRunner"
+	// IaCServiceJobCanceler is the independently advertised cancellation service.
+	IaCServiceJobCanceler = "workflow.plugin.external.iac.IaCProviderJobCanceler"
 	// IaCServiceResourceDriver is the gRPC service name for the optional
 	// ResourceDriver service. When advertised, Adapter.ResourceDriver(type)
 	// returns a per-resource-type bridge that routes Create/Read/Update/Delete/
 	// Diff/HealthCheck/Scale/SensitiveKeys through the plugin's gRPC process.
 	IaCServiceResourceDriver = "workflow.plugin.external.iac.ResourceDriver"
+	// IaCServiceSensitiveInputDeclarer declares sensitive Config leaf pointers.
+	IaCServiceSensitiveInputDeclarer = "workflow.plugin.external.iac.ResourceSensitiveInputDeclarer"
 )
 
 // RegionListerProvider is a capability-discovery interface implemented by
@@ -128,11 +133,32 @@ type RunnerProvider interface {
 	Runner() interfaces.IaCProviderRunner
 }
 
+// JobCancelerProvider discovers cancellation independently of Runner(). A nil
+// result means the plugin did not advertise the optional cancellation service.
+type JobCancelerProvider interface {
+	JobCanceler() interfaces.IaCProviderJobCanceler
+}
+
+type jobCancelerAdapter struct {
+	client pb.IaCProviderJobCancelerClient
+}
+
+func (c *jobCancelerAdapter) CancelJob(ctx context.Context, handle interfaces.JobHandle) error {
+	_, err := c.client.CancelJob(ctx, jobHandleToPB(handle))
+	if status.Code(err) == codes.Unimplemented {
+		return fmt.Errorf("%w: %w", interfaces.ErrProviderMethodUnimplemented, err)
+	}
+	return err
+}
+
 type runnerAdapter struct {
 	client pb.IaCProviderRunnerClient
 }
 
 func (r *runnerAdapter) RunJob(ctx context.Context, spec interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
 	resp, err := r.client.RunJob(ctx, jobSpecToPB(spec))
 	if err != nil {
 		if status.Code(err) == codes.Unimplemented {
@@ -214,8 +240,29 @@ type ResourceDriverProvider interface {
 // resource_type field is carried on every RPC so the plugin can route to the
 // correct per-type implementation (the DO plugin's 14-driver pattern).
 type resourceDriverAdapter struct {
-	client       pb.ResourceDriverClient
-	resourceType string
+	client          pb.ResourceDriverClient
+	resourceType    string
+	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
+}
+
+var _ interfaces.ResourceSensitiveInputDeclarer = (*resourceDriverAdapter)(nil)
+
+func (r *resourceDriverAdapter) SensitiveInputPaths(ctx context.Context) ([]string, error) {
+	if r.sensitiveInputs == nil {
+		return nil, fmt.Errorf("%w: ResourceSensitiveInputDeclarer not advertised", interfaces.ErrProviderMethodUnimplemented)
+	}
+	resp, err := r.sensitiveInputs.SensitiveInputPaths(ctx, &pb.ResourceSensitiveInputPathsRequest{ResourceType: r.resourceType})
+	if err != nil {
+		if status.Code(err) == codes.Unimplemented {
+			return nil, fmt.Errorf("%w: ResourceSensitiveInputDeclarer not implemented", interfaces.ErrProviderMethodUnimplemented)
+		}
+		return nil, err
+	}
+	paths := append([]string(nil), resp.GetPaths()...)
+	if err := sensitiveinputs.ValidatePaths(paths); err != nil {
+		return nil, err
+	}
+	return paths, nil
 }
 
 // Create calls ResourceDriver.Create with JSON-encoded spec.Config.
@@ -511,12 +558,14 @@ var (
 //
 // Compile-time guards are in adapter_test.go.
 type Adapter struct {
-	conn           grpc.ClientConnInterface
-	required       pb.IaCProviderRequiredClient
-	regionLister   *regionListerImpl       // nil when IaCServiceRegionLister not advertised
-	drift          *driftDetectorAdapter   // nil when IaCServiceDriftDetector not advertised
-	runner         *runnerAdapter          // nil when IaCServiceRunner not advertised
-	resourceDriver pb.ResourceDriverClient // nil when IaCServiceResourceDriver not advertised
+	conn            grpc.ClientConnInterface
+	required        pb.IaCProviderRequiredClient
+	regionLister    *regionListerImpl       // nil when IaCServiceRegionLister not advertised
+	drift           *driftDetectorAdapter   // nil when IaCServiceDriftDetector not advertised
+	runner          *runnerAdapter          // nil when IaCServiceRunner not advertised
+	jobCanceler     *jobCancelerAdapter     // nil when IaCServiceJobCanceler not advertised
+	resourceDriver  pb.ResourceDriverClient // nil when IaCServiceResourceDriver not advertised
+	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
 
 	// Capabilities cache. Populated on first call to fetchCapabilities via
 	// capsOnce; reused for the adapter's lifetime (capabilities don't change
@@ -574,8 +623,14 @@ func New(conn grpc.ClientConnInterface, advertisedServices map[string]bool) *Ada
 	if advertisedServices[IaCServiceRunner] {
 		a.runner = &runnerAdapter{client: pb.NewIaCProviderRunnerClient(conn)}
 	}
+	if advertisedServices[IaCServiceJobCanceler] {
+		a.jobCanceler = &jobCancelerAdapter{client: pb.NewIaCProviderJobCancelerClient(conn)}
+	}
 	if advertisedServices[IaCServiceResourceDriver] {
 		a.resourceDriver = pb.NewResourceDriverClient(conn)
+	}
+	if advertisedServices[IaCServiceSensitiveInputDeclarer] {
+		a.sensitiveInputs = pb.NewResourceSensitiveInputDeclarerClient(conn)
 	}
 	return a
 }
@@ -608,6 +663,14 @@ func (a *Adapter) Runner() interfaces.IaCProviderRunner {
 		return nil
 	}
 	return a.runner
+}
+
+// JobCanceler returns the optional cancellation capability, or nil when absent.
+func (a *Adapter) JobCanceler() interfaces.IaCProviderJobCanceler {
+	if a.jobCanceler == nil {
+		return nil
+	}
+	return a.jobCanceler
 }
 
 // ─── interfaces.IaCProvider ──────────────────────────────────────────────────
@@ -769,8 +832,9 @@ func (a *Adapter) ResourceDriver(resourceType string) (interfaces.ResourceDriver
 			interfaces.ErrProviderMethodUnimplemented)
 	}
 	return &resourceDriverAdapter{
-		client:       a.resourceDriver,
-		resourceType: resourceType,
+		client:          a.resourceDriver,
+		resourceType:    resourceType,
+		sensitiveInputs: a.sensitiveInputs,
 	}, nil
 }
 
@@ -1172,13 +1236,17 @@ func driftClassFromPB(c pb.DriftClass) interfaces.DriftClass {
 
 func jobSpecToPB(s interfaces.JobSpec) *pb.JobSpec {
 	out := &pb.JobSpec{
-		Name:          s.Name,
-		Kind:          s.Kind,
-		Image:         s.Image,
-		RunCommand:    s.RunCommand,
-		EnvVars:       copyStringMap(s.EnvVars),
-		EnvVarsSecret: copyStringMap(s.EnvVarsSecret),
-		Cron:          s.Cron,
+		Name:           s.Name,
+		Kind:           s.Kind,
+		Image:          s.Image,
+		RunCommand:     s.RunCommand,
+		EnvVars:        copyStringMap(s.EnvVars),
+		EnvVarsSecret:  copyStringMap(s.EnvVarsSecret),
+		Cron:           s.Cron,
+		TimeoutSeconds: int32(s.TimeoutSeconds), //nolint:gosec // G115: validated to 0..3600 before conversion
+	}
+	if s.Target != nil {
+		out.Target = refToPB(*s.Target)
 	}
 	if s.Termination != nil {
 		out.Termination = &pb.JobTerminationSpec{

@@ -651,6 +651,7 @@ func (a *ExternalPluginAdapter) advertisedOptionalIaCServices() map[string]bool 
 		case providerclient.IaCServiceRegionLister,
 			providerclient.IaCServiceDriftDetector,
 			providerclient.IaCServiceRunner,
+			providerclient.IaCServiceJobCanceler,
 			providerclient.IaCServiceResourceDriver:
 			out[d.ServiceName] = true
 		}
@@ -672,12 +673,13 @@ func (a *ExternalPluginAdapter) advertisedOptionalIaCServices() map[string]bool 
 // (no wiring needed — not an iac.provider plugin).
 //
 // Optional services (IaCProviderRegionLister, IaCProviderDriftDetector,
-// IaCProviderRunner, ResourceDriver) are collected from the ContractRegistry by
-// advertisedOptionalIaCServices and forwarded to providerclient.New.
+// IaCProviderRunner, IaCProviderJobCanceler, ResourceDriver) are collected from
+// the ContractRegistry by advertisedOptionalIaCServices and forwarded to
+// providerclient.New.
 // Optional gRPC clients are constructed only for advertised services, so the
 // adapter's capability accessors (RegionLister(), DriftDetector(), Runner(),
-// ResourceDriver()) return nil / ErrProviderMethodUnimplemented for unadvertised
-// services — ensuring fallback paths remain reachable.
+// JobCanceler(), ResourceDriver()) return nil / ErrProviderMethodUnimplemented
+// for unadvertised services — ensuring fallback paths remain reachable.
 func (a *ExternalPluginAdapter) iacProviderWiringHooks() []plugin.WiringHook {
 	if !a.advertisesIaCProviderRequiredService() {
 		return nil

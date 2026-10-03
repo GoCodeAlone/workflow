@@ -20,6 +20,7 @@ package workflow.plugin.external.iac;
 option go_package = "github.com/GoCodeAlone/workflow/plugin/external/proto;proto";
 
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REQUIRED service — every IaC provider MUST implement every RPC.
@@ -112,6 +113,12 @@ service IaCProviderRunner {
   rpc RunJob(JobSpec) returns (JobHandle);
   rpc JobStatus(JobHandle) returns (JobStatusReply);
   rpc JobLogs(JobHandle) returns (stream LogChunk);
+}
+
+// Cancellation is independently advertised, not added to the existing runner.
+// The handle's provider-owned metadata scopes cancellation and terminal cleanup.
+service IaCProviderJobCanceler {
+  rpc CancelJob(JobHandle) returns (google.protobuf.Empty);
 }
 
 // IaCRequirementDiscovery is an optional service for config-aware plugins that
@@ -837,6 +844,11 @@ message JobSpec {
   JobTerminationSpec termination = 8;
   repeated JobAlertSpec alerts = 9;
   repeated JobLogDestinationSpec log_destinations = 10;
+  // Exact existing parent identity: name, type, and provider_id are required.
+  ResourceRef target = 11;
+  // Targeted jobs require 1..3600 seconds. Negative or >3600 is invalid for
+  // every job; zero is accepted only for untargeted legacy provider defaults.
+  int32 timeout_seconds = 12;
 }
 
 message JobTerminationSpec {
@@ -996,6 +1008,9 @@ message IaCState {
   string created_at = 11;
   string updated_at = 12;
   string error      = 13;
+  // JSON-encoded ResourceLifecycle: identifiers and cleanup evidence only,
+  // never secret values. Absent bytes preserve legacy state records.
+  bytes lifecycle_json = 14;
 }
 
 // Configure delivers the iac.state module's YAML config to the plugin so it can
@@ -1023,3 +1038,18 @@ message UnlockResponse {}
 // plugin.json capabilities.iacStateBackends (PluginManifest.IaCStateBackends).
 message ListBackendNamesRequest  {}
 message ListBackendNamesResponse { repeated string backend_names = 1; }
+
+// ResourceSensitiveInputDeclarer is optional. Paths describe sensitive Config
+// leaves as canonical RFC 6901 pointers with one-segment '*' wildcards. No
+// Config values cross this discovery boundary. Old plugins omit this service.
+service ResourceSensitiveInputDeclarer {
+  rpc SensitiveInputPaths(ResourceSensitiveInputPathsRequest) returns (ResourceSensitiveInputPathsResponse);
+}
+
+message ResourceSensitiveInputPathsRequest {
+  string resource_type = 1;
+}
+
+message ResourceSensitiveInputPathsResponse {
+  repeated string paths = 1;
+}

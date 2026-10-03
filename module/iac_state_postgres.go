@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -191,6 +192,7 @@ CREATE TABLE IF NOT EXISTS iac_resources (
     applied_config JSONB NOT NULL DEFAULT '{}',
     outputs        JSONB NOT NULL DEFAULT '{}',
     dependencies   TEXT[] NOT NULL DEFAULT '{}',
+    lifecycle      JSONB,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`
@@ -203,6 +205,7 @@ var MigrateTableSQL = []string{
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS provider_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS config_hash TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS dependencies TEXT[] NOT NULL DEFAULT '{}'`,
+	`ALTER TABLE iac_resources ADD COLUMN IF NOT EXISTS lifecycle JSONB`,
 }
 
 var migrateTableColumns = []string{
@@ -211,6 +214,7 @@ var migrateTableColumns = []string{
 	"provider_id",
 	"config_hash",
 	"dependencies",
+	"lifecycle",
 }
 
 func (c *pgxRealConn) createTable(ctx context.Context) error {
@@ -277,9 +281,17 @@ func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {
 	if err != nil {
 		return err
 	}
+	lifecycle, err := json.Marshal(st.Lifecycle)
+	if err != nil {
+		return err
+	}
+	dependencies := st.Dependencies
+	if dependencies == nil {
+		dependencies = []string{}
+	}
 	_, err = c.pool.Exec(ctx, `
-		INSERT INTO iac_resources (name, type, provider, provider_ref, provider_id, config_hash, status, applied_config, outputs, dependencies, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+		INSERT INTO iac_resources (name, type, provider, provider_ref, provider_id, config_hash, status, applied_config, outputs, dependencies, lifecycle, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
 		ON CONFLICT (name) DO UPDATE SET
 			type           = EXCLUDED.type,
 			provider       = EXCLUDED.provider,
@@ -290,20 +302,22 @@ func (c *pgxRealConn) UpsertState(ctx context.Context, st *IaCState) error {
 			applied_config = EXCLUDED.applied_config,
 			outputs        = EXCLUDED.outputs,
 			dependencies   = EXCLUDED.dependencies,
+			lifecycle      = EXCLUDED.lifecycle,
 			updated_at     = NOW()
-	`, st.ResourceID, st.ResourceType, st.Provider, st.ProviderRef, st.ProviderID, st.ConfigHash, st.Status, string(cfg), string(out), st.Dependencies)
+	`, st.ResourceID, st.ResourceType, st.Provider, st.ProviderRef, st.ProviderID, st.ConfigHash, st.Status, string(cfg), string(out), dependencies, string(lifecycle))
 	return err
 }
 
 func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, error) {
 	var st IaCState
-	var cfgJSON, outJSON string
+	var cfgJSON, outJSON, lifecycleJSON string
+	var createdAt, updatedAt time.Time
 	var deps []string
 	err := c.pool.QueryRow(ctx, `
-		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies, created_at, updated_at
+		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies, created_at, updated_at, COALESCE(lifecycle::text, 'null')
 		FROM iac_resources WHERE name = $1
 	`, name).Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status,
-		&cfgJSON, &outJSON, &deps, &st.CreatedAt, &st.UpdatedAt)
+		&cfgJSON, &outJSON, &deps, &createdAt, &updatedAt, &lifecycleJSON)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -311,7 +325,9 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 		return nil, err
 	}
 	st.Dependencies = append([]string(nil), deps...)
-	if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON); err != nil {
+	st.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+	st.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+	if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON, lifecycleJSON); err != nil {
 		return nil, err
 	}
 	return &st, nil
@@ -319,7 +335,7 @@ func (c *pgxRealConn) GetState(ctx context.Context, name string) (*IaCState, err
 
 func (c *pgxRealConn) ListRows(ctx context.Context) ([]*IaCState, error) {
 	rows, err := c.pool.Query(ctx, `
-		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies
+		SELECT name, type, provider, provider_ref, provider_id, config_hash, status, applied_config::text, outputs::text, dependencies, COALESCE(lifecycle::text, 'null')
 		FROM iac_resources
 	`)
 	if err != nil {
@@ -339,11 +355,11 @@ func scanIaCStateRows(rows iacStateRows) ([]*IaCState, error) {
 	var results []*IaCState
 	for rows.Next() {
 		var st IaCState
-		var cfgJSON, outJSON string
-		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status, &cfgJSON, &outJSON, &st.Dependencies); err != nil {
+		var cfgJSON, outJSON, lifecycleJSON string
+		if err := rows.Scan(&st.ResourceID, &st.ResourceType, &st.Provider, &st.ProviderRef, &st.ProviderID, &st.ConfigHash, &st.Status, &cfgJSON, &outJSON, &st.Dependencies, &lifecycleJSON); err != nil {
 			return nil, fmt.Errorf("scan iac_resources row: %w", err)
 		}
-		if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON); err != nil {
+		if err := decodeIaCStatePayloads(&st, cfgJSON, outJSON, lifecycleJSON); err != nil {
 			return nil, err
 		}
 		results = append(results, &st)
@@ -351,12 +367,15 @@ func scanIaCStateRows(rows iacStateRows) ([]*IaCState, error) {
 	return results, rows.Err()
 }
 
-func decodeIaCStatePayloads(st *IaCState, cfgJSON, outJSON string) error {
+func decodeIaCStatePayloads(st *IaCState, cfgJSON, outJSON, lifecycleJSON string) error {
 	if err := json.Unmarshal([]byte(cfgJSON), &st.Config); err != nil {
 		return fmt.Errorf("decode iac_resources %q applied_config: %w", st.ResourceID, err)
 	}
 	if err := json.Unmarshal([]byte(outJSON), &st.Outputs); err != nil {
 		return fmt.Errorf("decode iac_resources %q outputs: %w", st.ResourceID, err)
+	}
+	if err := json.Unmarshal([]byte(lifecycleJSON), &st.Lifecycle); err != nil {
+		return fmt.Errorf("decode iac_resources %q lifecycle: %w", st.ResourceID, err)
 	}
 	return nil
 }

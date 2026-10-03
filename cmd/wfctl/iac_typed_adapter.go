@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitiveinputs"
 	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
@@ -50,19 +51,20 @@ import (
 // each name (Task 5). Constants are declared at package scope so callers
 // (e.g. the loader) can reference the same strings without duplication.
 const (
-	iacServiceRequired          = "workflow.plugin.external.iac.IaCProviderRequired"
-	iacServiceEnumerator        = "workflow.plugin.external.iac.IaCProviderEnumerator"
-	iacServiceDriftDetector     = "workflow.plugin.external.iac.IaCProviderDriftDetector"
-	iacServiceCredentialRevoker = "workflow.plugin.external.iac.IaCProviderCredentialRevoker"
-	iacServiceRegionLister      = "workflow.plugin.external.iac.IaCProviderRegionLister"
-	iacServiceOwnership         = "workflow.plugin.external.iac.IaCProviderOwnership"
-	iacServiceMigrationRepairer = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
-	iacServiceValidator         = "workflow.plugin.external.iac.IaCProviderValidator"
-	iacServiceDriftConfigDetect = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
-	iacServiceLogCapture        = "workflow.plugin.external.iac.IaCProviderLogCapture"
-	iacServiceFinalizer         = "workflow.plugin.external.iac.IaCProviderFinalizer"
-	iacServiceResourceDriver    = "workflow.plugin.external.iac.ResourceDriver"
-	iacServiceRequirementMapper = "workflow.plugin.external.iac.IaCProviderRequirementMapper"
+	iacServiceRequired               = "workflow.plugin.external.iac.IaCProviderRequired"
+	iacServiceEnumerator             = "workflow.plugin.external.iac.IaCProviderEnumerator"
+	iacServiceDriftDetector          = "workflow.plugin.external.iac.IaCProviderDriftDetector"
+	iacServiceCredentialRevoker      = "workflow.plugin.external.iac.IaCProviderCredentialRevoker"
+	iacServiceRegionLister           = "workflow.plugin.external.iac.IaCProviderRegionLister"
+	iacServiceOwnership              = "workflow.plugin.external.iac.IaCProviderOwnership"
+	iacServiceMigrationRepairer      = "workflow.plugin.external.iac.IaCProviderMigrationRepairer"
+	iacServiceValidator              = "workflow.plugin.external.iac.IaCProviderValidator"
+	iacServiceDriftConfigDetect      = "workflow.plugin.external.iac.IaCProviderDriftConfigDetector"
+	iacServiceLogCapture             = "workflow.plugin.external.iac.IaCProviderLogCapture"
+	iacServiceFinalizer              = "workflow.plugin.external.iac.IaCProviderFinalizer"
+	iacServiceResourceDriver         = "workflow.plugin.external.iac.ResourceDriver"
+	iacServiceRequirementMapper      = "workflow.plugin.external.iac.IaCProviderRequirementMapper"
+	iacServiceSensitiveInputDeclarer = "workflow.plugin.external.iac.ResourceSensitiveInputDeclarer"
 )
 
 // typedIaCAdapter implements interfaces.IaCProvider on top of the typed
@@ -79,19 +81,20 @@ const (
 type typedIaCAdapter struct {
 	conn *grpc.ClientConn
 
-	required     pb.IaCProviderRequiredClient
-	enumerator   pb.IaCProviderEnumeratorClient
-	drift        pb.IaCProviderDriftDetectorClient
-	revoker      pb.IaCProviderCredentialRevokerClient
-	regionLister pb.IaCProviderRegionListerClient
-	ownership    pb.IaCProviderOwnershipClient
-	repairer     pb.IaCProviderMigrationRepairerClient
-	validator    pb.IaCProviderValidatorClient
-	driftCfg     pb.IaCProviderDriftConfigDetectorClient
-	logCapture   pb.IaCProviderLogCaptureClient
-	finalizer    pb.IaCProviderFinalizerClient
-	resourceDriv pb.ResourceDriverClient
-	reqMapper    pb.IaCProviderRequirementMapperClient
+	required        pb.IaCProviderRequiredClient
+	enumerator      pb.IaCProviderEnumeratorClient
+	drift           pb.IaCProviderDriftDetectorClient
+	revoker         pb.IaCProviderCredentialRevokerClient
+	regionLister    pb.IaCProviderRegionListerClient
+	ownership       pb.IaCProviderOwnershipClient
+	repairer        pb.IaCProviderMigrationRepairerClient
+	validator       pb.IaCProviderValidatorClient
+	driftCfg        pb.IaCProviderDriftConfigDetectorClient
+	logCapture      pb.IaCProviderLogCaptureClient
+	finalizer       pb.IaCProviderFinalizerClient
+	resourceDriv    pb.ResourceDriverClient
+	reqMapper       pb.IaCProviderRequirementMapperClient
+	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
 
 	// cachedCaps memoizes the plugin's CapabilitiesResponse. Access via
 	// fetchCapabilities — never read this field directly.
@@ -146,6 +149,9 @@ func newTypedIaCAdapter(conn *grpc.ClientConn, registered map[string]bool) *type
 	}
 	if registered[iacServiceRequirementMapper] {
 		a.reqMapper = pb.NewIaCProviderRequirementMapperClient(conn)
+	}
+	if registered[iacServiceSensitiveInputDeclarer] {
+		a.sensitiveInputs = pb.NewResourceSensitiveInputDeclarerClient(conn)
 	}
 	return a
 }
@@ -485,7 +491,11 @@ func (a *typedIaCAdapter) ResourceDriver(resourceType string) (interfaces.Resour
 	if a.resourceDriv == nil {
 		return nil, unimplementedOptional(iacServiceResourceDriver)
 	}
-	return &typedResourceDriver{client: a.resourceDriv, resourceType: resourceType}, nil
+	return &typedResourceDriver{
+		client:          a.resourceDriv,
+		resourceType:    resourceType,
+		sensitiveInputs: a.sensitiveInputs,
+	}, nil
 }
 
 // SupportedCanonicalKeys returns the canonical IaC config keys this
@@ -758,8 +768,26 @@ func (a *typedIaCAdapter) CaptureLogs(ctx context.Context, req interfaces.LogCap
 // the per-type driver implementation (DO plugin's 14-driver router in
 // Task 11).
 type typedResourceDriver struct {
-	client       pb.ResourceDriverClient
-	resourceType string
+	client          pb.ResourceDriverClient
+	resourceType    string
+	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
+}
+
+var _ interfaces.ResourceSensitiveInputDeclarer = (*typedResourceDriver)(nil)
+
+func (d *typedResourceDriver) SensitiveInputPaths(ctx context.Context) ([]string, error) {
+	if d.sensitiveInputs == nil {
+		return nil, unimplementedOptional(iacServiceSensitiveInputDeclarer)
+	}
+	resp, err := d.sensitiveInputs.SensitiveInputPaths(ctx, &pb.ResourceSensitiveInputPathsRequest{ResourceType: d.resourceType})
+	if err != nil {
+		return nil, translateRPCErr(err)
+	}
+	paths := append([]string(nil), resp.GetPaths()...)
+	if err := sensitiveinputs.ValidatePaths(paths); err != nil {
+		return nil, err
+	}
+	return paths, nil
 }
 
 func (d *typedResourceDriver) Create(ctx context.Context, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {

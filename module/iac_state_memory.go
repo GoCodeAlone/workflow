@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -30,9 +31,7 @@ func (s *MemoryIaCStateStore) GetState(ctx context.Context, resourceID string) (
 	if !ok {
 		return nil, nil
 	}
-	// Return a shallow copy to prevent external mutation.
-	cp := *st
-	return &cp, nil
+	return cloneMemoryIaCState(st), nil
 }
 
 // SaveState inserts or replaces a state record.
@@ -45,8 +44,7 @@ func (s *MemoryIaCStateStore) SaveState(ctx context.Context, state *IaCState) er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := *state
-	s.states[state.ResourceID] = &cp
+	s.states[state.ResourceID] = cloneMemoryIaCState(state)
 	return nil
 }
 
@@ -58,11 +56,22 @@ func (s *MemoryIaCStateStore) ListStates(ctx context.Context, filter map[string]
 	var results []*IaCState
 	for _, st := range s.states {
 		if matchesFilter(st, filter) {
-			cp := *st
-			results = append(results, &cp)
+			results = append(results, cloneMemoryIaCState(st))
 		}
 	}
 	return results, nil
+}
+
+// Lifecycle retry evidence must not alias callers; retain the existing shallow
+// semantics for other state fields.
+func cloneMemoryIaCState(state *IaCState) *IaCState {
+	copy := *state
+	if state.Lifecycle != nil {
+		lifecycle := *state.Lifecycle
+		lifecycle.Secrets = slices.Clone(state.Lifecycle.Secrets)
+		copy.Lifecycle = &lifecycle
+	}
+	return &copy
 }
 
 // DeleteState removes a state record by resource ID.

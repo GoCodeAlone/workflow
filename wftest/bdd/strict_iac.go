@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
@@ -75,10 +76,20 @@ var iacServiceChecks = []iacServiceCheck{
 	}},
 	{"workflow.plugin.external.iac.IaCProviderRunner", func(p any) bool {
 		_, ok := p.(pb.IaCProviderRunnerServer)
-		return ok
+		_, native := p.(interfaces.IaCProviderRunner)
+		return ok || native
+	}},
+	{"workflow.plugin.external.iac.IaCProviderJobCanceler", func(p any) bool {
+		_, ok := p.(pb.IaCProviderJobCancelerServer)
+		_, native := p.(interfaces.IaCProviderJobCanceler)
+		return ok || native
 	}},
 	{"workflow.plugin.external.iac.ResourceDriver", func(p any) bool {
 		_, ok := p.(pb.ResourceDriverServer)
+		return ok
+	}},
+	{"workflow.plugin.external.iac.ResourceSensitiveInputDeclarer", func(p any) bool {
+		_, ok := p.(pb.ResourceSensitiveInputDeclarerServer)
 		return ok
 	}},
 	{"workflow.plugin.external.iac.IaCStateBackend", func(p any) bool {

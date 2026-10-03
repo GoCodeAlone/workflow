@@ -59,8 +59,8 @@ func (r *scanSuccessRows) Next() bool {
 }
 
 func (r *scanSuccessRows) Scan(dest ...any) error {
-	if len(dest) != 10 {
-		return fmt.Errorf("dest len = %d, want 10", len(dest))
+	if len(dest) != 11 {
+		return fmt.Errorf("dest len = %d, want 11", len(dest))
 	}
 	*(dest[0].(*string)) = "site-dns"
 	*(dest[1].(*string)) = "infra.dns"
@@ -72,6 +72,7 @@ func (r *scanSuccessRows) Scan(dest ...any) error {
 	*(dest[7].(*string)) = `{"domain":"example.com"}`
 	*(dest[8].(*string)) = `{"records":[]}`
 	*(dest[9].(*[]string)) = []string{"network"}
+	*(dest[10].(*string)) = "null"
 	return nil
 }
 
@@ -86,8 +87,8 @@ func (r *scanBadJSONRows) Next() bool {
 }
 
 func (r *scanBadJSONRows) Scan(dest ...any) error {
-	if len(dest) != 10 {
-		return fmt.Errorf("dest len = %d, want 10", len(dest))
+	if len(dest) != 11 {
+		return fmt.Errorf("dest len = %d, want 11", len(dest))
 	}
 	*(dest[0].(*string)) = "site-dns"
 	*(dest[1].(*string)) = "infra.dns"
@@ -99,6 +100,7 @@ func (r *scanBadJSONRows) Scan(dest ...any) error {
 	*(dest[7].(*string)) = r.cfgJSON
 	*(dest[8].(*string)) = r.outJSON
 	*(dest[9].(*[]string)) = []string{"network"}
+	*(dest[10].(*string)) = "null"
 	return nil
 }
 
@@ -462,7 +464,7 @@ func TestPostgresIaCStateStore_Migration_AddsColumnsForExistingPreChangeSchema(t
 		"created_at":     true,
 		"updated_at":     true,
 	}
-	newColumns := []string{"provider", "provider_ref", "provider_id", "config_hash", "dependencies"}
+	newColumns := []string{"provider", "provider_ref", "provider_id", "config_hash", "dependencies", "lifecycle"}
 
 	for _, col := range newColumns {
 		if legacySchemaColumns[col] {
@@ -503,6 +505,7 @@ func TestPostgresIaCStateStore_Migration_SkipsAlterForExistingColumns(t *testing
 		"applied_config",
 		"outputs",
 		"dependencies",
+		"lifecycle",
 		"created_at",
 		"updated_at",
 	}
@@ -522,6 +525,7 @@ func TestPostgresIaCStateStore_Migration_AltersOnlyMissingColumns(t *testing.T) 
 		"config_hash",
 		"applied_config",
 		"outputs",
+		"lifecycle",
 		"created_at",
 		"updated_at",
 	}

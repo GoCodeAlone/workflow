@@ -1,9 +1,16 @@
 package module
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 )
 
@@ -20,6 +27,17 @@ func iacStateToProto(s *IaCState) (*pb.IaCState, error) {
 	if s == nil {
 		return nil, nil
 	}
+	if err := validateIaCStateLifecycle(s.Lifecycle); err != nil {
+		return nil, err
+	}
+	var lifecycleJSON []byte
+	if s.Lifecycle != nil {
+		var err error
+		lifecycleJSON, err = json.Marshal(s.Lifecycle)
+		if err != nil {
+			return nil, invalidIaCStateLifecycle()
+		}
+	}
 	outputsJSON, err := json.Marshal(s.Outputs)
 	if err != nil {
 		return nil, err
@@ -29,19 +47,20 @@ func iacStateToProto(s *IaCState) (*pb.IaCState, error) {
 		return nil, err
 	}
 	return &pb.IaCState{
-		ResourceId:   s.ResourceID,
-		ResourceType: s.ResourceType,
-		Provider:     s.Provider,
-		ProviderRef:  s.ProviderRef,
-		ProviderId:   s.ProviderID,
-		ConfigHash:   s.ConfigHash,
-		Status:       s.Status,
-		OutputsJson:  outputsJSON,
-		ConfigJson:   configJSON,
-		Dependencies: s.Dependencies,
-		CreatedAt:    s.CreatedAt,
-		UpdatedAt:    s.UpdatedAt,
-		Error:        s.Error,
+		ResourceId:    s.ResourceID,
+		ResourceType:  s.ResourceType,
+		Provider:      s.Provider,
+		ProviderRef:   s.ProviderRef,
+		ProviderId:    s.ProviderID,
+		ConfigHash:    s.ConfigHash,
+		Status:        s.Status,
+		OutputsJson:   outputsJSON,
+		ConfigJson:    configJSON,
+		Dependencies:  s.Dependencies,
+		CreatedAt:     s.CreatedAt,
+		UpdatedAt:     s.UpdatedAt,
+		Error:         s.Error,
+		LifecycleJson: lifecycleJSON,
 	}, nil
 }
 
@@ -52,6 +71,10 @@ func iacStateToProto(s *IaCState) (*pb.IaCState, error) {
 func iacStateFromProto(p *pb.IaCState) (*IaCState, error) {
 	if p == nil {
 		return nil, nil
+	}
+	lifecycle, err := iacStateLifecycleFromJSON(p.LifecycleJson)
+	if err != nil {
+		return nil, err
 	}
 	outputs, err := jsonBytesToMap(p.OutputsJson)
 	if err != nil {
@@ -75,7 +98,83 @@ func iacStateFromProto(p *pb.IaCState) (*IaCState, error) {
 		CreatedAt:    p.CreatedAt,
 		UpdatedAt:    p.UpdatedAt,
 		Error:        p.Error,
+		Lifecycle:    lifecycle,
 	}, nil
+}
+
+func invalidIaCStateLifecycle() error {
+	// Decoder errors can contain payload field names; never propagate them.
+	return fmt.Errorf("%w: invalid IaC state lifecycle metadata", interfaces.ErrValidation)
+}
+
+func validIaCLifecycleIdentifier(value string) bool {
+	return utf8.ValidString(value) && strings.TrimSpace(value) != "" && !strings.ContainsFunc(value, unicode.IsControl)
+}
+
+func validateIaCStateLifecycle(lifecycle *interfaces.ResourceLifecycle) error {
+	if lifecycle == nil {
+		return nil
+	}
+	if !validIaCLifecycleIdentifier(lifecycle.Generation) {
+		return invalidIaCStateLifecycle()
+	}
+	switch lifecycle.Phase {
+	case interfaces.ResourcePhaseActive, interfaces.ResourcePhaseSecretRoutingPending,
+		interfaces.ResourcePhaseCloudDeletePending, interfaces.ResourcePhaseCloudDeletedSecretCleanupPending:
+	default:
+		return invalidIaCStateLifecycle()
+	}
+	for _, secret := range lifecycle.Secrets {
+		if !validIaCLifecycleIdentifier(secret.Key) || !validIaCLifecycleIdentifier(secret.Provider) ||
+			!validIaCLifecycleIdentifier(secret.Scope) || (secret.Store != "" && !validIaCLifecycleIdentifier(secret.Store)) {
+			return invalidIaCStateLifecycle()
+		}
+		// Unprefixed environment providers and the default provider namespace
+		// legitimately have no subject. Scoped stores require their identity.
+		if secret.Subject == "" {
+			if secret.Scope != "process" && secret.Scope != "default" {
+				return invalidIaCStateLifecycle()
+			}
+		} else if !validIaCLifecycleIdentifier(secret.Subject) {
+			return invalidIaCStateLifecycle()
+		}
+	}
+	return nil
+}
+
+func iacStateLifecycleFromJSON(payload []byte) (*interfaces.ResourceLifecycle, error) {
+	if len(payload) == 0 {
+		return nil, nil
+	}
+	if !utf8.Valid(payload) {
+		return nil, invalidIaCStateLifecycle()
+	}
+	var lifecycle interfaces.ResourceLifecycle
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&lifecycle); err != nil {
+		return nil, invalidIaCStateLifecycle()
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, invalidIaCStateLifecycle()
+	}
+	// encoding/json accepts null into scalar fields as their zero value.
+	// Lifecycle metadata requires concrete typed values, including evidence.
+	decoder = json.NewDecoder(bytes.NewReader(payload))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || token == nil {
+			return nil, invalidIaCStateLifecycle()
+		}
+	}
+	if err := validateIaCStateLifecycle(&lifecycle); err != nil {
+		return nil, err
+	}
+	return &lifecycle, nil
 }
 
 // jsonBytesToMap decodes JSON bytes into a map[string]any. Empty, "null" and

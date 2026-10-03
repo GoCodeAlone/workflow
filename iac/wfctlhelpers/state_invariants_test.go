@@ -2,8 +2,10 @@ package wfctlhelpers_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,42 @@ import (
 	"github.com/GoCodeAlone/workflow/iac/wfctlhelpers"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+func TestCleanupPending_StateRoundTrip(t *testing.T) {
+	lifecycle := &interfaces.ResourceLifecycle{Generation: "generation-1", Phase: interfaces.ResourcePhaseCloudDeletedSecretCleanupPending,
+		Secrets: []interfaces.RoutedSecretReference{{Key: "exact-routed-key", Provider: "file", Scope: "directory", Subject: "secret-dir", Store: "named-store"}, {Key: "named-alias", VerifiedAbsent: true}}}
+	for _, backend := range []string{"filesystem", "memory"} {
+		t.Run(backend, func(t *testing.T) {
+			cfg := writeStateCfg(t, "modules:\n  - name: state\n    type: iac.state\n    config:\n      backend: "+backend+"\n      directory: "+t.TempDir()+"\n")
+			store, err := wfctlhelpers.ResolveStateStore(cfg, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := interfaces.ResourceState{ID: "database", Name: "database", Type: "infra.database", ProviderID: "provider-id", Lifecycle: lifecycle}
+			if err := store.SaveResource(t.Context(), state); err != nil {
+				t.Fatal(err)
+			}
+			if backend == "filesystem" {
+				store, err = wfctlhelpers.ResolveStateStore(cfg, "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := store.GetResource(t.Context(), state.Name)
+			if err != nil || got == nil || !reflect.DeepEqual(got.Lifecycle, lifecycle) {
+				t.Fatalf("cleanup journal was lost: got=%+v err=%v", got, err)
+			}
+			states, err := store.ListResources(t.Context())
+			if err != nil || len(states) != 1 || !reflect.DeepEqual(states[0].Lifecycle, lifecycle) {
+				t.Fatalf("list lost cleanup journal: states=%+v err=%v", states, err)
+			}
+			data, err := json.Marshal(got)
+			if err != nil || !strings.Contains(string(data), "cloud_deleted_secret_cleanup_pending") {
+				t.Fatalf("phase not persisted: %s err=%v", data, err)
+			}
+		})
+	}
+}
 
 // TestOutOfSubsetMethods_Panic guards design-doc cycle-5 row 4: the
 // handler library and host module use only the

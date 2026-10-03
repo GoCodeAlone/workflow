@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -316,7 +317,7 @@ func runInfraPlan(args []string) error {
 		if cfgLoadErr != nil {
 			return fmt.Errorf("load config for plan-time resolver: %w", cfgLoadErr)
 		}
-		desired, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
+		_, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
 		if err != nil {
 			return fmt.Errorf("resolve specs against state: %w", err)
 		}
@@ -1479,6 +1480,10 @@ func runInfraApply(args []string) error {
 			return fmt.Errorf("list state for refresh: %w", statesErr)
 		}
 		groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
+		secretProvider, secretErr := loadSecretsProviderForRouting(cfgFile)
+		if secretErr != nil {
+			return secretErr
+		}
 		// Wrap each group in a helper so the deferred closer fires after the
 		// group finishes, not at runInfraApply exit. Without this, a config
 		// with N provider groups would hold N connections open throughout the
@@ -1498,7 +1503,7 @@ func runInfraApply(args []string) error {
 				}()
 			}
 			return runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
-				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr, secretProvider)
 		}
 		for _, moduleRef := range groupOrder {
 			if refreshErr := refreshGroup(moduleRef, groups[moduleRef]); refreshErr != nil {
@@ -1562,11 +1567,8 @@ func runInfraApply(args []string) error {
 				return inputsnapshot.NewStaleError(drift)
 			}
 		}
-		// Mirror the plan-time resolver: apply resolveSpecsAgainstState before
-		// hashing so that DesiredHash is computed on post-resolution specs, matching
-		// what runInfraPlan recorded in plan.DesiredHash. Without this step, any ref
-		// that resolved at plan time would cause a currentHash != plan.DesiredHash
-		// mismatch on every --plan apply.
+		// Stale checks hash the same declarative inputs recorded at plan time.
+		// Resolving here would make credential bytes part of the hash contract.
 		{
 			currentState, stateErr := loadCurrentState(cfgFile, envName)
 			if stateErr != nil {
@@ -1576,15 +1578,6 @@ func runInfraApply(args []string) error {
 				return fmt.Errorf("validate plan include scope: %w", err)
 			}
 			desired = filterSpecsByInclude(desired, planIncludeSet)
-			currentState = filterStatesByInclude(currentState, planIncludeSet)
-			planApplyCfg, cfgErr := config.LoadFromFile(cfgFile)
-			if cfgErr != nil {
-				return fmt.Errorf("load config for stale-check: %w", cfgErr)
-			}
-			desired, _, err = resolveSpecsAgainstState(desired, currentState, planApplyCfg, envName)
-			if err != nil {
-				return fmt.Errorf("resolve specs for stale-check: %w", err)
-			}
 		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {
@@ -1657,9 +1650,16 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
-	states, err := loadCurrentState(cfgFile, envName)
+	outputStateStore, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
-		return fmt.Errorf("load current state for infra_output sync: %w", err)
+		return cleanupStateError{operation: "open infra_output journal", cause: err}
+	}
+	if closer, ok := outputStateStore.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
+	}
+	states, err := outputStateStore.ListResources(ctx)
+	if err != nil {
+		return cleanupStateError{operation: "read infra_output journal", cause: err}
 	}
 	// Only reload the workflow config when routing or env resolution is needed:
 	// store-scoped generators need secretStores, and --env needs module
@@ -1677,7 +1677,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope)
+	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope, outputStateStore)
 }
 
 func runInfraStatus(args []string) error {

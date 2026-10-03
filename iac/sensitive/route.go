@@ -156,7 +156,7 @@ func Route(
 		}
 		secretName := SecretKey(resourceName, k)
 		if setErr := provider.Set(ctx, secretName, val); setErr != nil {
-			return nil, hydrated, fmt.Errorf("sensitive.Route: provider.Set(%q): %w", secretName, setErr)
+			return nil, hydrated, secretCleanupError{operation: "write", key: secretName, cause: setErr}
 		}
 		sanitized[k] = Placeholder(resourceName, k)
 		hydrated[secretName] = val
@@ -250,25 +250,87 @@ func Revoke(
 	if resourceName == "" {
 		return fmt.Errorf("sensitive.Revoke: resourceName is empty")
 	}
-	// Sort for determinism (test stability + log readability).
-	sorted := append([]string(nil), mergedKeys...)
-	sort.Strings(sorted)
+	keys := make([]string, 0, len(mergedKeys))
+	for _, key := range mergedKeys {
+		keys = append(keys, SecretKey(resourceName, key))
+	}
+	return RevokeKeys(ctx, provider, keys)
+}
 
+// RevokeKeys deletes exact persisted identifiers and verifies absence. Unlike
+// legacy Revoke, a missing provider is an error when cleanup debt exists.
+func RevokeKeys(ctx context.Context, provider secrets.Provider, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if provider == nil {
+		return fmt.Errorf("sensitive.RevokeKeys: secrets provider is unavailable")
+	}
+	unique := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if key == "" {
+			return fmt.Errorf("sensitive.RevokeKeys: empty secret identifier")
+		}
+		unique[key] = struct{}{}
+	}
+	sorted := make([]string, 0, len(unique))
+	for key := range unique {
+		sorted = append(sorted, key)
+	}
+	sort.Strings(sorted)
 	var errs []error
-	for _, k := range sorted {
-		secretName := SecretKey(resourceName, k)
-		if delErr := provider.Delete(ctx, secretName); delErr != nil {
-			if errors.Is(delErr, secrets.ErrNotFound) {
-				continue
-			}
-			errs = append(errs, fmt.Errorf("delete %q: %w", secretName, delErr))
+	for _, key := range sorted {
+		if err := provider.Delete(ctx, key); err != nil && !errors.Is(err, secrets.ErrNotFound) {
+			errs = append(errs, secretCleanupError{operation: "delete", key: key, cause: err})
+			continue
+		}
+		if err := VerifyAbsent(ctx, provider, key); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
-	}
-	return nil
+	return errors.Join(errs...)
 }
+
+// VerifyAbsent checks readable stores directly and write-only stores through
+// their key listing. Values and provider error payloads never enter diagnostics.
+func VerifyAbsent(ctx context.Context, provider secrets.Provider, key string) error {
+	if provider == nil || key == "" {
+		return fmt.Errorf("sensitive.VerifyAbsent: provider and identifier are required")
+	}
+	_, err := provider.Get(ctx, key)
+	if errors.Is(err, secrets.ErrNotFound) {
+		return nil
+	}
+	if errors.Is(err, secrets.ErrUnsupported) {
+		keys, listErr := provider.List(ctx)
+		if listErr != nil {
+			return secretCleanupError{operation: "list", key: key, cause: listErr}
+		}
+		for _, present := range keys {
+			// Conservative for stores that normalize case: a case-equivalent
+			// key blocks absence acceptance rather than dropping cleanup debt.
+			if strings.EqualFold(present, key) {
+				return secretCleanupError{operation: "verify absence", key: key}
+			}
+		}
+		return nil
+	}
+	if err != nil {
+		return secretCleanupError{operation: "read", key: key, cause: err}
+	}
+	return secretCleanupError{operation: "verify absence", key: key}
+}
+
+type secretCleanupError struct {
+	operation string
+	key       string
+	cause     error
+}
+
+func (e secretCleanupError) Error() string {
+	return fmt.Sprintf("secret cleanup %s failed for %q", e.operation, e.key)
+}
+func (e secretCleanupError) Unwrap() error { return e.cause }
 
 // MaskSensitiveForDiff returns copies of desired and current with sensitive
 // keys elided from BOTH sides. A key is considered sensitive when:

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/platform"
 )
 
 // ── fixtures for refresh tests ──────────────────────────────────────────────────
@@ -109,6 +110,51 @@ func TestApplyRefresh_DryRunPrintsPrunesWithoutMutating(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "test-vpc") {
 		t.Errorf("dry-run: expected resource name in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestApplyRefresh_RoutedCleanupDebtCannotBePruned(t *testing.T) {
+	for _, journaled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy-placeholder", true: "journal"}[journaled], func(t *testing.T) {
+			provider := newRefreshDriftFixture(t, []interfaces.DriftResult{{Name: "database", Type: "infra.database", Class: interfaces.DriftClassGhost}}, nil)
+			store := cleanupStateStore(t)
+			state := interfaces.ResourceState{ID: "database", Name: "database", Type: "infra.database", ProviderID: "deleted-id"}
+			if journaled {
+				state.Lifecycle = &interfaces.ResourceLifecycle{Generation: "generation-1", Phase: interfaces.ResourcePhaseCloudDeletedSecretCleanupPending}
+			} else {
+				state.Outputs = map[string]any{"password": "secret_ref://exact-key"}
+			}
+			if err := store.SaveResource(t.Context(), state); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			err := runInfraApplyRefreshPhase(t.Context(), provider, []interfaces.ResourceRef{{Name: state.Name, Type: state.Type}}, store, true, true, []interfaces.ResourceState{state}, &stdout, &stderr, newEnvTestProvider())
+			states, loadErr := store.ListResources(t.Context())
+			if err != nil || loadErr != nil || len(states) != 1 || states[0].Lifecycle == nil || states[0].Lifecycle.Phase != interfaces.ResourcePhaseCloudDeletedSecretCleanupPending || !strings.Contains(stdout.String(), "cleanup") {
+				t.Fatalf("refresh forgot routed-secret debt: states=%v err=%v load=%v output=%q", states, err, loadErr, stdout.String())
+			}
+		})
+	}
+}
+
+func TestApplyRefresh_ConfirmedRoutedGhostMustRecreate(t *testing.T) {
+	store := cleanupStateStore(t)
+	state := interfaces.ResourceState{ID: "database", Name: "database", Type: "infra.database", ProviderID: "deleted-id", Lifecycle: &interfaces.ResourceLifecycle{Generation: "generation-1", Phase: interfaces.ResourcePhaseActive}}
+	if err := store.SaveResource(t.Context(), state); err != nil {
+		t.Fatal(err)
+	}
+	provider := newRefreshDriftFixture(t, []interfaces.DriftResult{{Name: state.Name, Type: state.Type, Class: interfaces.DriftClassGhost}}, nil)
+	var stdout, stderr bytes.Buffer
+	if err := runInfraApplyRefreshPhase(t.Context(), provider, []interfaces.ResourceRef{{Name: state.Name, Type: state.Type, ProviderID: state.ProviderID}}, store, true, true, []interfaces.ResourceState{state}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	states, err := store.ListResources(t.Context())
+	if err != nil || len(states) != 1 || states[0].Lifecycle.Phase != interfaces.ResourcePhaseCloudDeletedSecretCleanupPending {
+		t.Fatalf("confirmed ghost was not durably marked: states=%+v err=%v", states, err)
+	}
+	plan, err := platform.ComputePlan(t.Context(), &declarativeCLIProvider{driver: &stubSensitiveDriver{}}, []interfaces.ResourceSpec{{Name: state.Name, Type: state.Type}}, states)
+	if err != nil || len(plan.Actions) != 1 || plan.Actions[0].Action != "replace" {
+		t.Fatalf("confirmed ghost was declared converged: plan=%+v err=%v", plan, err)
 	}
 }
 

@@ -44,12 +44,45 @@ type ResourceState struct {
 	//     refuse to compute config-drift on adoption-shaped entries.
 	//   - "" (empty): legacy state written before this field existed.
 	//     Consumers MUST treat as "adoption" (conservative default).
-	AppliedConfigSource string         `json:"applied_config_source,omitempty"`
-	Outputs             map[string]any `json:"outputs"`
-	Dependencies        []string       `json:"dependencies"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
-	LastDriftCheck      time.Time      `json:"last_drift_check,omitempty"`
+	AppliedConfigSource string             `json:"applied_config_source,omitempty"`
+	Outputs             map[string]any     `json:"outputs"`
+	Dependencies        []string           `json:"dependencies"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+	LastDriftCheck      time.Time          `json:"last_drift_check,omitempty"`
+	Lifecycle           *ResourceLifecycle `json:"lifecycle,omitempty"`
+}
+
+// ResourcePhase records recovery debt independently of provider outputs.
+type ResourcePhase string
+
+const (
+	ResourcePhaseActive                           ResourcePhase = "active"
+	ResourcePhaseSecretRoutingPending             ResourcePhase = "secret_routing_pending" //nolint:gosec // Lifecycle label, not a credential.
+	ResourcePhaseCloudDeletePending               ResourcePhase = "cloud_delete_pending"
+	ResourcePhaseCloudDeletedSecretCleanupPending ResourcePhase = "cloud_deleted_secret_cleanup_pending" //nolint:gosec // Lifecycle label, not a credential.
+)
+
+// ResourceLifecycle contains only identifiers and completion evidence, never
+// credential values. Generation fences retries against a different incarnation.
+type ResourceLifecycle struct {
+	Generation string        `json:"generation"`
+	Phase      ResourcePhase `json:"phase"`
+	// RoutingCreated permits rollback only of an interrupted owned creation.
+	// Its absent/false legacy value never authorizes deleting adopted resources.
+	RoutingCreated bool                    `json:"routing_created,omitempty"`
+	Secrets        []RoutedSecretReference `json:"secrets,omitempty"`
+}
+
+// RoutedSecretReference identifies the concrete secret namespace used at write
+// time. Store selects a configured named store; empty means the routing default.
+type RoutedSecretReference struct {
+	Key            string `json:"key"`
+	Store          string `json:"store,omitempty"`
+	Provider       string `json:"provider"`
+	Scope          string `json:"scope"`
+	Subject        string `json:"subject"`
+	VerifiedAbsent bool   `json:"verified_absent,omitempty"`
 }
 
 // PluginVersionInfo captures the name and version of an installed IaC provider
@@ -121,9 +154,15 @@ type PlanAction struct {
 	Resource ResourceSpec   `json:"resource"`
 	Current  *ResourceState `json:"current,omitempty"`
 	Changes  []FieldChange  `json:"changes,omitempty"`
+	// CreationOwned is populated only for post-apply hooks by the engine's
+	// actual dispatch outcome. Upsert updates are false; saved plans cannot
+	// assert ownership. Nil preserves legacy direct hook callers.
+	CreationOwned *bool `json:"-"`
 
-	// ResolvedConfigHash is the SHA-256 of POST-substitution Resource.Config,
-	// computed via platform.ConfigHash. Encoded as lower-case hex (no
+	// ResolvedConfigHash is the SHA-256 of the action's Resource.Config,
+	// computed via platform.ConfigHash. wfctl preserves declarative references
+	// here; runtime-resolved driver copies are never hashed into persisted plans.
+	// The legacy field/wire name is retained for compatibility. Lower-case hex (no
 	// "sha256:" prefix); empty string when the config map is empty
 	// (platform.ConfigHash short-circuit). The field uses `omitempty`, so the
 	// empty-string case is ABSENT from plan.json — consumers should treat

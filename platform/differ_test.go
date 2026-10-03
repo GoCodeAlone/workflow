@@ -58,6 +58,24 @@ func TestDiffer_NewResource(t *testing.T) {
 	}
 }
 
+func TestComputePlan_CleanupPendingCannotBecomeNoopOrUpdate(t *testing.T) {
+	for _, phase := range []interfaces.ResourcePhase{interfaces.ResourcePhaseCloudDeletePending, interfaces.ResourcePhaseCloudDeletedSecretCleanupPending} {
+		t.Run(string(phase), func(t *testing.T) {
+			desired := []interfaces.ResourceSpec{{Name: "database", Type: "infra.database", Config: map[string]any{"region": "public-region"}}}
+			state := interfaces.ResourceState{Name: "database", Type: "infra.database", ProviderID: "deleted-id", ConfigHash: platform.ConfigHash(desired[0].Config), Lifecycle: &interfaces.ResourceLifecycle{Generation: "cleanup-generation", Phase: phase}}
+			driver := &fakeDriver{diff: &interfaces.DiffResult{}}
+			plan, err := platform.ComputePlan(t.Context(), &fakeProvider{driver: driver}, desired, []interfaces.ResourceState{state})
+			if err != nil || len(plan.Actions) != 1 || plan.Actions[0].Action != "replace" || plan.Actions[0].Current == nil || plan.Actions[0].Current.ProviderID != state.ProviderID || driver.diffCallCount.Load() != 0 {
+				t.Fatalf("pending cleanup was treated as live infrastructure: plan=%+v err=%v diff=%d", plan, err, driver.diffCallCount.Load())
+			}
+			plan, err = platform.ComputePlan(t.Context(), nil, nil, []interfaces.ResourceState{state})
+			if err != nil || len(plan.Actions) != 1 || plan.Actions[0].Action != "delete" {
+				t.Fatalf("removed desired resource did not resume deletion: plan=%+v err=%v", plan, err)
+			}
+		})
+	}
+}
+
 func TestComputePlan_NewResource_AdoptionNoopDiffSkipsCreate(t *testing.T) {
 	desired := []interfaces.ResourceSpec{
 		{Name: "delegation", Type: "infra.dns_delegation", Config: map[string]any{"domain": "example.com"}},

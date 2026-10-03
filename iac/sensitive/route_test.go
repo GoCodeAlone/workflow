@@ -3,6 +3,7 @@ package sensitive
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -56,6 +57,92 @@ func (p *fakeProvider) List(_ context.Context) ([]string, error) {
 	return out, nil
 }
 
+type cleanupProofProvider struct {
+	*fakeProvider
+	retainDeleted bool
+	getErr        error
+	listErr       error
+}
+
+func (p *cleanupProofProvider) Delete(ctx context.Context, key string) error {
+	if p.retainDeleted {
+		p.delLog = append(p.delLog, key)
+		return nil
+	}
+	return p.fakeProvider.Delete(ctx, key)
+}
+
+func (p *cleanupProofProvider) Get(ctx context.Context, key string) (string, error) {
+	if p.getErr != nil {
+		return "", p.getErr
+	}
+	return p.fakeProvider.Get(ctx, key)
+}
+
+func (p *cleanupProofProvider) List(ctx context.Context) ([]string, error) {
+	if p.listErr != nil {
+		return nil, p.listErr
+	}
+	return p.fakeProvider.List(ctx)
+}
+
+func TestRevokeKeys_ExactIdentifiersAndAbsenceProof(t *testing.T) {
+	const key = "prior-provider-exact-key"
+	for _, writeOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(writeOnly), func(t *testing.T) {
+			p := &cleanupProofProvider{fakeProvider: newFakeProvider()}
+			if writeOnly {
+				p.getErr = secrets.ErrUnsupported
+			}
+			p.values[key], p.values["other-key"] = "known-cleanup-secret", "unrelated-consumer-payload"
+			if err := RevokeKeys(t.Context(), p, []string{key, key}); err != nil {
+				t.Fatal(err)
+			}
+			if len(p.delLog) != 1 || p.delLog[0] != key || len(p.values) != 1 || p.values["other-key"] != "unrelated-consumer-payload" {
+				t.Fatalf("exact cleanup altered unrelated data: deletes=%v values=%v", p.delLog, p.values)
+			}
+			if err := RevokeKeys(t.Context(), p, []string{key}); err != nil {
+				t.Fatalf("idempotent retry: %v", err)
+			}
+		})
+	}
+}
+
+func TestRevokeKeys_FailsClosedAndKeepsSafeCause(t *testing.T) {
+	const marker = "known-cleanup-secret"
+	cause := errors.New("provider unavailable")
+	for _, mode := range []string{"nil", "empty-key", "retained", "delete-error", "read-error", "list-error"} {
+		t.Run(mode, func(t *testing.T) {
+			p := &cleanupProofProvider{fakeProvider: newFakeProvider()}
+			p.values["exact-key"] = marker
+			var provider secrets.Provider = p
+			keys := []string{"exact-key"}
+			switch mode {
+			case "nil":
+				provider = nil
+			case "empty-key":
+				keys = []string{""}
+			case "retained":
+				p.retainDeleted = true
+			case "delete-error":
+				p.delErr["exact-key"] = fmt.Errorf("rejected %s: %w", marker, cause)
+			case "read-error":
+				p.getErr = fmt.Errorf("rejected %s: %w", marker, cause)
+			case "list-error":
+				p.getErr = secrets.ErrUnsupported
+				p.listErr = fmt.Errorf("rejected %s: %w", marker, cause)
+			}
+			err := RevokeKeys(t.Context(), provider, keys)
+			if err == nil || strings.Contains(err.Error(), marker) {
+				t.Fatalf("cleanup must fail without exposing values: %v", err)
+			}
+			if strings.HasSuffix(mode, "error") && !errors.Is(err, cause) {
+				t.Fatalf("safe diagnostic lost cause: %v", err)
+			}
+		})
+	}
+}
+
 func TestRoute_NoSensitive_PassesThrough(t *testing.T) {
 	p := newFakeProvider()
 	out := &interfaces.ResourceOutput{
@@ -74,6 +161,21 @@ func TestRoute_NoSensitive_PassesThrough(t *testing.T) {
 	}
 	if len(hydrated) != 0 {
 		t.Errorf("expected empty hydrated, got %v", hydrated)
+	}
+}
+
+func TestRoute_WriteFailureDoesNotExposeCredential(t *testing.T) {
+	const marker = "known-route-error-credential"
+	cause := fmt.Errorf("provider echoed %s: %w", marker, context.Canceled)
+	p := newFakeProvider()
+	p.setErr[SecretKey("database", "password")] = cause
+	out := &interfaces.ResourceOutput{Outputs: map[string]any{"password": marker, "public": "consumer-payload"}, Sensitive: map[string]bool{"password": true}}
+	_, _, err := Route(t.Context(), p, "database", out)
+	if err == nil || !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), marker) {
+		t.Fatalf("routing diagnostic must keep cause without credential: %v", err)
+	}
+	if out.Outputs["password"] != marker || out.Outputs["public"] != "consumer-payload" {
+		t.Fatal("diagnostic protection altered consumer payload")
 	}
 }
 
@@ -297,9 +399,8 @@ func TestRevoke_AggregatesErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected aggregated error")
 	}
-	msg := err.Error()
-	if !strings.Contains(msg, "boom1") || !strings.Contains(msg, "boom2") {
-		t.Errorf("aggregated error missing one or both: %q", msg)
+	if !errors.Is(err, p.delErr[SecretKey("r", "secret_key")]) || !errors.Is(err, p.delErr[SecretKey("r", "access_key")]) {
+		t.Errorf("aggregated error missing one or both causes: %v", err)
 	}
 }
 

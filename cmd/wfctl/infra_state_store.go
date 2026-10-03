@@ -209,18 +209,19 @@ type fsWfctlStateStore struct {
 // field names must stay stable to remain compatible with the existing
 // loadFSState reader and the importFromTFState / importFromPulumi writers.
 type iacStateRecord struct {
-	ResourceID   string         `json:"resource_id"`
-	ResourceType string         `json:"resource_type"`
-	Provider     string         `json:"provider"`
-	ProviderRef  string         `json:"provider_ref,omitempty"`
-	ProviderID   string         `json:"provider_id,omitempty"`
-	ConfigHash   string         `json:"config_hash,omitempty"`
-	Status       string         `json:"status"`
-	Config       map[string]any `json:"config"`
-	Outputs      map[string]any `json:"outputs"`
-	Dependencies []string       `json:"dependencies,omitempty"`
-	CreatedAt    string         `json:"created_at"`
-	UpdatedAt    string         `json:"updated_at"`
+	ResourceID   string                        `json:"resource_id"`
+	ResourceType string                        `json:"resource_type"`
+	Provider     string                        `json:"provider"`
+	ProviderRef  string                        `json:"provider_ref,omitempty"`
+	ProviderID   string                        `json:"provider_id,omitempty"`
+	ConfigHash   string                        `json:"config_hash,omitempty"`
+	Status       string                        `json:"status"`
+	Config       map[string]any                `json:"config"`
+	Outputs      map[string]any                `json:"outputs"`
+	Dependencies []string                      `json:"dependencies,omitempty"`
+	CreatedAt    string                        `json:"created_at"`
+	UpdatedAt    string                        `json:"updated_at"`
+	Lifecycle    *interfaces.ResourceLifecycle `json:"lifecycle,omitempty"`
 }
 
 func (s *fsWfctlStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
@@ -265,6 +266,7 @@ func (s *fsWfctlStateStore) SaveResource(_ context.Context, state interfaces.Res
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
 		Dependencies: append([]string(nil), state.Dependencies...),
+		Lifecycle:    cloneResourceLifecycle(state.Lifecycle),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -273,7 +275,7 @@ func (s *fsWfctlStateStore) SaveResource(_ context.Context, state interfaces.Res
 		return fmt.Errorf("save state %q: marshal: %w", state.ID, err)
 	}
 	fname := filepath.Join(s.dir, sanitizeStateID(state.ID)+".json")
-	if err := os.WriteFile(fname, data, 0o600); err != nil {
+	if err := module.WriteIaCStateFile(fname, data); err != nil {
 		return fmt.Errorf("save state %q: write: %w", state.ID, err)
 	}
 	return nil
@@ -342,6 +344,7 @@ func iacRecordToResourceState(r iacStateRecord) interfaces.ResourceState {
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
 		Dependencies:  append([]string(nil), r.Dependencies...),
+		Lifecycle:     cloneResourceLifecycle(r.Lifecycle),
 	}
 }
 
@@ -365,6 +368,7 @@ func iacStateToResourceState(r *module.IaCState) interfaces.ResourceState {
 		AppliedConfig: r.Config,
 		Outputs:       r.Outputs,
 		Dependencies:  append([]string(nil), r.Dependencies...),
+		Lifecycle:     cloneResourceLifecycle(r.Lifecycle),
 	}
 }
 
@@ -381,6 +385,7 @@ func resourceStateToIaCState(state interfaces.ResourceState) *module.IaCState {
 		Config:       state.AppliedConfig,
 		Outputs:      state.Outputs,
 		Dependencies: append([]string(nil), state.Dependencies...),
+		Lifecycle:    cloneResourceLifecycle(state.Lifecycle),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

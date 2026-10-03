@@ -77,12 +77,18 @@ package jitsubst
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/GoCodeAlone/workflow/iac/sensitive"
+	"github.com/GoCodeAlone/workflow/iac/sensitiveinputs"
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/secrets"
+	"github.com/go-openapi/jsonpointer"
 )
 
 // refRE matches a single ${...} reference. The body may contain any
@@ -147,6 +153,55 @@ func ResolveSpec(
 	return out, nil
 }
 
+// ResolveSpecWithSecretLookup hydrates secret:// and routed secret_ref://
+// leaves after module/env substitution, only in the deep dispatch copy.
+func ResolveSpecWithSecretLookup(
+	spec interfaces.ResourceSpec,
+	replaceIDMap map[string]string,
+	syncedOutputs map[string]map[string]any,
+	envLookup func(string) (string, bool),
+	secretLookup func(string) (string, error),
+) (interfaces.ResourceSpec, error) {
+	if spec.Config == nil {
+		return spec, nil
+	}
+	resolved, err := transformConfigStrings(spec.Config, func(path, value string) (string, error) {
+		value, err := resolveString(value, replaceIDMap, syncedOutputs, envLookup)
+		if err != nil {
+			return "", err
+		}
+		for _, prefix := range []string{secrets.SecretPrefix, sensitive.PlaceholderPrefix} {
+			if !strings.HasPrefix(value, prefix) {
+				continue
+			}
+			key := strings.TrimPrefix(value, prefix)
+			if key == "" || secretLookup == nil {
+				return "", &secretLookupError{path: path, cause: interfaces.ErrValidation}
+			}
+			secret, err := secretLookup(key)
+			if err != nil {
+				return "", &secretLookupError{path: path, cause: err}
+			}
+			return secret, nil
+		}
+		return value, nil
+	})
+	if err != nil {
+		return spec, err
+	}
+	out := spec
+	out.Config = resolved.(map[string]any)
+	return out, nil
+}
+
+type secretLookupError struct {
+	path  string
+	cause error
+}
+
+func (e *secretLookupError) Error() string { return "secret lookup failed at " + e.path }
+func (e *secretLookupError) Unwrap() error { return e.cause }
+
 // TryResolveSpec is the lenient sibling of ResolveSpec. ${VAR} or
 // ${MODULE.field} references that cannot resolve are LEFT UNTOUCHED in
 // the returned spec and recorded by name in the unresolved slice.
@@ -167,11 +222,39 @@ func TryResolveSpec(
 	syncedOutputs map[string]map[string]any,
 	envLookup func(string) (string, bool),
 ) (interfaces.ResourceSpec, []string, error) {
+	return TryResolveSpecPreservingPaths(spec, replaceIDMap, syncedOutputs, envLookup, nil)
+}
+
+// TryResolveSpecPreservingPaths keeps concrete sensitive leaf pointers
+// declarative in the planning copy while resolving nonsensitive comparisons.
+// Callers expand provider patterns before calling this helper.
+func TryResolveSpecPreservingPaths(
+	spec interfaces.ResourceSpec,
+	replaceIDMap map[string]string,
+	syncedOutputs map[string]map[string]any,
+	envLookup func(string) (string, bool),
+	preservedPaths []string,
+) (interfaces.ResourceSpec, []string, error) {
+	if err := sensitiveinputs.ValidatePaths(preservedPaths); err != nil {
+		return spec, nil, err
+	}
 	if spec.Config == nil {
 		return spec, nil, nil
 	}
 	seenUnresolved := map[string]struct{}{}
-	resolved, err := tryResolveAny(spec.Config, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
+	preserved := make(map[string]bool, len(preservedPaths))
+	for _, path := range preservedPaths {
+		preserved[path] = true
+	}
+	resolved, err := transformConfigStrings(spec.Config, func(path, value string) (string, error) {
+		if preserved[path] {
+			for _, match := range refRE.FindAllString(value, -1) {
+				seenUnresolved[match[2:len(match)-1]] = struct{}{}
+			}
+			return value, nil
+		}
+		return tryResolveString(value, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
+	})
 	if err != nil {
 		return spec, nil, err
 	}
@@ -183,49 +266,6 @@ func TryResolveSpec(
 	}
 	sort.Strings(unresolved)
 	return out, unresolved, nil
-}
-
-// tryResolveAny mirrors resolveAny (the helper for strict ResolveSpec)
-// but on unresolved-non-malformed refs, it preserves the original
-// ${...} literal AND records the ref body in seenUnresolved.
-func tryResolveAny(
-	v any,
-	replaceIDMap map[string]string,
-	syncedOutputs map[string]map[string]any,
-	envLookup func(string) (string, bool),
-	seenUnresolved map[string]struct{},
-) (any, error) {
-	switch val := v.(type) {
-	case string:
-		return tryResolveString(val, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
-	case map[string]any:
-		out := make(map[string]any, len(val))
-		keys := make([]string, 0, len(val))
-		for k := range val {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			r, err := tryResolveAny(val[k], replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
-			if err != nil {
-				return nil, err
-			}
-			out[k] = r
-		}
-		return out, nil
-	case []any:
-		out := make([]any, len(val))
-		for i, vv := range val {
-			r, err := tryResolveAny(vv, replaceIDMap, syncedOutputs, envLookup, seenUnresolved)
-			if err != nil {
-				return nil, err
-			}
-			out[i] = r
-		}
-		return out, nil
-	default:
-		return v, nil
-	}
 }
 
 // tryResolveString substitutes resolvable ${...} refs in s; refs that
@@ -354,40 +394,84 @@ func resolveAny(
 	syncedOutputs map[string]map[string]any,
 	envLookup func(string) (string, bool),
 ) (any, error) {
-	switch val := v.(type) {
-	case string:
-		return resolveString(val, replaceIDMap, syncedOutputs, envLookup)
-	case map[string]any:
-		out := make(map[string]any, len(val))
-		keys := make([]string, 0, len(val))
-		for k := range val {
-			keys = append(keys, k)
+	return transformConfigStrings(v, func(_, value string) (string, error) {
+		return resolveString(value, replaceIDMap, syncedOutputs, envLookup)
+	})
+}
+
+// Preserve concrete Go collection/scalar types instead of JSON-round-tripping,
+// which would coerce integer values and lose named map/slice types.
+func transformConfigStrings(v any, transform func(path, value string) (string, error)) (any, error) {
+	var walk func(reflect.Value, string) (reflect.Value, error)
+	walk = func(node reflect.Value, path string) (reflect.Value, error) {
+		if !node.IsValid() {
+			return node, nil
 		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			r, err := resolveAny(val[k], replaceIDMap, syncedOutputs, envLookup)
-			if err != nil {
-				return nil, err
+		switch node.Kind() {
+		case reflect.Interface:
+			if node.IsNil() {
+				return node, nil
 			}
-			out[k] = r
-		}
-		return out, nil
-	case []any:
-		out := make([]any, len(val))
-		for i, vv := range val {
-			r, err := resolveAny(vv, replaceIDMap, syncedOutputs, envLookup)
+			child, err := walk(node.Elem(), path)
 			if err != nil {
-				return nil, err
+				return reflect.Value{}, err
 			}
-			out[i] = r
+			out := reflect.New(node.Type()).Elem()
+			out.Set(child)
+			return out, nil
+		case reflect.String:
+			value, err := transform(path, node.String())
+			if err != nil {
+				return reflect.Value{}, err
+			}
+			out := reflect.New(node.Type()).Elem()
+			out.SetString(value)
+			return out, nil
+		case reflect.Map:
+			if node.IsNil() {
+				return node, nil
+			}
+			if node.Type().Key().Kind() != reflect.String {
+				return reflect.Value{}, fmt.Errorf("config %s requires string map keys", path)
+			}
+			out := reflect.MakeMapWithSize(node.Type(), node.Len())
+			keys := node.MapKeys()
+			slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
+			for _, key := range keys {
+				child, err := walk(node.MapIndex(key), path+"/"+jsonpointer.Escape(key.String()))
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				out.SetMapIndex(key, child)
+			}
+			return out, nil
+		case reflect.Slice, reflect.Array:
+			var out reflect.Value
+			if node.Kind() == reflect.Slice {
+				if node.IsNil() {
+					return node, nil
+				}
+				out = reflect.MakeSlice(node.Type(), node.Len(), node.Len())
+			} else {
+				out = reflect.New(node.Type()).Elem()
+			}
+			for i := 0; i < node.Len(); i++ {
+				child, err := walk(node.Index(i), path+"/"+strconv.Itoa(i))
+				if err != nil {
+					return reflect.Value{}, err
+				}
+				out.Index(i).Set(child)
+			}
+			return out, nil
+		default:
+			return node, nil
 		}
-		return out, nil
-	default:
-		// int/bool/float/nil/typed scalars: pass through. Callers that
-		// store custom struct values in Config receive them unchanged —
-		// JIT substitution is a string-value-only contract.
-		return v, nil
 	}
+	result, err := walk(reflect.ValueOf(v), "")
+	if err != nil || !result.IsValid() {
+		return nil, err
+	}
+	return result.Interface(), nil
 }
 
 // resolveString substitutes every ${...} reference in s. The first
