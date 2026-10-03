@@ -1,9 +1,39 @@
 package sandbox
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestDockerOutputIsBounded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX subprocess output fixture")
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\n/bin/dd if=/dev/zero bs=2097152 count=1 2>/dev/null\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := runDockerResult(ctx, []string{"fixture"})
+	if err == nil || result != nil {
+		captured := 0
+		if result != nil {
+			captured = len(result.Stdout) + len(result.Stderr)
+		}
+		t.Fatalf("oversized subprocess output must fail closed, captured %d bytes, error %v", captured, err)
+	}
+	if !strings.Contains(err.Error(), "output limit") {
+		t.Fatalf("want bounded-output failure, got %v", err)
+	}
+}
 
 func TestNewDockerSandbox_ValidConfig(t *testing.T) {
 	// This test validates config checking without requiring a Docker daemon.
@@ -315,7 +345,7 @@ func TestDefaultSecureSandboxConfig(t *testing.T) {
 	if cfg.PidsLimit != 64 {
 		t.Fatalf("unexpected PidsLimit: %d", cfg.PidsLimit)
 	}
-	if cfg.Tmpfs["/tmp"] != "size=64m,noexec" {
+	if cfg.Tmpfs["/tmp"] != "size=64m,mode=1777,uid=65532,gid=65532,noexec,nosuid,nodev" {
 		t.Fatalf("unexpected Tmpfs: %v", cfg.Tmpfs)
 	}
 	if cfg.Timeout != 5*time.Minute {
@@ -328,5 +358,17 @@ func TestDefaultSecureSandboxConfig_DefaultImage(t *testing.T) {
 
 	if cfg.Image != "cgr.dev/chainguard/wolfi-base:latest" {
 		t.Fatalf("unexpected default image: %s", cfg.Image)
+	}
+}
+
+func TestStrictSandboxUsesNonrootAndSafeTmpfs(t *testing.T) {
+	cfg := DefaultSecureSandboxConfig("fixture")
+	if cfg.User != "65532:65532" {
+		t.Fatalf("strict sandbox must be nonroot, got %q", cfg.User)
+	}
+	for _, option := range []string{"mode=1777", "noexec", "nosuid", "nodev"} {
+		if !strings.Contains(cfg.Tmpfs["/tmp"], option) {
+			t.Errorf("strict /tmp is missing %q: %q", option, cfg.Tmpfs["/tmp"])
+		}
 	}
 }

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gocodealone.com/schemas/wfctl-pipeline-record-v1.schema.json",
+  "title": "wfctl pipeline run record-mode error payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message", "retryable"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": ["pipeline_failed", "result_missing", "result_invalid"]
+    },
+    "message": {"type": "string", "minLength": 1, "maxLength": 256},
+    "retryable": {"type": "boolean"}
+  }
+}

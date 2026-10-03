@@ -215,6 +215,17 @@ func TestKnownStepTypesRequestParseConfigKeys(t *testing.T) {
 	}
 }
 
+func TestKnownStepTypesWebhookVerifyBodyLimit(t *testing.T) {
+	info, ok := KnownStepTypes()["step.webhook_verify"]
+	if !ok {
+		t.Fatal("step.webhook_verify not found")
+	}
+	want := []string{"provider", "scheme", "secret", "secret_from", "header", "signature_header", "url_reconstruction", "include_form_params", "error_status", "max_body_bytes"}
+	if !sameStringSet(info.ConfigKeys, want) {
+		t.Fatalf("step.webhook_verify validation metadata does not match its parser: got %v want %v", info.ConfigKeys, want)
+	}
+}
+
 func TestKnownStepTypesBuildBinaryConfigKeys(t *testing.T) {
 	info, ok := KnownStepTypes()["step.build_binary"]
 	if !ok {

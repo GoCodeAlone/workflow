@@ -1,0 +1,7 @@
+{
+  "name": "record-fixture",
+  "version": "0.1.0",
+  "author": "workflow-tests",
+  "description": "Real SDK record-mode host fixture without a config fragment",
+  "stepTypes": ["step.record_fixture", "step.record_fixture_aux"]
+}

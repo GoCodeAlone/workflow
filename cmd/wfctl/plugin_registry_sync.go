@@ -51,6 +51,8 @@ func runPluginRegistrySync(args []string) error {
 	pluginFilter := fs.String("plugin", "", "Restrict to single plugin directory name")
 	verifyCaps := fs.Bool("verify-capabilities", false, "Spawn binary + diff capabilities (registry-side; slow)")
 	registryDir := fs.String("registry-dir", ".", "Path to a workflow-registry checkout")
+	targetVersion := fs.String("target-version", "", "Exact stable plugin version (including an older version for rollback)")
+	report := fs.String("report", "", "Write a canonical registry-sync-operation.v1 report (requires --plugin and --fix)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: wfctl plugin registry-sync [options]
        wfctl plugin registry-sync core [options]
@@ -73,6 +75,35 @@ Options:
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	var exactTarget, reportRequested bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "target-version" {
+			exactTarget = true
+		}
+		if f.Name == "report" {
+			reportRequested = true
+		}
+	})
+	if exactTarget || reportRequested {
+		if fs.NArg() != 0 {
+			return fmt.Errorf("unexpected registry-sync arguments: %v", fs.Args())
+		}
+		tag := ""
+		if exactTarget {
+			var err error
+			tag, err = registrySyncStableTag(*targetVersion)
+			if err != nil {
+				return err
+			}
+		}
+		if reportRequested && (*report == "" || !*fix) {
+			return fmt.Errorf("--report requires a nonempty file path and --fix")
+		}
+		if !reportRequested {
+			return syncRegistryTarget(*registryDir, *pluginFilter, *targetVersion, *fix, *verifyCaps)
+		}
+		return syncRegistryRelease(*registryDir, *pluginFilter, tag, *report, *fix, *verifyCaps)
 	}
 
 	return syncDefault(*registryDir, *fix, *pluginFilter, *verifyCaps)
@@ -295,13 +326,21 @@ type releaseAsset struct {
 }
 
 type githubReleaseAsset struct {
+	ID                 int64  `json:"id"`
 	Name               string `json:"name"`
+	Size               int64  `json:"size"`
+	Digest             string `json:"digest"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
 type githubReleaseMetadata struct {
-	TagName string               `json:"tag_name"`
-	Assets  []githubReleaseAsset `json:"assets"`
+	ID              int64                `json:"id"`
+	TagName         string               `json:"tag_name"`
+	TargetCommitish string               `json:"target_commitish"`
+	Draft           bool                 `json:"draft"`
+	Prerelease      bool                 `json:"prerelease"`
+	Immutable       bool                 `json:"immutable"`
+	Assets          []githubReleaseAsset `json:"assets"`
 }
 
 func escapedGitHubRepoPath(ghRepo string) string {
@@ -317,12 +356,20 @@ func githubReleaseByTag(ghRepo, tag string) (*githubReleaseMetadata, error) {
 }
 
 func fetchGitHubReleaseMetadata(apiPath string) (*githubReleaseMetadata, error) {
+	var release githubReleaseMetadata
+	if err := registrySyncGitHubJSON(apiPath, &release); err != nil {
+		return nil, err
+	}
+	return &release, nil
+}
+
+func registrySyncGitHubJSON(apiPath string, result any) error {
 	apiURL := strings.TrimRight(gitHubAPIBaseURL, "/") + "/" + strings.TrimLeft(apiPath, "/")
 	ctx, cancel := context.WithTimeout(context.Background(), gitHubReleaseMetadataTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil) //nolint:gosec // URL is built from trusted repo/tag metadata.
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if tok := gitHubToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -334,18 +381,21 @@ func fetchGitHubReleaseMetadata(apiPath string) (*githubReleaseMetadata, error) 
 	resp, err := gitHubAPIClient.Do(req)
 	if err != nil {
 		closeResponseBody(resp)
-		return nil, fmt.Errorf("GitHub releases API request %s: %w", apiPath, err)
+		return fmt.Errorf("GitHub API request %s: %w", apiPath, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("GitHub releases API: HTTP %d for %s: %s", resp.StatusCode, apiPath, strings.TrimSpace(string(body)))
+		return fmt.Errorf("GitHub API: HTTP %d for %s: %s", resp.StatusCode, apiPath, strings.TrimSpace(string(body)))
 	}
-	var release githubReleaseMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return nil, fmt.Errorf("decode GitHub release response: %w", err)
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 8<<20))
+	if err := decoder.Decode(result); err != nil {
+		return fmt.Errorf("decode GitHub API response: %w", err)
 	}
-	return &release, nil
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("GitHub API response has trailing data: %v", err)
+	}
+	return nil
 }
 
 // releaseDownloads returns the platform release-asset list for a tag, in the

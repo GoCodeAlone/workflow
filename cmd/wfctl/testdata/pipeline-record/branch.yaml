@@ -1,0 +1,28 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: host-prepared
+      - name: result
+        type: step.branch
+        config:
+          field: mode
+          branches:
+            success:
+              - name: nested-sdk
+                type: step.record_fixture
+                config:
+                  mode: success
+                  audit_path: "{{ .audit_path }}"
+                  greeting: "{{ .steps.prepare.greeting }}"
+            stopped-error:
+              - name: stopped-sdk
+                type: step.record_fixture
+                config:
+                  mode: stopped-error
+                  audit_path: "{{ .audit_path }}"
+                  greeting: "{{ .steps.prepare.greeting }}"

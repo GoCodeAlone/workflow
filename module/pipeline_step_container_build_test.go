@@ -3,8 +3,11 @@ package module_test
 import (
 	"context"
 	"os"
-	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow/module"
 )
@@ -94,18 +97,22 @@ func TestContainerBuild_ImageRefIncludesRegistry(t *testing.T) {
 }
 
 func TestContainerBuild_BuildAndPush_MockExec(t *testing.T) {
-	// Skip if docker is not available (CI without Docker).
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker not available; skipping build+push test")
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture builder requires a POSIX shell")
 	}
 
 	contextDir := t.TempDir()
-	if err := os.WriteFile(contextDir+"/Dockerfile", []byte("FROM scratch\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte("FROM scratch\n"), 0644); err != nil {
 		t.Fatalf("write Dockerfile: %v", err)
+	}
+	builder := filepath.Join(t.TempDir(), "fixture builder")
+	if err := os.WriteFile(builder, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n"), 0700); err != nil {
+		t.Fatalf("write fixture builder: %v", err)
 	}
 
 	app, reg := setupContainerBuildApp(t)
 	cfg := baseContainerBuildCfg(contextDir)
+	cfg["builder"] = builder
 
 	factory := module.NewContainerBuildStepFactory()
 	step, err := factory("build", cfg, app)
@@ -113,17 +120,28 @@ func TestContainerBuild_BuildAndPush_MockExec(t *testing.T) {
 		t.Fatalf("factory: %v", err)
 	}
 
-	result, err := step.Execute(context.Background(), &module.PipelineContext{Current: map[string]any{}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := step.Execute(ctx, &module.PipelineContext{Current: map[string]any{}})
 	if err != nil {
-		// Build may fail in CI — accept as long as it's a build error, not a config error.
-		t.Logf("build+push returned error (expected in restricted CI): %v", err)
-		return
+		t.Fatalf("build+push: %v", err)
 	}
 	if result.Output["success"] != true {
 		t.Errorf("expected success=true, got %v", result.Output["success"])
 	}
-	if len(reg.pushedImages) == 0 {
-		t.Error("expected at least one pushed image")
+	if len(reg.pushedImages) != 1 || reg.pushedImages[0] != "registry.example.com/myapp:v2" {
+		t.Fatalf("unexpected pushed images: %v", reg.pushedImages)
+	}
+	if result.Output["digest"] != "sha256:abc123def456" {
+		t.Errorf("unexpected pushed digest: %v", result.Output["digest"])
+	}
+	args, err := os.ReadFile(builder + ".args")
+	if err != nil {
+		t.Fatalf("read build arguments: %v", err)
+	}
+	want := strings.Join([]string{"build", "-f", "Dockerfile", "-t", "registry.example.com/myapp:v2", contextDir, ""}, "\n")
+	if string(args) != want {
+		t.Errorf("build arguments = %q; want %q", args, want)
 	}
 }
 

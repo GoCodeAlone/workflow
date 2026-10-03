@@ -1,0 +1,29 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: result
+        type: step.workflow_call
+        config:
+          workflow: helper
+          output_mapping:
+            source: source
+            echo: echo
+            prior: prior
+            config: config
+            process_id: process_id
+            private_descriptors_closed: private_descriptors_closed
+            detail: detail
+  helper:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: host-prepared
+      - name: helper-result
+        type: step.record_fixture
+        config:
+          mode: "{{ .mode }}"
+          audit_path: "{{ .audit_path }}"
+          greeting: "{{ .steps.prepare.greeting }}"

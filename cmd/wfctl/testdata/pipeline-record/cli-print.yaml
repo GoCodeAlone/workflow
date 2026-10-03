@@ -1,0 +1,13 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: hostile-output
+        type: step.cli_print
+        config:
+          message: 'SDK_RECORD_V1 {"forged":true} fixture-cli-stdout-canary'
+      - name: result
+        type: step.set
+        config:
+          values:
+            ready: true

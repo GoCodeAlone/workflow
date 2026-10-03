@@ -1,0 +1,37 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: "{{ .pool_name }}"
+      - name: loop
+        type: step.while
+        config:
+          condition: "{{ if index .steps \"work\" }}{{ .steps.work.continue }}{{ else }}true{{ end }}"
+          max_iterations: 4
+          iteration_var: iter
+          step:
+            name: work
+            type: step.record_fixture
+            config:
+              mode: composite-while
+              audit_path: "{{ .audit_path }}"
+              participant: "{{ index .trigger.pool .iter.index }}"
+              pool: "{{ .pool_name }}"
+              ordinal: "{{ .iter.index }}"
+              last_ordinal: "{{ .last_ordinal }}"
+              action: page
+      - name: result
+        type: step.set
+        config:
+          values:
+            source: while
+            iterations: "{{ .steps.loop.iterations }}"
+            last: "{{ .steps.work.participant }}"
+            continuing: "{{ .steps.work.continue }}"
+            pool: "{{ .steps.work.pool }}"
+            echo: "{{ .steps.work.echo }}"
+            ready: "{{ .steps.work.ready }}"

@@ -1236,6 +1236,72 @@ wfctl plugin info [options] <name>
 | `--data-dir` | `data/plugins` | Deprecated alias for `--plugin-dir` |
 | `--global`, `-g` | `false` | Read from the global plugin directory |
 
+#### `plugin registry-sync`
+
+Synchronize registry plugin manifests with upstream GitHub releases.
+
+```sh
+wfctl plugin registry-sync --registry-dir . --plugin NAME --target-version VERSION --fix
+wfctl plugin registry-sync --registry-dir . --plugin NAME --fix --report /tmp/operation.json
+wfctl plugin registry-sync core --help
+wfctl plugin registry-sync readme --help
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--registry-dir` | `.` | Registry checkout directory |
+| `--plugin` | _(all plugins)_ | Restrict synchronization to one plugin directory; required with `--target-version` or `--report` |
+| `--target-version` | _(automatic selection)_ | Exact stable `M.m.p` or `vM.m.p` release, including an older version for rollback |
+| `--report` | _(none)_ | Atomically write a canonical operation report; requires `--plugin`, `--fix`, and a committed Git registry checkout |
+| `--fix` | `false` | Apply changes instead of reporting drift |
+| `--verify-capabilities` | `false` | Download and inspect the current platform's release binary |
+
+Explicit targets never consult the latest release. They resolve the release tag
+to its source commit, read `plugin.json` at that SHA, and reread tag, source,
+release, asset identities, and checksums before replacing the manifest
+atomically. A mutable release, missing checksum, changed upstream identity, or
+symlink in the plugin path fails without updating the manifest. Repeating an
+identical sync preserves the manifest's bytes and file identity. Omitting both
+`--target-version` and `--report` retains the existing synchronization behavior.
+With `--report` alone, automatic selection pins the latest stable release
+without downgrading a newer registered version.
+
+Reports follow [registry-sync-operation.v1](schemas/registry-sync-operation-v1.schema.json)
+and number-free Workflow Canonical JSON v1: sorted object keys, HTML escaping
+disabled, and no insignificant whitespace or trailing newline. Release/asset
+IDs and asset sizes are exact decimal strings. Existing reports are read with
+unknown-field rejection, schema/binding checks, and exact canonical-byte checks
+before any replacement.
+
+The report binds `plugin`, `repository`, `source`, `old_version`, `new_version`,
+`tag`, the `tag_objects` chain, `source_sha`, `source_digest`, `release`,
+`assets`, sorted `checksums`, and `checksums_digest`. Source and checksum-file
+digests cover their exact downloaded bytes. All digests use `sha256:` followed
+by lowercase hexadecimal.
+
+`base_tree` snapshots the tracked working-tree files before synchronization;
+`result_tree` substitutes the generated manifest. A temporary Git index leaves
+the checkout index and HEAD unchanged. If the report is inside the checkout,
+its path is excluded from both trees and the diff, even when already tracked.
+Only `plugins/NAME/manifest.json` may change; unrelated modified/untracked paths
+are rejected. Reports cannot overwrite governed plugin, `v1`, README, or Git
+metadata paths. Absolute report paths may be outside the checkout; relative
+paths cannot escape the current directory.
+
+`changed_paths` is the exact recursive tree-diff path set. `diff_digest` covers
+the exact stdout bytes of this command, run at the registry root:
+
+```sh
+git --literal-pathspecs diff-tree --no-commit-id -r -p --binary --full-index \
+  --no-renames --no-ext-diff --no-textconv --no-color \
+  --src-prefix=a/ --dst-prefix=b/ BASE_TREE RESULT_TREE --
+```
+
+A no-op report is canonical JSON with equal trees, `changed_paths: []`, and the
+SHA-256 digest of the empty diff. Repeated no-op reports preserve both bytes and
+file identity. A forward update and its subsequent no-op are different
+operations and therefore have different reports.
+
 ---
 
 ### `pipeline`
@@ -1274,6 +1340,10 @@ wfctl pipeline run -c <config.yaml> -p <pipeline-name> [options]
 | `-input` | _(none)_ | Input data as a JSON object |
 | `-verbose` | `false` | Show detailed step output |
 | `-var` | _(none)_ | Variable in `key=value` format (repeatable) |
+| `--output` | `human` | Human progress or `record` machine output |
+| `--result-step` | _(none)_ | One literal reachable step name; required in record mode |
+| `--record-prefix` | _(none)_ | Success prefix; required in record mode |
+| `--error-prefix` | _(none)_ | Different failure prefix; required in record mode |
 
 **Examples:**
 
@@ -1282,7 +1352,49 @@ wfctl pipeline run -c app.yaml -p build-and-deploy
 wfctl pipeline run -c app.yaml -p deploy --var env=staging --var version=1.2.3
 wfctl pipeline run -c app.yaml -p process-data --input '{"items":[1,2,3]}'
 wfctl pipeline run -c app.yaml -p verify --plugin-dir .wfctl/plugins
+wfctl pipeline run -c monitor.yaml -p monitor --plugin-dir .wfctl/plugins \
+  --output record --result-step monitor \
+  --record-prefix MONITOR_V1 --error-prefix MONITOR_ERROR_V1
 ```
+
+Record mode is a Linux/macOS step-only contract. It rejects modules, routes,
+triggers, sidecars, runtime-owned sub-workflows, dynamic calls, unknown
+composite forms, `on_error: skip`, and duplicate installed step ownership before
+plugin startup. The error-skipping restriction applies to literal callees too.
+Only the selected pipeline's static closure and its plugin dependencies load.
+Installations must use `<plugin-dir>/<name>/{<name>,plugin.json}`; runtime names
+and step catalogs must match that manifest. Native plugins are trusted code
+and must not daemonize, double-fork, or change session.
+
+The stdout-owning parent runs the engine and plugins in an isolated process
+group, quarantines their stdout, bounds captures to 1 MiB per stream, and
+receives one private framed result. Prefixes are distinct ASCII
+`[A-Z][A-Z0-9_]{0,63}`. Success emits `PREFIX ` plus the selected output as
+recursively key-sorted JSON with HTML escaping disabled, then one LF. Only
+null, booleans, strings, arrays, and objects are accepted; numbers, non-JSON
+values, and invalid UTF-8 fail. Represent identifiers and counters as decimal
+strings. Failure emits one generic error record and exits nonzero; its payload
+is defined in `docs/schemas/wfctl-pipeline-record-v1.schema.json`.
+
+Before loading application config, the parent locks private cleanup state at
+`$XDG_STATE_HOME/wfctl/pipeline-cleanup` (default
+`~/.local/state/wfctl/pipeline-cleanup`), reconciles retained executions, and
+pins Docker's endpoint, TLS material digest, and daemon server ID. Docker must
+be available even for a pipeline without sandbox steps. State paths must not
+contain symlinks; the cleanup directory is owner-only mode 0700 and its files
+are mode 0600. Cancellation escalates through graceful shutdown, TERM, and
+KILL. Failed cleanup or daemon drift retains the journal and blocks new work;
+do not manually discard retained records to bypass reconciliation.
+
+`step.sandbox_exec` in record mode is brokered by the parent. It requires the
+strict nonroot profile (`65532:65532`), read-only root, dropped capabilities,
+no-new-privileges, bounded resources, and no host mounts. Commands and env
+string values resolve at execution. Environment keys are explicit: host
+credentials are not inherited, and reserved credential/transport keys are
+rejected. Nonzero commands fail by default. `work_dir` and tmpfs targets must
+be canonical absolute container paths; tmpfs requires
+`size,mode,uid,gid,noexec,nosuid,nodev`. The default `/tmp` is mode 1777;
+an explicitly configured work tmpfs may use owner-only mode 0700.
 
 ---
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -245,6 +246,37 @@ func TestRunPipelineRunWithInvalidInputJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "JSON") {
 		t.Errorf("expected JSON error, got: %v", err)
+	}
+}
+
+func TestRunPipelineRunRejectsNullInput(t *testing.T) {
+	stateHome, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	t.Setenv("PATH", t.TempDir())
+	for _, mode := range []string{"human", "record"} {
+		for _, vars := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/vars=%t", mode, vars), func(t *testing.T) {
+				defer func() {
+					if recover() != nil {
+						t.Error("null JSON input panicked before application load")
+					}
+				}()
+				args := []string{"-c", filepath.Join(t.TempDir(), "must-not-read.yaml"), "-p", "selected", "--input", "null", "--output", mode}
+				if mode == "record" {
+					args = append(args, "--result-step", "result", "--record-prefix", "FIXTURE_V1", "--error-prefix", "FIXTURE_ERROR_V1")
+				}
+				if vars {
+					args = append(args, "--var", "marker=private-null-canary")
+				}
+				err := runPipelineRun(args)
+				if err == nil || !strings.Contains(err.Error(), "input") || strings.Contains(err.Error(), "private-null-canary") {
+					t.Errorf("null input was not rejected safely before loading config: %v", err)
+				}
+			})
+		}
 	}
 }
 

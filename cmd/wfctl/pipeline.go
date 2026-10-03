@@ -113,6 +113,10 @@ func runPipelineRun(args []string) error {
 	pluginDir := fs.String("plugin-dir", "", "Directory containing installed external plugins")
 	inputJSON := fs.String("input", "", "Input data as JSON object")
 	verbose := fs.Bool("verbose", false, "Show detailed step output")
+	outputMode := fs.String("output", "human", "Output mode: human or record")
+	resultStep := fs.String("result-step", "", "Literal reachable result step for record output")
+	recordPrefix := fs.String("record-prefix", "", "Success record prefix")
+	errorPrefix := fs.String("error-prefix", "", "Error record prefix")
 	var vars stringSliceFlag
 	fs.Var(&vars, "var", "Variable in key=value format (repeatable)")
 	fs.Usage = func() {
@@ -144,12 +148,25 @@ Options:
 	if *pluginDir == "" {
 		*pluginDir = strings.TrimSpace(os.Getenv("WFCTL_PLUGIN_DIR"))
 	}
+	if *outputMode != "human" && *outputMode != "record" {
+		return fmt.Errorf("--output must be human or record")
+	}
+	if *outputMode == "record" {
+		if err := validatePipelineRecordSelectors(*resultStep, *recordPrefix, *errorPrefix); err != nil {
+			return err
+		}
+	} else if *resultStep != "" || *recordPrefix != "" || *errorPrefix != "" {
+		return fmt.Errorf("record selectors require --output record")
+	}
 
 	// Build initial trigger data from --input JSON
 	triggerData := make(map[string]any)
 	if *inputJSON != "" {
 		if err := json.Unmarshal([]byte(*inputJSON), &triggerData); err != nil {
 			return fmt.Errorf("invalid --input JSON: %w", err)
+		}
+		if triggerData == nil {
+			return fmt.Errorf("invalid --input JSON: expected an object")
 		}
 	}
 
@@ -160,6 +177,11 @@ Options:
 			return fmt.Errorf("invalid --var %q: expected key=value format", kv)
 		}
 		triggerData[kv[:idx]] = kv[idx+1:]
+	}
+	if *outputMode == "record" {
+		return runPipelineRecord(pipelineRecordRequest{Pipeline: *pipelineName, ResultStep: *resultStep,
+			PluginDir: *pluginDir, Input: triggerData}, pipelineRecordOptions{ConfigPath: *configPath,
+			SuccessPrefix: *recordPrefix, ErrorPrefix: *errorPrefix})
 	}
 
 	// Load config
@@ -182,6 +204,15 @@ Options:
 	}
 
 	// Set up a logger — suppress engine noise unless --verbose
+	closure, err := selectPipelineClosure(cfg, *pipelineName, false)
+	if err != nil {
+		return err
+	}
+	if _, err := inspectPipelineInstallations(*pluginDir); err != nil {
+		return err
+	}
+	cfg = closure.config
+
 	logLevel := slog.LevelError
 	if *verbose {
 		logLevel = slog.LevelDebug
@@ -289,6 +320,9 @@ func (ps *progressStep) Execute(ctx context.Context, pc *module.PipelineContext)
 	fmt.Printf("Step %d/%d: %s ... ", ps.index+1, ps.total, ps.inner.Name())
 
 	result, err := ps.inner.Execute(ctx, pc)
+	if err == nil {
+		err = stoppedPipelineError(result)
+	}
 	elapsed := time.Since(start)
 
 	if err != nil {

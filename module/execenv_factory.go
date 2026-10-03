@@ -40,7 +40,7 @@ type providerRunnerAccessor interface {
 func resolveSandboxRunner(ctx context.Context, app modular.Application, execEnv string, cfg sandbox.SandboxConfig, argoModuleName, providerName string) (sandbox.SandboxRunner, error) {
 	switch execEnv {
 	case "", "local-docker":
-		return sandbox.NewLocalDockerRunner(cfg)
+		return sandbox.NewLocalRunner(ctx, cfg)
 	case "ephemeral":
 		// Wire ephemeral runner via Argo Workflows module (PR9).
 		return resolveEphemeralRunner(app, argoModuleName, cfg)

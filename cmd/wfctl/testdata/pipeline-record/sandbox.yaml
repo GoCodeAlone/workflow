@@ -1,0 +1,20 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: command
+        type: step.sandbox_exec
+        config:
+          image: alpine:3.21
+          command: [sh, -euc, "printf '%s' '{{ .message }}'"]
+          security_profile: strict
+          cpu_limit: 1
+          timeout: 30s
+          env:
+            PUBLIC_VALUE: "{{ .message }}"
+      - name: result
+        type: step.set
+        config:
+          values:
+            source: broker
+            message: "{{ .steps.command.stdout }}"

@@ -164,6 +164,9 @@ var commands = map[string]func([]string) error{
 }
 
 func main() {
+	if handled, code := pipelineRecordEarlyDispatch(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	// Load the embedded config. All command definitions and pipeline wiring
 	// live in wfctl.yaml — no hardcoded routing in this file.
 	cfg, err := config.LoadFromBytes(wfctlConfigBytes)

@@ -1,0 +1,52 @@
+modules: []
+pipelines:
+  selected:
+    on_error: compensate
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: "{{ .pool_name }}"
+      - name: forward
+        type: step.record_fixture
+        config:
+          mode: composite
+          audit_path: "{{ .audit_path }}"
+          participant: "{{ index .trigger.pool 0 }}"
+          pool: "{{ .pool_name }}"
+          ordinal: "0"
+          action: forward
+      - name: fail
+        type: step.record_fixture_aux
+        config:
+          mode: composite-error
+          audit_path: "{{ .audit_path }}"
+          participant: "{{ last .trigger.pool }}"
+          pool: "{{ .pool_name }}"
+          ordinal: "{{ .last_ordinal }}"
+          action: fail
+      - name: result
+        type: step.set
+        config:
+          values:
+            false_success: true
+    compensation:
+      - name: undo-first
+        type: step.record_fixture
+        config:
+          mode: composite-compensate
+          audit_path: "{{ .audit_path }}"
+          participant: "{{ index .trigger.pool 0 }}"
+          pool: "{{ .pool_name }}"
+          ordinal: "0"
+          action: undo-first
+      - name: undo-last
+        type: step.record_fixture_aux
+        config:
+          mode: composite-compensate
+          audit_path: "{{ .audit_path }}"
+          participant: "{{ last .trigger.pool }}"
+          pool: "{{ .pool_name }}"
+          ordinal: "{{ .last_ordinal }}"
+          action: undo-last
