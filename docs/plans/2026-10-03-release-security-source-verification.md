@@ -31,18 +31,29 @@ maintenance release, not a local tarball or source replacement.
 
 Node24.14.0/npm11.9.0: clean npmci, focused10, full141 tests, targeted lint,
 types/Vite build all PASS. Installed ten-family/duplicate audit PASS. Babel,
-Vitest and browser-data changes are resolver-required family closure; no
-unrelated direct manifest or ecommerce-lock changes. Build chunk-size warning
+Vitest and browser-data changes retain required family alignment. Independent
+review found chai/tinyrainbow refreshes unnecessary; an isolated npm resolver
+restored base6.2.2/3.1.0, with only those two lock entries changed and no manifest
+changes. Fresh clean install/full141 tests/types/build/targeted lint and all ten
+installed-family checks PASS after restoration. No ecommerce-lock changes.
+Build chunk-size warning
 remains, not suppressed or refactored in this security boundary.
 
 ## Remaining Gates
 
-Final four binaries must be rebuilt from the final committed plain checkout
-and report exact VCS identity/Go1.26.8, not the enclosing workspace revision.
+Plain committed550c0f7a binaries all report exact VCS identity, unmodified source
+and Go1.26.8; server/wfctl link OTel1.45.0. Shipped Darwin/Linux/Windows import
+lists contain no OpenPGP. Actual credential-free server smoke returns the
+owned unpredictable identity, exits0 on SIGTERM and leaves no listener.
+The final committed head must retain that exact-head proof after the bounded
+UI-resolution/review-document changes; Go source/modules remain byte-identical
+to the cold-suite commit40d5d6e6.
 Native OSV2.6 complete production JSON/analysis is pending. Real native called,
 uncalled and restored OpenPGP control already proves reporter rejection; it is
 a labeled scanner control, not an application demo. No ignores/exceptions.
-Independent final UI/whole-boundary review, exact-head PR/CI, merge and retro
+Independent final UI/whole-boundary review SHIP-IT, no Critical/Important
+findings; the sole Minor unnecessary-resolution finding is addressed above.
+See the committed code-review disposition. Exact-head PR/CI, merge and retro
 remain. Protected .github/scripts/Dockerfile/policytool bytes are unchanged.
 
 The separately pinned old CI scanner cannot analyze the root floor; local
