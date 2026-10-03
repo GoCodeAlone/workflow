@@ -98,3 +98,39 @@ repository-token policy and concurrent v0.86.1 tag/run.
 Reviewed revert of the single source-remediation PR, rerun build/runtime tests,
 and hold promotion because known vulnerabilities return. No workflow trust,
 tag, registry, deployment or data rollback occurs.
+
+### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
+
+Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker
+bootstrap and deployment-documentation pins, not just protected CI/policytool.
+Changing those product defaults is the separately deferred fleet/generator
+boundary; the source-only patch does not silently perform it.
+
+Evidence: root/example/eleven owning fixture floors and relevant fixture
+overrides are 1.26.8; old `go1.26.5+auto` driver builds patched source with
+actual 1.26.8 metadata. Exact policytool 1.26.5 analysis has eight module-only
+stdlib rows and zero called findings; its wrapper passes unchanged. Forcing
+`GOTOOLCHAIN=go1.26.5` across the root mutation harness prevents root-level
+helper compilation. CI-equivalent authenticated auto selection runs all
+mutation assertions, but concurrent worker edits invalidate its production
+immutability snapshot; repeat once in a frozen, noncompeting plain checkout.
+
+Correction: audit classifies every residual pin as protected driver, standalone
+legacy scaffold/bootstrap, historical example or pending fleet follow-up.
+Never call this a completed fleet upgrade. Nested Git worktree artifact VCS
+metadata reports the outer checkout: frozen plain-checkout verification is
+required for exact-head evidence. Local path/actual CLI and compiler checks
+establish source behavior, not a release. Scope: no manifest/task/PR change.
+
+### Backport 2026-10-03: Bundled Editor Parser Prerequisite
+
+Cause: installed editor 0.2.0 embeds its own js-yaml implementation. Updating
+Workflow's external lock cannot patch it. Real consumer regression remains
+RED (140 tests PASS, one editor hostile-merge test FAIL); direct updated
+js-yaml tests and UI build pass.
+
+Correction: independently design/review/patch/release compatible editor 0.2.x,
+then resolve it through existing Workflow `^0.2.0` range. Preserve current
+Workflow manifest/PR grouping; no parser mock, UI shim, externalization shortcut
+or weakened assertion. The adjacent owning-library fix has its own design and
+PR, not an unrecorded edit in this source-only manifest.
