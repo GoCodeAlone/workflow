@@ -1578,7 +1578,6 @@ func runInfraApply(args []string) error {
 				return fmt.Errorf("validate plan include scope: %w", err)
 			}
 			desired = filterSpecsByInclude(desired, planIncludeSet)
-			currentState = filterStatesByInclude(currentState, planIncludeSet)
 		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {
