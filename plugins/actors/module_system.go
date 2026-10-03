@@ -18,6 +18,7 @@ type ActorSystemModule struct {
 	shutdownTimeout time.Duration
 	system          actor.ActorSystem
 	logger          *slog.Logger
+	grainPools      grainPoolRegistry
 
 	// Default recovery policy
 	defaultSupervisor *supervisor.Supervisor
@@ -78,6 +79,7 @@ func (m *ActorSystemModule) Start(ctx context.Context) error {
 	opts := []actor.Option{
 		actor.WithShutdownTimeout(m.shutdownTimeout),
 		actor.WithDefaultSupervisor(m.defaultSupervisor),
+		actor.WithExtensions(&m.grainPools),
 	}
 
 	sys, err := actor.NewActorSystem(m.name, opts...)
@@ -87,6 +89,10 @@ func (m *ActorSystemModule) Start(ctx context.Context) error {
 
 	if err := sys.Start(ctx); err != nil {
 		return fmt.Errorf("actor.system %q: failed to start: %w", m.name, err)
+	}
+	if err := sys.Inject(&grainPoolReference{}); err != nil {
+		_ = sys.Stop(ctx)
+		return fmt.Errorf("actor.system %q: failed to register grain pool dependency: %w", m.name, err)
 	}
 
 	m.system = sys
