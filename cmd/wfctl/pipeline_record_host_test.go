@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -56,8 +57,26 @@ func buildPipelineRecordHostGo(t *testing.T, output, target string, race bool) {
 	args = append(args, target)
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Env = append(os.Environ(), "GOWORK=off")
-	if data, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build actual host/SDK fixture %s: %v\n%s", target, err, data)
+	build := func(destination string) error {
+		cmd.Args[3] = destination
+		if data, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("build actual host/SDK fixture %s: %w\n%s", target, err, data)
+		}
+		return nil
+	}
+	if target == "." && race {
+		if cmd.Err == nil {
+			if key, err := pipelineRecordHostCacheKeyForCommand(cmd); err == nil {
+				cmd.Dir = key.directory
+				if err := pipelineRecordHostSourceCache.build(ctx, key, output, build); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+	}
+	if err := build(output); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -433,17 +452,7 @@ func pipelineRecordHostCompositeExpectations(t *testing.T, name, poolName, marke
 
 func copyPipelineRecordHostBinary(t *testing.T, source, destination string) {
 	t.Helper()
-	input, err := os.Open(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer input.Close()
-	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, copyErr := io.Copy(output, input)
-	if err := errors.Join(copyErr, output.Chmod(0700), output.Close()); err != nil {
+	if err := copyPipelineRecordHostFile(source, destination); err != nil {
 		t.Fatal(err)
 	}
 }
