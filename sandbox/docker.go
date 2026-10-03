@@ -7,12 +7,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const MaxOutputBytes = 1 << 20
+
+type boundedSandboxOutput struct {
+	buf      bytes.Buffer
+	overflow bool
+}
+
+func (w *boundedSandboxOutput) Write(data []byte) (int, error) {
+	count := len(data)
+	remaining := MaxOutputBytes - w.buf.Len()
+	if len(data) > remaining {
+		w.overflow = true
+		data = data[:remaining]
+	}
+	_, _ = w.buf.Write(data)
+	return count, nil
+}
 
 // Mount describes a bind mount from host to container.
 type Mount struct {
@@ -73,8 +93,9 @@ func DefaultSecureSandboxConfig(image string) SandboxConfig {
 		CapDrop:         []string{"ALL"},
 		NoNewPrivileges: true,
 		ReadOnlyRootfs:  true,
+		User:            "65532:65532",
 		PidsLimit:       64,
-		Tmpfs:           map[string]string{"/tmp": "size=64m,noexec"},
+		Tmpfs:           map[string]string{"/tmp": "size=64m,mode=1777,uid=65532,gid=65532,noexec,nosuid,nodev"},
 		Timeout:         5 * time.Minute,
 	}
 }
@@ -370,33 +391,40 @@ func (s *DockerSandbox) dockerRunArgs() []string {
 	if hc.ReadonlyRootfs {
 		args = append(args, "--read-only")
 	}
-	for path, spec := range hc.Tmpfs {
+	for _, path := range slices.Sorted(maps.Keys(hc.Tmpfs)) {
+		spec := hc.Tmpfs[path]
 		args = append(args, "--tmpfs", path+":"+spec)
 	}
 	return args
 }
 
 func runDockerResult(ctx context.Context, args []string) (*ExecResult, error) {
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr boundedSandboxOutput
 	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec G204 - sandbox intentionally maps config into Docker CLI args.
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	if stdout.overflow || stderr.overflow {
+		return nil, fmt.Errorf("sandbox: stdout/stderr output limit exceeded")
+	}
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("sandbox: execution cancelled: %w", ctx.Err())
+	}
 	exitCode := 0
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return nil, fmt.Errorf("sandbox: docker command failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+			return nil, fmt.Errorf("sandbox: docker command failed: %w", err)
 		}
 	}
 
 	return &ExecResult{
 		ExitCode: exitCode,
-		Stdout:   strings.TrimSpace(stdout.String()),
-		Stderr:   strings.TrimSpace(stderr.String()),
+		Stdout:   strings.TrimSpace(stdout.buf.String()),
+		Stderr:   strings.TrimSpace(stderr.buf.String()),
 	}, nil
 }
 

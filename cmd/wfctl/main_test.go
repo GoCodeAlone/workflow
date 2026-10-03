@@ -30,6 +30,9 @@ import (
 // are exercised by platform/differ_cache_test.go via its own
 // in-memory swap.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == pipelineRecordChildCommand {
+		os.Exit(runPipelineRecordChild())
+	}
 	if err := os.Setenv("WFCTL_DIFFCACHE", "disabled"); err != nil {
 		panic("setenv WFCTL_DIFFCACHE: " + err.Error())
 	}

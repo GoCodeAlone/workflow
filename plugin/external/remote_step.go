@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/GoCodeAlone/workflow/module"
@@ -181,8 +182,20 @@ func remotePluginMetadata(metadata map[string]any) map[string]any {
 	if metadata == nil {
 		return nil
 	}
-	filtered := make(map[string]any, len(metadata))
-	for key, value := range metadata {
+	// Host request objects, raw bodies and credentials never cross this boundary,
+	// even when they happen to be JSON-encodable.
+	filtered := make(map[string]any)
+	for _, key := range []string{"pipeline", "started_at", "execution_id", "tenant_id", "request_id", "trace_id"} {
+		value, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		// Marshal only validates JSON safety (including cycles/non-finite
+		// numbers). Keep the original value: NewValue rejects invalid UTF8
+		// instead of accepting the JSON encoder's replacement characters.
+		if _, err := json.Marshal(value); err != nil {
+			continue
+		}
 		if _, err := structpb.NewValue(value); err != nil {
 			continue
 		}

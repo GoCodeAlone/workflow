@@ -2,18 +2,167 @@ package module
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+type webhookInvokerSpy struct{ calls int }
+
+func (*webhookInvokerSpy) Name() string { return "external-invoker" }
+
+func (s *webhookInvokerSpy) Execute(context.Context, *PipelineContext) (*StepResult, error) {
+	s.calls++
+	return &StepResult{Output: map[string]any{"invoked": true}}, nil
+}
+
+func TestWebhookVerifyBodyLimitStopsPipeline(t *testing.T) {
+	body := strings.Repeat("x", 64)
+	step, err := NewWebhookVerifyStepFactory()("verify", map[string]any{
+		"scheme": "hmac-sha256-hex", "secret": "test-secret", "signature_header": "X-Hub-Signature-256", "error_status": http.StatusTeapot, "max_body_bytes": 8,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/webhook", nil)
+	reader := &httpBodyReadSpy{Reader: strings.NewReader(body)}
+	req.Body, req.ContentLength = reader, -1
+	req.Header.Set("X-Hub-Signature-256", "sha256="+computeTestHMAC("test-secret", body))
+	w := httptest.NewRecorder()
+	ctx := context.WithValue(t.Context(), HTTPRequestContextKey, req)
+	ctx = context.WithValue(ctx, HTTPResponseWriterContextKey, w)
+	next := &webhookInvokerSpy{}
+	pipeline := &Pipeline{Name: "webhook-limit", Steps: []PipelineStep{step, next}, OnError: ErrorStrategyStop}
+	if _, err := pipeline.Execute(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusRequestEntityTooLarge || next.calls != 0 {
+		t.Fatalf("oversized signed body reached subsequent execution: status=%d invocations=%d", w.Code, next.calls)
+	}
+	if reader.readBytes > 9 {
+		t.Fatalf("verifier body read exceeded cap plus overflow probe: %d", reader.readBytes)
+	}
+}
+
+func TestWebhookVerifyBodyLimitRejectsOversizedCache(t *testing.T) {
+	body := []byte(strings.Repeat("x", 64))
+	step, err := NewWebhookVerifyStepFactory()("verify", map[string]any{
+		"provider": "github", "secret": "test-secret", "max_body_bytes": 8,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/webhook", nil)
+	req.Header.Set("X-Hub-Signature-256", "sha256="+computeTestHMAC("test-secret", string(body)))
+	w := httptest.NewRecorder()
+	pc := NewPipelineContext(nil, map[string]any{"_http_request": req, "_http_response_writer": w, "_raw_body": body})
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil || result == nil || !result.Stop || result.Output["verified"] != false || w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized cached body bypassed the cap: result=%v error=%v status=%d", result, err, w.Code)
+	}
+}
+
+func TestWebhookVerifyBodyLimitPreservesExactBytesForRequestParse(t *testing.T) {
+	const body = " {\n  \"action\": \"opened\", \"number\": 1\n}\n"
+	step, err := NewWebhookVerifyStepFactory()("verify", map[string]any{
+		"provider": "github", "secret": "test-secret", "max_body_bytes": len(body),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", "sha256="+computeTestHMAC("test-secret", body))
+	pc := NewPipelineContext(nil, map[string]any{"_http_request": req})
+	result, err := step.Execute(t.Context(), pc)
+	if err != nil || result == nil || result.Stop || result.Output["verified"] != true {
+		t.Fatalf("signature over exact raw bytes was not accepted: result=%v error=%v", result, err)
+	}
+	if raw, ok := pc.Metadata["_raw_body"].([]byte); !ok || !bytes.Equal(raw, []byte(body)) {
+		t.Fatalf("HMAC bytes were normalized or not cached: %#v", pc.Metadata["_raw_body"])
+	}
+	parse, err := NewRequestParseStepFactory()("parse", map[string]any{"format": "json"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parse.Execute(t.Context(), pc)
+	if err != nil || parsed == nil {
+		t.Fatalf("request_parse failed: result=%v error=%v", parsed, err)
+	}
+	parsedBody, _ := parsed.Output["body"].(map[string]any)
+	if parsedBody["action"] != "opened" {
+		t.Fatalf("request_parse did not consume the cached verified bytes: result=%v error=%v", parsed, err)
+	}
+}
+
+func TestWebhookVerifyBodyLimitRejectsInvalidConfig(t *testing.T) {
+	for _, value := range []any{nil, 0, -1, 1.5, math.NaN(), math.Inf(1), math.Exp2(63), "8", true} {
+		t.Run(fmt.Sprintf("%T/%v", value, value), func(t *testing.T) {
+			_, err := NewWebhookVerifyStepFactory()("verify", map[string]any{"provider": "github", "secret": "test-secret", "max_body_bytes": value}, nil)
+			if err == nil {
+				t.Fatalf("invalid max_body_bytes %v was silently ignored", value)
+			}
+		})
+	}
+}
+
+func TestWebhookVerifyBodyLimitDefaultAlwaysEnforced(t *testing.T) {
+	const limit = 1 << 20
+	body := strings.Repeat("x", limit+1)
+	for _, mode := range []string{"legacy provider", "scheme", "zero value"} {
+		for _, cached := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/cached=%t", mode, cached), func(t *testing.T) {
+				var step PipelineStep
+				if mode == "zero value" {
+					step = &WebhookVerifyStep{name: "verify", provider: "github", secret: "test-secret"}
+				} else {
+					cfg := map[string]any{"provider": "github", "secret": "test-secret"}
+					if mode == "scheme" {
+						cfg = map[string]any{"scheme": "hmac-sha256-hex", "secret": "test-secret", "signature_header": "X-Hub-Signature-256"}
+					}
+					var err error
+					step, err = NewWebhookVerifyStepFactory()("verify", cfg, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := step.(*WebhookVerifyStep).maxBodyBytes; got != limit {
+						t.Errorf("omitted cap must configure the enforced 1 MiB default, got %d", got)
+					}
+				}
+				req := httptest.NewRequest(http.MethodPost, "/webhook", nil)
+				reader := &httpBodyReadSpy{Reader: strings.NewReader(body)}
+				req.Body, req.ContentLength = reader, -1
+				req.Header.Set("X-Hub-Signature-256", "sha256="+computeTestHMAC("test-secret", body))
+				w := httptest.NewRecorder()
+				metadata := map[string]any{"_http_request": req, "_http_response_writer": w}
+				if cached {
+					metadata["_raw_body"] = []byte(body)
+				}
+				next := &webhookInvokerSpy{}
+				pipeline := &Pipeline{Name: "webhook-default-limit", Metadata: metadata, Steps: []PipelineStep{step, next}, OnError: ErrorStrategyStop}
+				if _, err := pipeline.Execute(t.Context(), nil); err != nil {
+					t.Fatal(err)
+				}
+				if w.Code != http.StatusRequestEntityTooLarge || next.calls != 0 {
+					t.Fatalf("default/zero cap allowed oversized body: status=%d invocations=%d", w.Code, next.calls)
+				}
+				if reader.readBytes > limit+1 || (cached && reader.readBytes != 0) {
+					t.Fatalf("default body read was not bounded or ignored cache: read %d bytes", reader.readBytes)
+				}
+			})
+		}
+	}
+}
 
 // computeTestHMAC is a test helper to compute HMAC-SHA256.
 func computeTestHMAC(secret, data string) string {

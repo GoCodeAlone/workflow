@@ -1,0 +1,35 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: host-prepared
+      - name: before
+        type: step.record_fixture
+        config:
+          mode: "{{ .before_mode }}"
+          audit_path: "{{ .before_audit }}"
+          greeting: "{{ .steps.prepare.greeting }}"
+      - name: command
+        type: step.sandbox_exec
+        config:
+          image: alpine:3.21
+          command: [sh, -euc, "printf '%s' 'fixture-command'"]
+          security_profile: strict
+          cpu_limit: 1
+          timeout: 30s
+      - name: after
+        type: step.record_fixture
+        config:
+          mode: "{{ .after_mode }}"
+          audit_path: "{{ .after_audit }}"
+          greeting: "{{ .steps.prepare.greeting }}"
+      - name: result
+        type: step.set
+        config:
+          values:
+            ready: true
+            source: cleanup-fixture

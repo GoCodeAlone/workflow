@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gocodealone.com/schemas/registry-sync-operation-v1.schema.json",
+  "title": "Workflow registry synchronization operation v1",
+  "description": "Number-free Workflow Canonical JSON v1. Trees exclude the report itself. Consumers must recompute release/source/checksum, tree, path, and diff bindings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "plugin", "repository", "source", "old_version", "new_version", "tag", "tag_objects", "source_sha", "source_digest", "release", "assets", "checksums", "checksums_digest", "changed_paths", "base_tree", "result_tree", "diff_digest"],
+  "properties": {
+    "schema": {"const": "registry-sync-operation.v1"},
+    "plugin": {"$ref": "#/$defs/name"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "source": {"type": "string", "minLength": 1},
+    "old_version": {"$ref": "#/$defs/version"},
+    "new_version": {"$ref": "#/$defs/version"},
+    "tag": {"type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "tag_objects": {
+      "type": "array", "minItems": 1, "maxItems": 9,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["type", "sha"],
+        "properties": {"type": {"enum": ["tag", "commit"]}, "sha": {"$ref": "#/$defs/git_sha"}}
+      }
+    },
+    "source_sha": {"$ref": "#/$defs/git_sha"},
+    "source_digest": {"$ref": "#/$defs/digest"},
+    "release": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "tag_name", "target_commitish", "immutable"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "tag_name": {"type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+        "target_commitish": {"type": "string", "minLength": 1},
+        "immutable": {"const": true}
+      }
+    },
+    "assets": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "name", "size", "url", "digest"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "name": {"$ref": "#/$defs/name"},
+          "size": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+          "url": {"type": "string", "pattern": "^https?://[^/]+"},
+          "digest": {"type": "string", "pattern": "^$|^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "checksums": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "sha256"],
+        "properties": {"name": {"$ref": "#/$defs/name"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+      }
+    },
+    "checksums_digest": {"$ref": "#/$defs/digest"},
+    "changed_paths": {
+      "type": "array", "maxItems": 1, "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^plugins/[^/\\\\]+/manifest\\.json$"}
+    },
+    "base_tree": {"$ref": "#/$defs/git_sha"},
+    "result_tree": {"$ref": "#/$defs/git_sha"},
+    "diff_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "name": {"type": "string", "minLength": 1, "pattern": "^[^/\\\\]+$", "not": {"enum": [".", ".."]}},
+    "id": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

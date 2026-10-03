@@ -1,0 +1,53 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: "{{ .pool_name }}"
+      - name: retry
+        type: step.retry_with_backoff
+        config:
+          max_retries: 1
+          initial_delay: 0s
+          max_delay: 0s
+          step:
+            name: breaker
+            type: step.resilient_circuit_breaker
+            config:
+              failure_threshold: 1
+              reset_timeout: 1h
+              step:
+                name: primary
+                type: step.record_fixture
+                config:
+                  mode: composite-error
+                  audit_path: "{{ .audit_path }}"
+                  participant: "{{ index .pool 1 }}"
+                  pool: "{{ .pool_name }}"
+                  ordinal: "1"
+                  action: primary
+              fallback:
+                name: fallback
+                type: step.record_fixture_aux
+                config:
+                  mode: composite
+                  audit_path: "{{ .audit_path }}"
+                  participant: "{{ index .pool 1 }}"
+                  pool: "{{ .pool_name }}"
+                  ordinal: "1"
+                  action: fallback
+      - name: result
+        type: step.set
+        config:
+          values:
+            source: resilient-circuit-breaker
+            retries: "{{ .steps.retry.retry_attempts }}"
+            open: "{{ .steps.retry.circuit_breaker_open }}"
+            action: "{{ .steps.retry.action }}"
+            participant: "{{ .steps.retry.participant }}"
+            pool: "{{ .steps.retry.pool }}"
+            echo: "{{ .steps.retry.echo }}"
+            ready: "{{ .steps.retry.ready }}"

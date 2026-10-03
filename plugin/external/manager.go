@@ -2,6 +2,7 @@ package external
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -25,6 +26,8 @@ type ExternalPluginManager struct {
 	clients map[string]*goplugin.Client
 
 	callbackServer *CallbackServer
+	processStdout  io.Writer
+	processStderr  io.Writer
 
 	startPlugin func(name string) (*pluginLaunch, error)
 }
@@ -52,6 +55,14 @@ func (m *ExternalPluginManager) SetCallbackServer(server *CallbackServer) {
 	m.mu.Lock()
 	m.callbackServer = server
 	m.mu.Unlock()
+}
+
+// SetProcessOutput selects host-owned subprocess output sinks. Nil preserves
+// the default stdout discard and stderr logging behavior. Set before loading.
+func (m *ExternalPluginManager) SetProcessOutput(stdout, stderr io.Writer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.processStdout, m.processStderr = stdout, stderr
 }
 
 // DiscoverPlugins scans the plugins directory for subdirectories that contain
@@ -172,6 +183,7 @@ func (m *ExternalPluginManager) startPluginUnlocked(name string) (*pluginLaunch,
 
 	m.mu.RLock()
 	callbackServer := m.callbackServer
+	processStdout, processStderr := m.processStdout, m.processStderr
 	m.mu.RUnlock()
 
 	// Run the plugin subprocess with its own directory as the working directory.
@@ -180,7 +192,10 @@ func (m *ExternalPluginManager) startPluginUnlocked(name string) (*pluginLaunch,
 	// which may not be writable (e.g. /app owned by root, process runs as nonroot).
 	cmd := exec.Command(binaryPath) //nolint:gosec // G204: plugin binary path is from trusted data/plugins directory
 	cmd.Dir = pluginDir
-	pluginStderr := newPluginStderrForwarder(name, m.logger)
+	var pluginStderr io.Writer = newPluginStderrForwarder(name, m.logger)
+	if processStderr != nil {
+		pluginStderr = processStderr
+	}
 
 	client := goplugin.NewClient(&goplugin.ClientConfig{
 		HandshakeConfig:  Handshake,
@@ -188,6 +203,7 @@ func (m *ExternalPluginManager) startPluginUnlocked(name string) (*pluginLaunch,
 		Cmd:              cmd,
 		Stderr:           pluginStderr,
 		SyncStderr:       pluginStderr,
+		SyncStdout:       processStdout,
 		AllowedProtocols: []goplugin.Protocol{goplugin.ProtocolGRPC},
 	})
 

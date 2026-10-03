@@ -1,9 +1,107 @@
 package module
 
 import (
+	"context"
+	"math"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/GoCodeAlone/workflow/sandbox"
 )
+
+func TestSandboxExecHonorsIntegerCPUsAndRejectsInvalidResources(t *testing.T) {
+	factory := NewSandboxExecStepFactory()
+	step, err := factory("fixture", map[string]any{"cpu_limit": 1, "timeout": "10m"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := step.(*SandboxExecStep).buildSandboxConfig()
+	if cfg.CPULimit != 1 || cfg.Timeout != 10*time.Minute {
+		t.Fatalf("resource config silently changed: CPU=%v timeout=%v", cfg.CPULimit, cfg.Timeout)
+	}
+	for _, invalid := range []map[string]any{
+		{"cpu_limit": 0}, {"cpu_limit": -1}, {"cpu_limit": math.NaN()}, {"cpu_limit": math.Inf(1)}, {"cpu_limit": "1"},
+		{"timeout": "0s"}, {"timeout": "-1s"}, {"timeout": ""}, {"timeout": 1},
+	} {
+		if _, err := factory("fixture", invalid, nil); err == nil {
+			t.Fatalf("invalid resource value was ignored: %#v", invalid)
+		}
+	}
+}
+
+type sandboxExecFixtureRunner struct {
+	command []string
+	exit    int
+	closed  bool
+}
+
+func (r *sandboxExecFixtureRunner) Exec(_ context.Context, command []string) (*sandbox.ExecResult, error) {
+	r.command = command
+	return &sandbox.ExecResult{ExitCode: r.exit, Stdout: "private-output"}, nil
+}
+
+func (r *sandboxExecFixtureRunner) Close() error { r.closed = true; return nil }
+
+func TestSandboxExecRuntimeTemplatesAndNonzeroError(t *testing.T) {
+	step, err := NewSandboxExecStepFactory()("fixture", map[string]any{
+		"command": []any{"printf", "{{ .message }}"},
+		"env":     map[string]any{"PUBLIC_VALUE": "{{ .message }}"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &sandboxExecFixtureRunner{exit: 7}
+	var gotConfig sandbox.SandboxConfig
+	ctx := sandbox.WithLocalRunnerFactory(context.Background(), func(cfg sandbox.SandboxConfig) (sandbox.SandboxRunner, error) {
+		gotConfig = cfg
+		return runner, nil
+	})
+	pc := NewPipelineContext(map[string]any{"message": "runtime"}, nil)
+	result, err := step.Execute(ctx, pc)
+	if err == nil || result != nil {
+		t.Fatalf("nonzero execution must return an error, not a successful stop: %#v, %v", result, err)
+	}
+	if strings.Contains(err.Error(), "private-output") {
+		t.Fatal("captured command output leaked into error")
+	}
+	if len(runner.command) != 2 || runner.command[1] != "runtime" || gotConfig.Env["PUBLIC_VALUE"] != "runtime" || !runner.closed {
+		t.Fatalf("runtime command/env/cleanup not applied: %#v %#v closed=%v", runner.command, gotConfig.Env, runner.closed)
+	}
+	if step.(*SandboxExecStep).command[1] != "{{ .message }}" {
+		t.Fatal("execution mutated shared command config")
+	}
+}
+
+func TestSandboxExecRejectsNonStringAndReservedEnvironment(t *testing.T) {
+	for _, env := range []map[string]any{
+		{"VALUE": 42}, {"GITHUB_TOKEN": "private"}, {"ACTIONS_RUNTIME_TOKEN": "private"},
+		{"DOCKER_HOST": "unix:///host.sock"}, {"VALUE": map[string]any{"nested": "string"}},
+	} {
+		if _, err := NewSandboxExecStepFactory()("fixture", map[string]any{"command": []any{"true"}, "env": env}, nil); err == nil {
+			t.Fatalf("unsafe environment accepted: %v", env)
+		}
+	}
+}
+
+func TestSandboxExecWorkDirectoryAndTmpfs(t *testing.T) {
+	step, err := NewSandboxExecStepFactory()("fixture", map[string]any{
+		"command": []any{"true"}, "work_dir": "/work",
+		"tmpfs": map[string]any{"/work": "size=96m,mode=0700,uid=65532,gid=65532,noexec,nosuid,nodev"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := step.(*SandboxExecStep).buildSandboxConfig()
+	if cfg.WorkDir != "/work" || !strings.Contains(cfg.Tmpfs["/work"], "mode=0700") {
+		t.Fatalf("validated private work filesystem missing: %#v", cfg)
+	}
+	for _, path := range []string{"relative", "/", "/work/../host", "/work:host"} {
+		if _, err := NewSandboxExecStepFactory()("fixture", map[string]any{"command": []any{"true"}, "work_dir": path}, nil); err == nil {
+			t.Errorf("invalid work_dir accepted: %q", path)
+		}
+	}
+}
 
 func TestNewSandboxExecStepFactory_Defaults(t *testing.T) {
 	factory := NewSandboxExecStepFactory()
@@ -146,7 +244,7 @@ func TestNewSandboxExecStepFactory_EnvAndNetwork(t *testing.T) {
 	factory := NewSandboxExecStepFactory()
 	step, err := factory("s", map[string]any{
 		"command": []any{"env"},
-		"env":     map[string]any{"FOO": "bar", "NUM": 42},
+		"env":     map[string]any{"FOO": "bar", "NUM": "42"},
 		"network": "bridge",
 	}, nil)
 	if err != nil {

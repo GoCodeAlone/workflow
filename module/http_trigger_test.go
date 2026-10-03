@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,95 @@ import (
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+type httpBodyReadSpy struct {
+	io.Reader
+	readBytes int
+}
+
+func (s *httpBodyReadSpy) Read(p []byte) (int, error) {
+	n, err := s.Reader.Read(p)
+	s.readBytes += n
+	return n, err
+}
+
+func (s *httpBodyReadSpy) Close() error { return nil }
+
+func bodyLimitTriggerConfig(t *testing.T, limit any) (*HTTPTrigger, *MockWorkflowEngine, error) {
+	t.Helper()
+	app := NewMockApplication()
+	router := NewMockHTTPRouter("body-limit-router")
+	engine := NewMockWorkflowEngine()
+	if err := app.RegisterService("httpRouter", router); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.RegisterService("workflowEngine", engine); err != nil {
+		t.Fatal(err)
+	}
+	trigger := NewHTTPTrigger()
+	err := trigger.Configure(app, map[string]any{"routes": []any{map[string]any{
+		"path": "/webhook", "method": "POST", "workflow": "pipeline:webhook", "action": "execute", "max_body_bytes": limit,
+	}}})
+	return trigger, engine, err
+}
+
+func TestHTTPTriggerBodyLimitBeforePipeline(t *testing.T) {
+	for _, knownLength := range []bool{false, true} {
+		t.Run(fmt.Sprint(knownLength), func(t *testing.T) {
+			trigger, engine, err := bodyLimitTriggerConfig(t, int64(8))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/webhook", nil)
+			body := &httpBodyReadSpy{Reader: strings.NewReader(strings.Repeat("x", 64))}
+			req.Body = body
+			req.ContentLength = -1
+			if knownLength {
+				req.ContentLength = 64
+			}
+			w := httptest.NewRecorder()
+			trigger.createHandler(trigger.routes[0]).Handle(w, req)
+			if w.Code != http.StatusRequestEntityTooLarge || len(engine.triggeredWorkflows) != 0 {
+				t.Fatalf("oversized body reached the pipeline: status=%d invocations=%d", w.Code, len(engine.triggeredWorkflows))
+			}
+			if body.readBytes > 9 {
+				t.Fatalf("first trigger read was unbounded: read %d bytes for cap 8", body.readBytes)
+			}
+		})
+	}
+}
+
+func TestHTTPTriggerBodyLimitBoundaries(t *testing.T) {
+	const limit = 1 << 20
+	for _, size := range []int{0, limit, limit + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			trigger, engine, err := bodyLimitTriggerConfig(t, float64(limit))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(strings.Repeat(" ", size)))
+			w := httptest.NewRecorder()
+			trigger.createHandler(trigger.routes[0]).Handle(w, req)
+			if size > limit {
+				if w.Code != http.StatusRequestEntityTooLarge || len(engine.triggeredWorkflows) != 0 {
+					t.Fatalf("oversized body was not rejected before execution: status=%d invocations=%d", w.Code, len(engine.triggeredWorkflows))
+				}
+			} else if w.Code != http.StatusAccepted || len(engine.triggeredWorkflows) != 1 {
+				t.Fatalf("bounded body did not execute once: status=%d invocations=%d", w.Code, len(engine.triggeredWorkflows))
+			}
+		})
+	}
+}
+
+func TestHTTPTriggerBodyLimitRejectsInvalidConfig(t *testing.T) {
+	for _, value := range []any{nil, 0, -1, 1.5, math.NaN(), math.Inf(1), math.Exp2(63), "8", true} {
+		t.Run(fmt.Sprintf("%T/%v", value, value), func(t *testing.T) {
+			if _, _, err := bodyLimitTriggerConfig(t, value); err == nil {
+				t.Fatalf("invalid max_body_bytes %v was silently ignored", value)
+			}
+		})
+	}
+}
 
 // TestHTTPTrigger tests the HTTP trigger functionality
 func TestHTTPTrigger(t *testing.T) {

@@ -818,9 +818,12 @@ func KnownStepTypes() map[string]StepTypeInfo {
 			ConfigKeys: []string{"collection", "item_var", "item_key", "step", "steps", "index_key"},
 		},
 		"step.webhook_verify": {
-			Type:       "step.webhook_verify",
-			Plugin:     "pipelinesteps",
-			ConfigKeys: []string{"provider", "scheme", "secret", "secret_from", "header", "signature_header", "url_reconstruction", "include_form_params", "error_status"},
+			Type:   "step.webhook_verify",
+			Plugin: "pipelinesteps",
+			// max_body_bytes is a positive integer cap on raw reads and cached
+			// bytes, always enforced with a 1 MiB default when omitted. Explicit
+			// GitHub hosts set 1048576 (1 MiB) on both route and step.
+			ConfigKeys: []string{"provider", "scheme", "secret", "secret_from", "header", "signature_header", "url_reconstruction", "include_form_params", "error_status", "max_body_bytes"},
 		},
 		"step.base64_decode": {
 			Type:       "step.base64_decode",

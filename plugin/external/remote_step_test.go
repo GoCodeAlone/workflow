@@ -3,6 +3,8 @@ package external
 import (
 	"context"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -334,14 +336,113 @@ func TestRemoteStep_Execute_FiltersUnrepresentableMetadata(t *testing.T) {
 	if got["pipeline"] != "http-flow" {
 		t.Fatalf("expected serializable metadata to be preserved, got %#v", got)
 	}
-	if got["explicit_trace"] != true {
-		t.Fatalf("expected boolean metadata to be preserved, got %#v", got)
+	if _, ok := got["explicit_trace"]; ok {
+		t.Fatalf("expected unapproved metadata to be filtered, got %#v", got)
 	}
 	if _, ok := got["_http_response_writer"]; ok {
 		t.Fatalf("expected response writer metadata to be filtered, got %#v", got)
 	}
 	if _, ok := got["_http_request"]; ok {
 		t.Fatalf("expected request metadata to be filtered, got %#v", got)
+	}
+}
+
+func TestRemoteStepMetadataAllowlistPayload(t *testing.T) {
+	for _, mode := range []pb.ContractMode{pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT, pb.ContractMode_CONTRACT_MODE_STRICT_PROTO} {
+		t.Run(mode.String(), func(t *testing.T) {
+			stub := &stubPluginServiceClient{
+				response: &pb.ExecuteStepResponse{TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{"name": "output", "version": "v1"})},
+			}
+			contract := &pb.ContractDescriptor{
+				Mode: mode, ConfigMessage: "workflow.plugin.v1.Manifest", InputMessage: "workflow.plugin.v1.Manifest", OutputMessage: "workflow.plugin.v1.Manifest",
+			}
+			step := NewRemoteStep("metadata-boundary", "handle-metadata", stub, map[string]any{"name": "config", "version": "v1"}, contract)
+			allowed := map[string]any{
+				"pipeline": "webhook", "started_at": "2026-10-03T00:00:00Z", "execution_id": "execution-1",
+				"tenant_id": "tenant-1", "request_id": "request-1", "trace_id": "trace-1",
+			}
+			metadata := map[string]any{
+				"_http_request":         map[string]any{"Authorization": "host-secret-request"},
+				"_http_response_writer": "host-secret-writer", "_raw_body": []byte("host-secret-body"),
+				"credentials": map[string]any{"token": "host-secret-credentials"}, "arbitrary": "host-secret-arbitrary",
+			}
+			for key, value := range allowed {
+				metadata[key] = value
+			}
+			pc := module.NewPipelineContext(map[string]any{"name": "input", "version": "v1"}, metadata)
+			parsed := map[string]any{"body": map[string]any{"action": "opened"}, "headers": map[string]any{"X-GitHub-Delivery": "delivery-1"}}
+			pc.MergeStepOutput("parse-request", parsed)
+			if _, err := step.Execute(t.Context(), pc); err != nil {
+				t.Fatal(err)
+			}
+			req := stub.lastRequest
+			if req == nil {
+				t.Fatal("external RPC was not invoked")
+			}
+			if got := req.Metadata.AsMap(); !reflect.DeepEqual(got, allowed) {
+				t.Fatalf("RPC metadata leaked host values or lost allowed values: got %#v, want %#v", got, allowed)
+			}
+			if got := req.StepOutputs["parse-request"].AsMap(); !reflect.DeepEqual(got, parsed) {
+				t.Fatalf("prior host output did not reach the RPC: %#v", got)
+			}
+			if mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO && (req.TypedInput == nil || req.TypedConfig == nil || req.Current != nil || req.Config != nil) {
+				t.Fatal("metadata filtering changed the strict protobuf contract")
+			}
+			wire, err := protojson.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(wire), "host-secret-") {
+				t.Fatalf("host credential canary reached the actual RPC payload: %s", wire)
+			}
+			if len(pc.Metadata) != len(metadata) || pc.Metadata["arbitrary"] != "host-secret-arbitrary" {
+				t.Fatal("metadata filtering mutated the host context")
+			}
+		})
+	}
+}
+
+func TestRemoteStepMetadataRejectsNonJSONValues(t *testing.T) {
+	for name, value := range map[string]any{
+		"nan": math.NaN(), "positive infinity": math.Inf(1), "negative infinity": math.Inf(-1),
+		"channel": make(chan int), "non-string map": map[int]string{1: "host-only"},
+		"nested nan":                map[string]any{"value": math.NaN()},
+		"invalid UTF8 string":       string([]byte{0xff}),
+		"invalid UTF8 nested value": map[string]any{"value": string([]byte{0xff})},
+		"invalid UTF8 nested key":   map[string]any{string([]byte{0xff}): "value"},
+		"invalid UTF8 list value":   []any{string([]byte{0xff})},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := &stubPluginServiceClient{}
+			pc := module.NewPipelineContext(nil, map[string]any{"pipeline": "safe", "trace_id": value})
+			if _, err := NewRemoteStep("metadata", "handle", stub, nil).Execute(t.Context(), pc); err != nil {
+				t.Fatal(err)
+			}
+			got := stub.lastRequest.Metadata.AsMap()
+			if got["pipeline"] != "safe" || len(got) != 1 {
+				t.Fatalf("non-JSON-safe allowed-key value reached RPC metadata: %#v", got)
+			}
+		})
+	}
+}
+
+func TestRemoteStepMetadataPreservesJSONSafeValues(t *testing.T) {
+	for name, value := range map[string]any{
+		"null": nil, "boolean": true, "number": 42.5,
+		"object": map[string]any{"nested": []any{nil, false, 42.5, "valid UTF8: \u00e9"}},
+		"array":  []any{"value", 42.5, true, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stub := &stubPluginServiceClient{}
+			pc := module.NewPipelineContext(nil, map[string]any{"pipeline": "safe", "trace_id": value})
+			if _, err := NewRemoteStep("metadata", "handle", stub, nil).Execute(t.Context(), pc); err != nil {
+				t.Fatal(err)
+			}
+			got := stub.lastRequest.Metadata.AsMap()
+			if !reflect.DeepEqual(got, map[string]any{"pipeline": "safe", "trace_id": value}) {
+				t.Fatalf("JSON-safe approved metadata value was changed or removed: %#v", got)
+			}
+		})
 	}
 }
 

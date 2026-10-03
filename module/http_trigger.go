@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -249,6 +251,9 @@ type HTTPTriggerRoute struct {
 	Action         string         `json:"action" yaml:"action"`
 	Params         map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 	IncludeRawBody bool           `json:"include_raw_body,omitempty" yaml:"include_raw_body,omitempty"`
+	// MaxBodyBytes bounds the first body read when configured. Omission preserves
+	// legacy routes; explicit webhook routes must set a positive cap (1 MiB for GitHub).
+	MaxBodyBytes int64 `json:"max_body_bytes,omitempty" yaml:"max_body_bytes,omitempty"`
 }
 
 // HTTPTrigger implements a trigger that starts workflows from HTTP requests
@@ -417,6 +422,14 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) erro
 		if _, ok := routeMap["include_raw_body"]; !ok {
 			includeRawBody = boolConfigValue(routeMap["raw_body"])
 		}
+		var maxBodyBytes int64
+		if raw, ok := routeMap["max_body_bytes"]; ok {
+			var err error
+			maxBodyBytes, err = parseHTTPBodyLimit(raw)
+			if err != nil {
+				return fmt.Errorf("invalid route configuration at index %d: %w", i, err)
+			}
+		}
 
 		// Add the route
 		t.routes = append(t.routes, HTTPTriggerRoute{
@@ -426,6 +439,7 @@ func (t *HTTPTrigger) Configure(app modular.Application, triggerConfig any) erro
 			Action:         action,
 			Params:         params,
 			IncludeRawBody: includeRawBody,
+			MaxBodyBytes:   maxBodyBytes,
 		})
 	}
 
@@ -442,6 +456,37 @@ func boolConfigValue(v any) bool {
 	default:
 		return false
 	}
+}
+
+// parseHTTPBodyLimit accepts integer byte counts from YAML or JSON without
+// truncating fractions or overflowing http.MaxBytesReader's int64 limit.
+func parseHTTPBodyLimit(raw any) (int64, error) {
+	var limit int64
+	switch value := raw.(type) {
+	case int:
+		limit = int64(value)
+	case int64:
+		limit = value
+	case int32:
+		limit = int64(value)
+	case json.Number:
+		var err error
+		limit, err = value.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("max_body_bytes must be a positive integer")
+		}
+	case float64:
+		if !(value > 0 && value < math.Exp2(63) && math.Trunc(value) == value) {
+			return 0, fmt.Errorf("max_body_bytes must be a positive integer")
+		}
+		limit = int64(value) // #nosec G115 -- finite integral value is strictly between zero and 2^63.
+	default:
+		return 0, fmt.Errorf("max_body_bytes must be a positive integer")
+	}
+	if limit <= 0 {
+		return 0, fmt.Errorf("max_body_bytes must be a positive integer")
+	}
+	return limit, nil
 }
 
 // createHandler creates an HTTP handler for a specific route
@@ -494,7 +539,18 @@ func (t *HTTPTrigger) createHandler(route HTTPTriggerRoute) HTTPHandler {
 
 		// Parse JSON request body if present
 		if r.Body != nil {
-			bodyBytes, _ := io.ReadAll(r.Body)
+			if route.MaxBodyBytes > 0 {
+				r.Body = http.MaxBytesReader(rw, r.Body, route.MaxBodyBytes)
+			}
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+					http.Error(rw, "request body exceeds max_body_bytes", http.StatusRequestEntityTooLarge)
+				} else {
+					http.Error(rw, "failed to read request body", http.StatusBadRequest)
+				}
+				return
+			}
 			if len(bodyBytes) > 0 {
 				var body map[string]any
 				if err := json.Unmarshal(bodyBytes, &body); err == nil {

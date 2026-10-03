@@ -1,0 +1,43 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: "{{ .pool_name }}"
+      - name: fanout
+        type: step.parallel
+        config:
+          steps:
+            - name: left
+              type: step.record_fixture
+              config:
+                mode: composite
+                audit_path: "{{ .audit_path }}"
+                participant: "{{ index .pool 0 }}"
+                pool: "{{ .pool_name }}"
+                ordinal: "0"
+                action: left
+            - name: right
+              type: step.record_fixture_aux
+              config:
+                mode: composite
+                audit_path: "{{ .audit_path }}"
+                participant: "{{ index .pool (sub (len .pool) 1) }}"
+                pool: "{{ .pool_name }}"
+                ordinal: "{{ .last_ordinal }}"
+                action: right
+      - name: result
+        type: step.set
+        config:
+          values:
+            source: parallel
+            completed: "{{ .steps.fanout.completed }}"
+            failed: "{{ .steps.fanout.failed }}"
+            left: "{{ .steps.fanout.results.left.participant }}"
+            right: "{{ .steps.fanout.results.right.participant }}"
+            pool: "{{ .steps.fanout.results.left.pool }}"
+            echo: "{{ .steps.fanout.results.right.echo }}"
+            ready: "{{ .steps.fanout.results.right.ready }}"

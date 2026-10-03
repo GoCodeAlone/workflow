@@ -1,0 +1,35 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: "{{ .pool_name }}"
+      - name: fanout
+        type: step.foreach
+        config:
+          collection: pool
+          concurrency: 2
+          step:
+            name: visit
+            type: step.record_fixture
+            config:
+              mode: composite
+              audit_path: "{{ .audit_path }}"
+              participant: "{{ .item }}"
+              pool: "{{ .pool_name }}"
+              ordinal: "{{ .foreach.index }}"
+              action: visit
+      - name: result
+        type: step.set
+        config:
+          values:
+            source: foreach
+            count: "{{ .steps.fanout.count }}"
+            first: "{{ (index .steps.fanout.results 0).participant }}"
+            last: "{{ (last .steps.fanout.results).participant }}"
+            pool: "{{ (index .steps.fanout.results 0).pool }}"
+            echo: "{{ (last .steps.fanout.results).echo }}"
+            ready: "{{ (last .steps.fanout.results).ready }}"

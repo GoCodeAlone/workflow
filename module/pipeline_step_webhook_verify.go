@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,14 +34,18 @@ const (
 
 	// stripeTimestampTolerance is the maximum allowed age of a Stripe timestamp.
 	stripeTimestampTolerance = 5 * time.Minute
+
+	// Legacy configs may omit max_body_bytes, but never opt out of a body cap.
+	defaultWebhookBodyLimit int64 = 1 << 20
 )
 
 // WebhookVerifyStep verifies HMAC signatures for incoming webhook requests.
 type WebhookVerifyStep struct {
-	name     string
-	provider string
-	secret   string
-	header   string
+	name         string
+	provider     string
+	secret       string
+	header       string
+	maxBodyBytes int64
 
 	// scheme-based fields (new config model)
 	scheme            string
@@ -52,26 +57,37 @@ type WebhookVerifyStep struct {
 }
 
 // NewWebhookVerifyStepFactory returns a StepFactory that creates WebhookVerifyStep instances.
+// A positive body cap is always enforced, including for cached raw bytes. Omitted
+// max_body_bytes preserves legacy configuration syntax with a 1 MiB default;
+// explicit GitHub hosts set max_body_bytes: 1048576 on both route and step.
 func NewWebhookVerifyStepFactory() StepFactory {
 	return func(name string, config map[string]any, _ modular.Application) (PipelineStep, error) {
+		maxBodyBytes := defaultWebhookBodyLimit
+		if raw, ok := config["max_body_bytes"]; ok {
+			var err error
+			maxBodyBytes, err = parseHTTPBodyLimit(raw)
+			if err != nil {
+				return nil, fmt.Errorf("webhook_verify step %q: %w", name, err)
+			}
+		}
 		scheme, _ := config["scheme"].(string)
 		provider, _ := config["provider"].(string)
 
 		// Determine which mode to use: scheme-based or provider-based
 		if scheme != "" {
-			return newSchemeBasedStep(name, scheme, config)
+			return newSchemeBasedStep(name, scheme, config, maxBodyBytes)
 		}
 
 		if provider == "" {
 			return nil, fmt.Errorf("webhook_verify step %q: 'scheme' or 'provider' is required", name)
 		}
 
-		return newProviderBasedStep(name, provider, config)
+		return newProviderBasedStep(name, provider, config, maxBodyBytes)
 	}
 }
 
 // newSchemeBasedStep creates a WebhookVerifyStep using the scheme-based config model.
-func newSchemeBasedStep(name, scheme string, config map[string]any) (PipelineStep, error) {
+func newSchemeBasedStep(name, scheme string, config map[string]any, maxBodyBytes int64) (PipelineStep, error) {
 	switch scheme {
 	case webhookSchemeHMACSHA1, webhookSchemeHMACSHA256, webhookSchemeHMACSHA256Hex:
 		// valid
@@ -109,6 +125,7 @@ func newSchemeBasedStep(name, scheme string, config map[string]any) (PipelineSte
 
 	return &WebhookVerifyStep{
 		name:              name,
+		maxBodyBytes:      maxBodyBytes,
 		scheme:            scheme,
 		secret:            secret,
 		secretFrom:        secretFrom,
@@ -120,7 +137,7 @@ func newSchemeBasedStep(name, scheme string, config map[string]any) (PipelineSte
 }
 
 // newProviderBasedStep creates a WebhookVerifyStep using the legacy provider-based config model.
-func newProviderBasedStep(name, provider string, config map[string]any) (PipelineStep, error) {
+func newProviderBasedStep(name, provider string, config map[string]any, maxBodyBytes int64) (PipelineStep, error) {
 	switch provider {
 	case webhookVerifyProviderGitHub, webhookVerifyProviderStripe, webhookVerifyProviderGeneric:
 		// valid
@@ -137,11 +154,12 @@ func newProviderBasedStep(name, provider string, config map[string]any) (Pipelin
 	header, _ := config["header"].(string)
 
 	return &WebhookVerifyStep{
-		name:        name,
-		provider:    provider,
-		secret:      secret,
-		header:      header,
-		errorStatus: http.StatusUnauthorized,
+		name:         name,
+		maxBodyBytes: maxBodyBytes,
+		provider:     provider,
+		secret:       secret,
+		header:       header,
+		errorStatus:  http.StatusUnauthorized,
 	}, nil
 }
 
@@ -158,6 +176,14 @@ func (s *WebhookVerifyStep) Execute(_ context.Context, pc *PipelineContext) (*St
 	// Read the request body. Body may have been read already; use raw body from metadata if present.
 	body, err := s.readBody(req, pc)
 	if err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			if w, ok := pc.Metadata["_http_response_writer"].(http.ResponseWriter); ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				_, _ = w.Write([]byte(`{"error":"request body exceeds max_body_bytes"}`))
+			}
+			return &StepResult{Stop: true, Output: map[string]any{"verified": false, "reason": "request body exceeds max_body_bytes"}}, nil
+		}
 		return s.unauthorized(pc, fmt.Sprintf("failed to read request body: %v", err))
 	}
 
@@ -480,14 +506,23 @@ func (s *WebhookVerifyStep) unauthorized(pc *PipelineContext, reason string) (*S
 
 // readBody reads the request body, preferring a cached copy in pipeline metadata.
 func (s *WebhookVerifyStep) readBody(req *http.Request, pc *PipelineContext) ([]byte, error) {
+	limit := s.maxBodyBytes
+	if limit <= 0 {
+		limit = defaultWebhookBodyLimit
+	}
 	// Check if raw body is already cached in metadata
 	if raw, ok := pc.Metadata["_raw_body"].([]byte); ok {
+		if int64(len(raw)) > limit {
+			return nil, &http.MaxBytesError{Limit: limit}
+		}
 		return raw, nil
 	}
 
 	if req.Body == nil {
 		return []byte{}, nil
 	}
+	w, _ := pc.Metadata["_http_response_writer"].(http.ResponseWriter)
+	req.Body = http.MaxBytesReader(w, req.Body, limit)
 
 	body, err := io.ReadAll(req.Body)
 	if err != nil {

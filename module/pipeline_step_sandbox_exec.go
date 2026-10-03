@@ -3,6 +3,10 @@ package module
 import (
 	"context"
 	"fmt"
+	"maps"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/GoCodeAlone/modular"
@@ -25,6 +29,9 @@ type SandboxExecStep struct {
 	timeout         time.Duration
 	network         string
 	env             map[string]string
+	workDir         string
+	tmpfs           map[string]string
+	tmpl            *TemplateEngine
 	mounts          []sandbox.Mount
 	failOnError     bool
 	app             modular.Application
@@ -39,6 +46,7 @@ func NewSandboxExecStepFactory() StepFactory {
 			securityProfile: "strict",
 			failOnError:     true,
 			app:             app,
+			tmpl:            NewTemplateEngine(),
 		}
 
 		if img, ok := cfg["image"].(string); ok && img != "" {
@@ -80,14 +88,30 @@ func NewSandboxExecStepFactory() StepFactory {
 			step.memoryLimit = limit
 		}
 
-		if cpu, ok := cfg["cpu_limit"].(float64); ok {
-			step.cpuLimit = cpu
+		if value, exists := cfg["cpu_limit"]; exists {
+			switch value := value.(type) {
+			case int:
+				step.cpuLimit = float64(value)
+			case int64:
+				step.cpuLimit = float64(value)
+			case float64:
+				step.cpuLimit = value
+			default:
+				return nil, fmt.Errorf("sandbox_exec step %q: cpu_limit must be a positive number", name)
+			}
+			if step.cpuLimit <= 0 || math.IsNaN(step.cpuLimit) || math.IsInf(step.cpuLimit, 0) {
+				return nil, fmt.Errorf("sandbox_exec step %q: cpu_limit must be a finite positive number", name)
+			}
 		}
 
-		if ts, ok := cfg["timeout"].(string); ok && ts != "" {
+		if value, exists := cfg["timeout"]; exists {
+			ts, ok := value.(string)
+			if !ok || ts == "" {
+				return nil, fmt.Errorf("sandbox_exec step %q: timeout must be a positive duration", name)
+			}
 			d, err := time.ParseDuration(ts)
-			if err != nil {
-				return nil, fmt.Errorf("sandbox_exec step %q: invalid timeout %q: %w", name, ts, err)
+			if err != nil || d <= 0 {
+				return nil, fmt.Errorf("sandbox_exec step %q: timeout must be a positive duration", name)
 			}
 			step.timeout = d
 		}
@@ -118,11 +142,44 @@ func NewSandboxExecStepFactory() StepFactory {
 			step.provider = provider
 		}
 
-		if envRaw, ok := cfg["env"].(map[string]any); ok {
+		if envRaw, exists := cfg["env"]; exists {
+			envRaw, ok := envRaw.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("sandbox_exec step %q: env must be a string-valued object", name)
+			}
 			step.env = make(map[string]string, len(envRaw))
 			for k, v := range envRaw {
-				step.env[k] = fmt.Sprintf("%v", v)
+				value, ok := v.(string)
+				if !ok || sandboxReservedEnvironment(k) || strings.ContainsAny(k, "=\x00\r\n") || k == "" {
+					return nil, fmt.Errorf("sandbox_exec step %q: invalid or reserved environment key", name)
+				}
+				step.env[k] = value
 			}
+		}
+
+		if raw, exists := cfg["work_dir"]; exists {
+			value, ok := raw.(string)
+			if !ok {
+				return nil, fmt.Errorf("sandbox_exec step %q: work_dir must be a literal absolute path", name)
+			}
+			step.workDir = value
+		}
+		if raw, exists := cfg["tmpfs"]; exists {
+			entries, ok := raw.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("sandbox_exec step %q: tmpfs must be a string-valued object", name)
+			}
+			step.tmpfs = make(map[string]string, len(entries))
+			for path, raw := range entries {
+				spec, ok := raw.(string)
+				if !ok {
+					return nil, fmt.Errorf("sandbox_exec step %q: tmpfs options must be strings", name)
+				}
+				step.tmpfs[path] = spec
+			}
+		}
+		if err := sandbox.ValidateFilesystem(step.buildSandboxConfig()); err != nil {
+			return nil, fmt.Errorf("sandbox_exec step %q: %w", name, err)
 		}
 
 		if mountsRaw, ok := cfg["mounts"].([]any); ok {
@@ -150,8 +207,27 @@ func NewSandboxExecStepFactory() StepFactory {
 func (s *SandboxExecStep) Name() string { return s.name }
 
 // Execute runs the configured command in a Docker sandbox.
-func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*StepResult, error) {
+func (s *SandboxExecStep) Execute(ctx context.Context, pc *PipelineContext) (*StepResult, error) {
+	if pc == nil {
+		pc = NewPipelineContext(nil, nil)
+	}
 	sbCfg := s.buildSandboxConfig()
+	command := make([]string, len(s.command))
+	for i, value := range s.command {
+		resolved, err := s.tmpl.Resolve(value, pc)
+		if err != nil || strings.ContainsRune(resolved, '\x00') {
+			return nil, fmt.Errorf("sandbox_exec step %q: invalid command template", s.name)
+		}
+		command[i] = resolved
+	}
+	sbCfg.Env = make(map[string]string, len(s.env))
+	for key, value := range s.env {
+		resolved, err := s.tmpl.Resolve(value, pc)
+		if err != nil || strings.ContainsRune(resolved, '\x00') {
+			return nil, fmt.Errorf("sandbox_exec step %q: invalid environment template", s.name)
+		}
+		sbCfg.Env[key] = resolved
+	}
 
 	sb, err := resolveSandboxRunner(ctx, s.app, s.execEnv, sbCfg, s.argoModule, s.provider)
 	if err != nil {
@@ -159,7 +235,7 @@ func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 	}
 	defer sb.Close()
 
-	result, err := sb.Exec(ctx, s.command)
+	result, err := sb.Exec(ctx, command)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox_exec step %q: execution failed: %w", s.name, err)
 	}
@@ -171,7 +247,7 @@ func (s *SandboxExecStep) Execute(ctx context.Context, _ *PipelineContext) (*Ste
 	}
 
 	if result.ExitCode != 0 && s.failOnError {
-		return &StepResult{Output: output, Stop: true}, nil
+		return nil, fmt.Errorf("sandbox_exec step %q: command exited nonzero (%d)", s.name, result.ExitCode)
 	}
 
 	return &StepResult{Output: output}, nil
@@ -203,6 +279,14 @@ func (s *SandboxExecStep) buildSandboxConfig() sandbox.SandboxConfig {
 	if len(s.mounts) > 0 {
 		cfg.Mounts = s.mounts
 	}
+	cfg.WorkDir = s.workDir
+	if len(s.tmpfs) != 0 {
+		cfg.Tmpfs = maps.Clone(cfg.Tmpfs)
+		if cfg.Tmpfs == nil {
+			cfg.Tmpfs = make(map[string]string)
+		}
+		maps.Copy(cfg.Tmpfs, s.tmpfs)
+	}
 
 	return cfg
 }
@@ -229,10 +313,24 @@ func parseMemoryLimit(s string) (int64, error) {
 		numStr = s[:len(s)-1]
 	}
 
-	var n int64
-	_, err := fmt.Sscanf(numStr, "%d", &n)
-	if err != nil {
+	n, err := strconv.ParseInt(numStr, 10, 64)
+	if err != nil || n <= 0 || n > math.MaxInt64/multiplier {
 		return 0, fmt.Errorf("invalid memory limit %q", s)
 	}
 	return n * multiplier, nil
+}
+
+func sandboxReservedEnvironment(name string) bool {
+	name = strings.ToUpper(name)
+	if strings.HasPrefix(name, "DOCKER_") || strings.HasPrefix(name, "WFCTL_") ||
+		strings.HasPrefix(name, "ACTIONS_") || strings.HasPrefix(name, "REGISTRY_PROPOSER_") {
+		return true
+	}
+	switch name {
+	case "GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PAT", "REGISTRY_TOKEN", "SSH_AUTH_SOCK",
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+		"GOOGLE_APPLICATION_CREDENTIALS", "AZURE_CLIENT_SECRET":
+		return true
+	}
+	return false
 }

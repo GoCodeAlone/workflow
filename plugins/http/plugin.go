@@ -166,6 +166,9 @@ func (p *HTTPPlugin) PipelineTriggerConfigWrappers() map[string]plugin.TriggerCo
 			if middlewares, ok := cfg["middlewares"]; ok {
 				route["middlewares"] = middlewares
 			}
+			if maxBodyBytes, ok := cfg["max_body_bytes"]; ok {
+				route["max_body_bytes"] = maxBodyBytes
+			}
 			if includeRawBody, ok := cfg["include_raw_body"]; ok {
 				route["include_raw_body"] = includeRawBody
 			} else if rawBody, ok := cfg["raw_body"]; ok {

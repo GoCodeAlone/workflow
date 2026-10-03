@@ -1,0 +1,36 @@
+modules: []
+pipelines:
+  selected:
+    steps:
+      - name: prepare
+        type: step.set
+        config:
+          values:
+            greeting: "{{ .pool_name }}"
+      - name: retry
+        type: step.retry_with_backoff
+        config:
+          max_retries: 1
+          initial_delay: 0s
+          max_delay: 0s
+          step:
+            name: work
+            type: step.record_fixture
+            config:
+              mode: composite-flaky
+              audit_path: "{{ .audit_path }}"
+              participant: "{{ index .pool 0 }}"
+              pool: "{{ .pool_name }}"
+              ordinal: "0"
+              action: retry
+      - name: result
+        type: step.set
+        config:
+          values:
+            source: retry-with-backoff
+            retries: "{{ .steps.retry.retry_attempts }}"
+            attempt: "{{ .steps.retry.attempt }}"
+            participant: "{{ .steps.retry.participant }}"
+            pool: "{{ .steps.retry.pool }}"
+            echo: "{{ .steps.retry.echo }}"
+            ready: "{{ .steps.retry.ready }}"
