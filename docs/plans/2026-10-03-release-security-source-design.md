@@ -1,6 +1,6 @@
 # Workflow Source Security Remediation
 
-**Status:** Approved under standing autonomous follow-up authority; review pending.
+**Status:** Approved; design review PASS with two proof refinements incorporated.
 **Baseline:** main `49e1803424f303f6f98cef51cc9ea2dee96c7d38`.
 **Authority:** independent source-only maintenance. Existing Signal scope unchanged.
 **Decision:** `decisions/0056-isolate-source-security-remediation.md`.
@@ -16,7 +16,8 @@ modifying protected CI authority, unrelated staged work, or release tags.
   compiler overrides and runnable minimum-version docs match 1.26.8.
 - S2: Patch the ten affected npm package families within existing compatible
   ranges, preserving unrelated lock resolutions and direct dependencies.
-  Add a real js-yaml merge-budget regression; run the UI suite/build.
+  Add a real js-yaml merge-budget regression and exercise the actual imported
+  `@gocodealone/workflow-editor/utils` `parseYaml`; run the UI suite/build.
 - S3: Lazily reuse only the immutable source-built record host (`.`, race),
   matching cwd, compiler and complete build environment. Changed inputs use
   the original uncached path. Explicit downloaded-binary selection/denial runs
@@ -29,8 +30,10 @@ modifying protected CI authority, unrelated staged work, or release tags.
   UI build/test and version-skew audit. New source must be lint-clean.
 - S5: Preserve CI/workflow/policytool bytes and staged contexts. Exact Go
   1.26.5 policytool reachability proof is required. Independently run supported
-  OSV v2.6.0 against source plus an isolated called-vulnerability control;
-  retain analyzed JSON. No scan suppression, ignores or clean-CI claim for the
+  OSV v2.6.0 against source plus an isolated called-vulnerability control,
+  using verified image index digest
+  `sha256:71ad04ab2f8798be47870f9b18817ad317c2f8f2f97aa6726ba10d5578bc174a`;
+  retain tool identity and analyzed JSON. No scan suppression, ignores or clean-CI claim for the
   old pinned main scanner. Source PR merge needs all required PR checks green.
 
 ## Alternatives
@@ -78,7 +81,7 @@ repository-token policy and concurrent v0.86.1 tag/run.
 | UI + js-yaml | runtime-integrated | actual installed parser regression, UI tests/build |
 | upstream OSV + Go loader + reporter | runtime-integrated | successful native analysis, preserved classification, outside-tree called-vulnerability control rejected |
 | existing CI policy | config-only | no byte changes; existing positive/mutation suite |
-| scanner CI rollout/fleet upgrade/Signal promotion | deferred or blocked | parent draft D6/owner clarification; existing Signal tasks remain open |
+| scanner CI rollout/fleet upgrade/Signal promotion | separate | user approved CI reconciliation; this source-only PR does not perform it; existing Signal tasks remain open |
 
 ## Assumptions And Self-Challenge
 
