@@ -32,7 +32,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Draft
+**Status:** Locked 2026-10-03T18:25:28Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
