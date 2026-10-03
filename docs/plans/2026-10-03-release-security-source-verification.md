@@ -39,18 +39,43 @@ installed-family checks PASS after restoration. No ecommerce-lock changes.
 Build chunk-size warning
 remains, not suppressed or refactored in this security boundary.
 
-## Remaining Gates
+## Final Source And Native Scanner
 
 Plain committed550c0f7a binaries all report exact VCS identity, unmodified source
 and Go1.26.8; server/wfctl link OTel1.45.0. Shipped Darwin/Linux/Windows import
 lists contain no OpenPGP. Actual credential-free server smoke returns the
 owned unpredictable identity, exits0 on SIGTERM and leaves no listener.
-The final committed head must retain that exact-head proof after the bounded
-UI-resolution/review-document changes; Go source/modules remain byte-identical
-to the cold-suite commit40d5d6e6.
-Native OSV2.6 complete production JSON/analysis is pending. Real native called,
-uncalled and restored OpenPGP control already proves reporter rejection; it is
-a labeled scanner control, not an application demo. No ignores/exceptions.
+Fresh plaincf28e5a4 four-artifact metadata also passes with exact revision,
+unmodified source/Go1.26.8/OTel1.45.0; owned server smoke returns HTTP200,
+loopback-only listener, clean SIGTERM0 and endpoint absence. Go source/modules
+remain byte-identical to cold-suite40d5d6e6. Final evidence-doc commits require
+only exact-head warm relink/readback, not a repeat cold compiler test.
+
+Original native production scan: OOM137 at7GiB after63.224s, no results or
+reporter, not accepted. Same550c0f7a paired resource trial with container-local
+GOMEMLIMIT=4GiB completes scanner0/reporter0. Final preserved-resolutioncf28e5a4
+full recursive scan completes scanner0/reporter0 in96s, no loading/analysis
+errors and no OOM. Image/entrypoint/analysis command unchanged; no exclusions,
+ignores, authentication/Go compiler override or repository policy changes.
+This local GC budget is not authorized CI configuration; policytool GO* env
+restriction remains unchanged.
+
+All14 committed Go modules are discovered. Raw JSON retains root/example
+x/crypto0.57.0 GO-2026-5932 with genuine called:false. Other12 modules have no
+reported affected groups and therefore no upstream default native-analysis
+trigger; do not label them fourteen govulncheck invocations. Exact Go1.26.8
+shipped-code and Go1.26.5 policytool proofs independently retain stdlib/module
+classification. Current-run source/evidence custody, image/entrypoint, all14
+discovery, classification/no-error and reporter assertions pass. A throwaway
+collector's entrypoint-shape assertion was corrected from actual Docker/image
+readback; raw scanner output was never changed.
+
+Same corrected environment detects the existing real OpenPGP API call as
+called:true; scanner1 and unchanged --fail-on-vuln=true reporter1 are expected
+rejection, without analysis errors. Original no-import reversal/restored-called
+evidence retained. This is a labeled scanner control, not an application demo.
+
+## Remaining Integration Gates
 Independent final UI/whole-boundary review SHIP-IT, no Critical/Important
 findings; the sole Minor unnecessary-resolution finding is addressed above.
 See the committed code-review disposition. Exact-head PR/CI, merge and retro

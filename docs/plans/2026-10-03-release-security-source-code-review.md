@@ -17,7 +17,8 @@ lead reran UI verification after the only finding's resolution.
 | M1 validation | Clean npmci0; full141 tests; tsc/Vite0; focused lint0; ten-family installed audit0; manifest/root-lock unchanged |
 
 Disposition: SHIP-IT for source review, not release authorization. Final
-exact-head artifacts/native production scan/PR checks/merge remain mandatory.
+cf28e5a4 artifacts/native production scan subsequently pass; exact-head
+PR checks/merge remain mandatory.
 No new design or broad review cycle warranted for M1.
 
 ## Bug Classes

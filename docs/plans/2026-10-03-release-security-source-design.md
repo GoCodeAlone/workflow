@@ -165,3 +165,40 @@ full CI command: 152 packages, wfctl 519.387s below the unchanged 600s limit,
 run 19:46:25-19:59:01 UTC. Go 1.26.8 real strict live Docker tests also pass
 (36.661s), with journal/container cleanup. Explicitly source evidence, not
 downloaded-release proof. Scope: no manifest/task/PR or protected-file change.
+
+### Backport 2026-10-03: Native Scanner Memory Custody
+
+Cause: digest-pinned OSV2.6 unchanged entrypoint discovered all14 Go modules,
+then Docker killed the scanner after63.224s: exit137/OOMKilled=true, 7GiB
+container cap, no results JSON and no reporter execution. Discovery alone is
+not successful native analysis. Docker Desktop has8GiB total; another owner's
+container must remain untouched. No production-code defect or clean scan is
+inferred from this failed local verification environment.
+
+Hypothesis: a container-local `GOMEMLIMIT=4GiB` soft GC budget can reduce the
+scanner's peak memory without changing analyses. This is ordinary runtime
+resource tuning, not a Go/compiler/authentication or advisory exception. It
+does not authorize CI adoption: the protected policytool's GO* env restriction
+remains unchanged. Official [runtime docs](https://pkg.go.dev/runtime#hdr-Environment_Variables)
+define a soft Go-managed-memory bound, not a hard shared container bound.
+
+Correction: one paired resource trial on the same frozen550c0f7a source/image,
+platform, entrypoint, recursive command, container limits and analysis defaults;
+only GOMEMLIMIT changes. Fresh outside-source evidence, exact OOM receipt and
+raw logs retained. If it completes, verify final preserved-resolution source
+separately under the corrected environment. Require all14 module discovery and
+native-analysis coverage, current valid JSON, no loading/analysis/OOM/timeout
+errors, raw classification and unchanged reporter acceptance. Missing analysis
+stays unknown. Preserve the genuine called-control reporter rejection. Another
+incomplete trial remains blocking; no automatic retry loop, ignores, disabled
+analysis or deadline extension. This external resource failure needs no new
+product/spec invariant. Scope: no manifest/task/PR or protected-file change.
+
+Trial disposition: paired550 source scanner0/reporter0; final preserved-source
+cf28e5a4 scanner0/reporter0, no loading/analysis errors or OOM. Raw root/example
+OpenPGP findings remain called:false; same GC-budget real-call control yields
+called:true and reporter1. Upstream v2.6 default calls native analysis only for
+sources with affected dependency groups. Classification covers all14 discovered
+modules, distinguishing the12 without reported affected groups from the2 with
+native results; no invented analysis receipt. Exact native compiler proofs
+remain separate, including protected policytool stdlib module-only findings.
