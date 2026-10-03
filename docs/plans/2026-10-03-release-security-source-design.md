@@ -134,3 +134,18 @@ then resolve it through existing Workflow `^0.2.0` range. Preserve current
 Workflow manifest/PR grouping; no parser mock, UI shim, externalization shortcut
 or weakened assertion. The adjacent owning-library fix has its own design and
 PR, not an unrecorded edit in this source-only manifest.
+
+### Backport 2026-10-03: Match CI Filesystem Privilege
+
+Cause: the first local container used a read-only checkout/tmpfs and was not a
+valid CI environment. Its writable replacement ran as root: wfctl finished in
+542.027s, but root bypassed the intentional read-only lockfile denial and could
+create `/nonexistent/path`, contaminating three subsequent missing-path tests.
+Neither run is full-suite GREEN or a reason to modify tests or their deadlines.
+
+Correction: cold-cache proof uses a fresh complete plain checkout, writable
+owned source copy and a non-root CI user, with disk-backed compiler cache.
+Verify exact HEAD/clean tracked bytes before execution. Preserve the unchanged
+`go test -v -race -coverprofile=coverage.out ./...` command and 600s package
+timeout. Classify environmental failures separately from code regressions; no
+retry without a falsifiable corrected cause. Scope: no manifest/task/PR change.
