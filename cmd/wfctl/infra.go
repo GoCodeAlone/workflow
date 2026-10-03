@@ -316,7 +316,7 @@ func runInfraPlan(args []string) error {
 		if cfgLoadErr != nil {
 			return fmt.Errorf("load config for plan-time resolver: %w", cfgLoadErr)
 		}
-		desired, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
+		_, resolutionDiags, err = resolveSpecsAgainstState(desired, current, wfCfgForResolver, envName)
 		if err != nil {
 			return fmt.Errorf("resolve specs against state: %w", err)
 		}
@@ -1562,11 +1562,8 @@ func runInfraApply(args []string) error {
 				return inputsnapshot.NewStaleError(drift)
 			}
 		}
-		// Mirror the plan-time resolver: apply resolveSpecsAgainstState before
-		// hashing so that DesiredHash is computed on post-resolution specs, matching
-		// what runInfraPlan recorded in plan.DesiredHash. Without this step, any ref
-		// that resolved at plan time would cause a currentHash != plan.DesiredHash
-		// mismatch on every --plan apply.
+		// Stale checks hash the same declarative inputs recorded at plan time.
+		// Resolving here would make credential bytes part of the hash contract.
 		{
 			currentState, stateErr := loadCurrentState(cfgFile, envName)
 			if stateErr != nil {
@@ -1577,14 +1574,6 @@ func runInfraApply(args []string) error {
 			}
 			desired = filterSpecsByInclude(desired, planIncludeSet)
 			currentState = filterStatesByInclude(currentState, planIncludeSet)
-			planApplyCfg, cfgErr := config.LoadFromFile(cfgFile)
-			if cfgErr != nil {
-				return fmt.Errorf("load config for stale-check: %w", cfgErr)
-			}
-			desired, _, err = resolveSpecsAgainstState(desired, currentState, planApplyCfg, envName)
-			if err != nil {
-				return fmt.Errorf("resolve specs for stale-check: %w", err)
-			}
 		}
 		currentHash := desiredStateHash(desired)
 		if plan.DesiredHash != currentHash {

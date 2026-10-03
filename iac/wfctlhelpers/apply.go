@@ -54,10 +54,12 @@ import (
 	"log"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/GoCodeAlone/workflow/iac/inputsnapshot"
 	"github.com/GoCodeAlone/workflow/iac/jitsubst"
+	"github.com/GoCodeAlone/workflow/iac/sensitiveinputs"
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
@@ -89,6 +91,11 @@ import (
 // successfully mutates cloud-side state. Hooks let wfctl persist state at the
 // action boundary instead of waiting for the whole plan to finish.
 type ApplyPlanHooks struct {
+	// CurrentState seeds references to unchanged siblings that have no action.
+	// It is an in-memory dispatch source, never embedded in the plan.
+	CurrentState []interfaces.ResourceState
+	// ResolveSecret retrieves a secret key only at the dispatch boundary.
+	ResolveSecret func(context.Context, string) (string, error)
 	// OnBeforeAction fires PRE-DISPATCH for every PlanAction, after the
 	// per-iteration ctx.Err() check but before JIT substitution / driver
 	// resolution / cloud-side mutation. The intended use case is policy /
@@ -174,6 +181,15 @@ func applyPlanWithEnvProviderAndHooks(
 	applyTimeEnv func(string) (string, bool),
 	hooks ApplyPlanHooks,
 ) (result *interfaces.ApplyResult, err error) {
+	redactDiagnostic := func(message string) string { return message }
+	defer func() {
+		if result != nil {
+			for i := range result.Errors {
+				result.Errors[i].Error = redactDiagnostic(result.Errors[i].Error)
+			}
+		}
+		err = redactApplyError(err, redactDiagnostic)
+	}()
 	// loopReached is set to true immediately before the per-action loop
 	// opens (below). The deferred OnPlanComplete closure short-circuits
 	// when loopReached=false so pre-loop preflight failures skip finalize
@@ -212,15 +228,15 @@ func applyPlanWithEnvProviderAndHooks(
 		if hookErr != nil {
 			// Append per-driver-attribution entry so callers iterating
 			// result.Errors see the finalize-attributed failure
-			// distinctly from per-action driver errors. Pass the raw
-			// hookErr.Error() — the structured Resource="<plan-finalize>"
+			// distinctly from per-action driver errors. Mask declared runtime
+			// values; the structured Resource="<plan-finalize>"
 			// + Action="finalize" fields already carry the attribution;
 			// a "plan finalize:" string prefix here would double-attribute
 			// when callers format as "<Resource>/<Action>: <Error>".
 			result.Errors = append(result.Errors, interfaces.ActionError{
 				Resource: "<plan-finalize>",
 				Action:   "finalize",
-				Error:    hookErr.Error(),
+				Error:    redactDiagnostic(hookErr.Error()),
 			})
 			// Outer err carries the "plan finalize:" prefix because the
 			// outer-err caller path lacks the structured Resource/Action
@@ -245,7 +261,7 @@ func applyPlanWithEnvProviderAndHooks(
 		defer func() {
 			if r := recover(); r != nil {
 				result.InputDriftReport = nil
-				log.Printf("warning: input-drift postcondition panicked: %v", r)
+				log.Printf("warning: input-drift postcondition panicked: %s", redactDiagnostic(fmt.Sprint(r)))
 			}
 		}()
 		// Resolve the apply-time env provider lazily so the production
@@ -275,6 +291,12 @@ func applyPlanWithEnvProviderAndHooks(
 	// new outputs are written per-resource on success and become visible
 	// to later actions in the same plan).
 	syncedOutputs := buildInitialSyncedOutputs(plan.Actions)
+	for i := range hooks.CurrentState {
+		state := &hooks.CurrentState[i]
+		if _, exists := syncedOutputs[state.Name]; !exists {
+			syncedOutputs[state.Name] = flattenStateOutputs(state)
+		}
+	}
 
 	if deleteHookActive {
 		if err := preflightProviderOwnedReplaceWithDeleteHooks(p, plan); err != nil {
@@ -317,7 +339,7 @@ func applyPlanWithEnvProviderAndHooks(
 				}
 				errStr := ""
 				if iterErr != nil {
-					errStr = iterErr.Error()
+					errStr = redactDiagnostic(iterErr.Error())
 				}
 				outcome := interfaces.ActionOutcome{
 					//nolint:gosec // ActionIndex is loop counter bound by len(plan.Actions); G115 false positive.
@@ -330,7 +352,7 @@ func applyPlanWithEnvProviderAndHooks(
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								log.Printf("warning: OnActionComplete panicked for %s/%s: %v", action.Resource.Type, action.Resource.Name, r)
+								log.Printf("warning: OnActionComplete panicked for %s/%s: %s", action.Resource.Type, action.Resource.Name, redactDiagnostic(fmt.Sprint(r)))
 							}
 						}()
 						hooks.OnActionComplete(ctx, action, outcome)
@@ -367,6 +389,35 @@ func applyPlanWithEnvProviderAndHooks(
 					return
 				}
 			}
+			d, err := p.ResourceDriver(action.Resource.Type)
+			if err != nil {
+				result.Errors = append(result.Errors, interfaces.ActionError{
+					Resource: action.Resource.Name, Action: action.Action, Error: fmt.Sprintf("resolve driver: %v", err),
+				})
+				iterErr = fmt.Errorf("resolve driver: %w", err)
+				iterStatus = statusForPreDispatchSkip()
+				return
+			}
+			var sensitivePaths []string
+			if declarer, ok := d.(interfaces.ResourceSensitiveInputDeclarer); ok {
+				sensitivePaths, err = declarer.SensitiveInputPaths(ctx)
+				if errors.Is(err, interfaces.ErrProviderMethodUnimplemented) {
+					sensitivePaths, err = nil, nil
+				}
+				if err != nil {
+					result.Errors = append(result.Errors, interfaces.ActionError{
+						Resource: action.Resource.Name, Action: action.Action, Error: fmt.Sprintf("sensitive input discovery: %v", err),
+					})
+					iterErr = fmt.Errorf("sensitive input discovery: %w", err)
+					iterStatus = statusForPreDispatchSkip()
+					return
+				}
+			}
+			if err := sensitiveinputs.ValidateReferences(action.Resource.Config, sensitivePaths); err != nil {
+				result.Errors = append(result.Errors, interfaces.ActionError{Resource: action.Resource.Name, Action: action.Action, Error: err.Error()})
+				iterErr, iterStatus = err, statusForPreDispatchSkip()
+				return
+			}
 			// Per-action JIT substitution — resolve ${VAR} / ${MODULE.field}
 			// / ${MODULE.id} in action.Resource.Config against
 			// result.ReplaceIDMap (this-apply Replace ProviderIDs) and
@@ -378,7 +429,11 @@ func applyPlanWithEnvProviderAndHooks(
 			// production env source; nil-safe inside ResolveSpec — refs that
 			// only need replaceIDMap / syncedOutputs still resolve. Phase 2.3
 			// (#698): JIT-fail is pre-dispatch — no driver call yet.
-			resolved, err := jitsubst.ResolveSpec(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv)
+			var secretLookup func(string) (string, error)
+			if hooks.ResolveSecret != nil {
+				secretLookup = func(key string) (string, error) { return hooks.ResolveSecret(ctx, key) }
+			}
+			resolved, err := jitsubst.ResolveSpecWithSecretLookup(action.Resource, result.ReplaceIDMap, syncedOutputs, os.LookupEnv, secretLookup)
 			if err != nil {
 				result.Errors = append(result.Errors, interfaces.ActionError{
 					Resource: action.Resource.Name,
@@ -389,27 +444,28 @@ func applyPlanWithEnvProviderAndHooks(
 				iterStatus = statusForPreDispatchSkip()
 				return
 			}
-			action.Resource = resolved
-			// Phase 2.3 (#698): driver-resolve-fail is pre-dispatch — no
-			// driver method has been called yet.
-			d, err := p.ResourceDriver(action.Resource.Type)
+			resolved.DependsOn = slices.Clone(action.Resource.DependsOn)
+			if resolved.Hints != nil {
+				hints := *resolved.Hints
+				resolved.Hints = &hints
+			}
+			runtimeAction := action
+			runtimeAction.Resource = resolved
+			runtimeRedactor, err := sensitiveinputs.DiagnosticRedactor(resolved.Config, sensitivePaths)
 			if err != nil {
-				result.Errors = append(result.Errors, interfaces.ActionError{
-					Resource: action.Resource.Name,
-					Action:   action.Action,
-					Error:    fmt.Sprintf("resolve driver: %v", err),
-				})
-				iterErr = fmt.Errorf("resolve driver: %v", err)
-				iterStatus = statusForPreDispatchSkip()
+				result.Errors = append(result.Errors, interfaces.ActionError{Resource: action.Resource.Name, Action: action.Action, Error: err.Error()})
+				iterErr, iterStatus = err, statusForPreDispatchSkip()
 				return
 			}
+			priorRedactor := redactDiagnostic
+			redactDiagnostic = func(message string) string { return runtimeRedactor(priorRedactor(message)) }
 			// Capture result.Resources length pre-dispatch so we can identify
 			// the entry (if any) that this action appended and propagate its
 			// outputs into syncedOutputs for subsequent actions. doCreate /
 			// doUpdate / doReplace each append on success; doDelete does not.
 			preLen := len(result.Resources)
 			actionHooks := hooks
-			actionHooks.OnResourceDeleted = func(ctx context.Context, action interfaces.PlanAction) error {
+			actionHooks.OnResourceDeleted = func(ctx context.Context, _ interfaces.PlanAction) error {
 				if hooks.OnResourceDeleted != nil {
 					if err := hooks.OnResourceDeleted(ctx, action); err != nil {
 						return err
@@ -418,7 +474,7 @@ func applyPlanWithEnvProviderAndHooks(
 				delete(syncedOutputs, action.Resource.Name)
 				return nil
 			}
-			if err := dispatchAction(ctx, d, action, result, actionHooks, deleteHookActive); err != nil {
+			if err := dispatchAction(ctx, d, runtimeAction, result, actionHooks, deleteHookActive); err != nil {
 				var hookErr hookDispatchError
 				if errors.As(err, &hookErr) {
 					// Phase 2.3 (#698): hookDispatchError wraps a hook
@@ -436,7 +492,7 @@ func applyPlanWithEnvProviderAndHooks(
 				result.Errors = append(result.Errors, interfaces.ActionError{
 					Resource: action.Resource.Name,
 					Action:   action.Action,
-					Error:    err.Error(),
+					Error:    redactDiagnostic(err.Error()),
 				})
 				iterErr = err
 				iterStatus = statusForDispatchError(action.Action)
@@ -492,6 +548,25 @@ func applyPlanWithEnvProviderAndHooks(
 	}
 
 	return result, nil
+}
+
+type redactedApplyError struct {
+	cause   error
+	message string
+}
+
+func (e redactedApplyError) Error() string { return e.message }
+func (e redactedApplyError) Unwrap() error { return e.cause }
+
+func redactApplyError(err error, redact func(string) string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	if safe := redact(message); safe != message {
+		return redactedApplyError{cause: err, message: safe}
+	}
+	return err
 }
 
 // Phase 2.3 (workflow#698): replaced single mapDispatchErrToStatus with

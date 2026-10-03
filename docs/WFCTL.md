@@ -2124,6 +2124,14 @@ Provider plugins map ownership to their native mechanism, such as `managed-by:<o
 
 Reconcile cloud infrastructure to match the desired state declared in the config. Computes a diff plan via each `iac.provider` and dispatches creates/updates/replaces/deletes through the loaded provider plugin. State is persisted after every successful action so the next run sees the cloud-truth.
 
+Provider-declared sensitive input paths must contain references, not literal
+credentials. Plans, hashes, persistence hooks, and applied config retain those
+references. Only the driver receives a deep runtime-resolved copy, including
+`secret://` and routed `secret_ref://` values from the configured secret store.
+Known resolved sensitive values are masked in control-plane diagnostics, not in
+provider outputs or consumer artifacts. Regenerate older saved plans whose
+hashes were based on resolved values before applying them with this version.
+
 ```
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]

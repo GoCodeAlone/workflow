@@ -59,6 +59,16 @@ func resolveSpecsAgainstState(
 	cfg *config.WorkflowConfig,
 	envName string,
 ) ([]interfaces.ResourceSpec, []ResolutionDiagnostic, error) {
+	return resolveSpecsAgainstStatePreserving(specs, current, cfg, envName, nil)
+}
+
+func resolveSpecsAgainstStatePreserving(
+	specs []interfaces.ResourceSpec,
+	current []interfaces.ResourceState,
+	cfg *config.WorkflowConfig,
+	envName string,
+	preserved map[string][]string,
+) ([]interfaces.ResourceSpec, []ResolutionDiagnostic, error) {
 	syncedOutputs := buildSyncedOutputsFromState(current)
 	resolvedSecrets := buildResolvedSecretsFromState(cfg, current, envName)
 	runtimeOnlyKeys := buildRuntimeOnlySecretKeys(cfg)
@@ -67,7 +77,7 @@ func resolveSpecsAgainstState(
 	out := make([]interfaces.ResourceSpec, len(specs))
 	var diags []ResolutionDiagnostic
 	for i, spec := range specs {
-		resolved, unresolved, err := jitsubst.TryResolveSpec(spec, nil, syncedOutputs, envLookup)
+		resolved, unresolved, err := jitsubst.TryResolveSpecPreservingPaths(spec, nil, syncedOutputs, envLookup, preserved[spec.Name])
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve %q: %w", spec.Name, err)
 		}

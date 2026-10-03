@@ -318,14 +318,6 @@ func (p *readBackedFailingApplyProvider) installAsV2Dispatch(t testing.TB) {
 	t.Cleanup(func() { applyV2ApplyPlanWithHooksFn = orig })
 }
 
-type noDriverApplyProvider struct {
-	applyCapture
-}
-
-func (p *noDriverApplyProvider) ResourceDriver(resourceType string) (interfaces.ResourceDriver, error) {
-	return nil, fmt.Errorf("no driver for %s", resourceType)
-}
-
 type waitHealthDriver struct {
 	readDriver
 	results  []interfaces.HealthResult
@@ -1111,7 +1103,7 @@ func TestAdoptExistingResources_AdoptionRoutingSaveFailureCleansSecretsOnly(t *t
 	store := &fakeStateStore{saveErr: errors.New("state unavailable")}
 	secretsProvider := newEnvTestProvider()
 
-	_, err := adoptExistingResources(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, store, secretsProvider, map[string]string{})
+	_, err := adoptExistingResources(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, nil, store, secretsProvider, map[string]string{})
 	if err == nil {
 		t.Fatalf("adoptExistingResources succeeded, want state persistence error")
 	}
@@ -1459,7 +1451,7 @@ func TestApplyWithProvider_SkipsAdoptionWhenAppDriverHasNoLocator(t *testing.T) 
 		Type:   "infra.container_service",
 		Config: map[string]any{"image": "example/app:latest"},
 	}
-	provider := &noDriverApplyProvider{}
+	provider := &readBackedProvider{driver: &stubSensitiveDriver{}}
 	provider.installAsV2Dispatch(t)
 
 	err := applyWithProviderAndStore(t.Context(), provider, "digitalocean", []interfaces.ResourceSpec{spec}, nil, &fakeStateStore{}, io.Discard, "", "", nil)

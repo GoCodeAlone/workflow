@@ -122,8 +122,10 @@ type PlanAction struct {
 	Current  *ResourceState `json:"current,omitempty"`
 	Changes  []FieldChange  `json:"changes,omitempty"`
 
-	// ResolvedConfigHash is the SHA-256 of POST-substitution Resource.Config,
-	// computed via platform.ConfigHash. Encoded as lower-case hex (no
+	// ResolvedConfigHash is the SHA-256 of the action's Resource.Config,
+	// computed via platform.ConfigHash. wfctl preserves declarative references
+	// here; runtime-resolved driver copies are never hashed into persisted plans.
+	// The legacy field/wire name is retained for compatibility. Lower-case hex (no
 	// "sha256:" prefix); empty string when the config map is empty
 	// (platform.ConfigHash short-circuit). The field uses `omitempty`, so the
 	// empty-string case is ABSENT from plan.json — consumers should treat

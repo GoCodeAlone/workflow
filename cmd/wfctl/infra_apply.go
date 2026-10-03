@@ -209,15 +209,6 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) (map[string
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 
-	// Plan-time JIT resolution (PR-1): substitute ${MODULE.field} and
-	// ${SECRET} refs against current state so driver.Diff sees real
-	// values instead of literal templates. Apply does not print the
-	// diagnostics — they're plan-output sugar only.
-	infraSpecs, _, err = resolveSpecsAgainstState(infraSpecs, current, cfg, envName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve specs against state: %w", err)
-	}
-
 	// Build a lookup table of iac.provider module name → (providerType, providerCfg).
 	// Also track which providers are explicitly disabled for this env so we can
 	// emit a precise error if an infra module references one.
@@ -415,18 +406,28 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// group; applyInfraModules does that before invoking this helper.
 
 	var err error
-	current, err = adoptExistingResources(ctx, provider, providerType, specs, current, store, secretsProvider, hydratedOut)
-	if err != nil {
-		return err
-	}
-
 	// Compute the diff plan via the loaded provider so platform.ComputePlan
 	// can dispatch ResourceDriver.Diff over the live plugin process for
 	// honest Replace-action classification (T3.6e). Indirected through
 	// computeInfraPlan so tests can spy on the provider arg without
 	// standing up a real gRPC plugin (var-seam pattern matches
 	// resolveIaCProvider/loadIaCPlugin in deploy_providers.go).
-	plan, err := computeInfraPlan(ctx, provider, specs, current)
+	var planConfig *config.WorkflowConfig
+	if cfgFile != "" {
+		planConfig, err = config.LoadFromFile(cfgFile)
+		if err != nil {
+			return fmt.Errorf("load planning config: %w", err)
+		}
+	}
+	planning, err := prepareDeclarativePlanningSpecs(ctx, provider, specs, current, planConfig, envName)
+	if err != nil {
+		return fmt.Errorf("prepare planning inputs: %w", err)
+	}
+	current, err = adoptExistingResources(ctx, provider, providerType, specs, planning, current, store, secretsProvider, hydratedOut)
+	if err != nil {
+		return err
+	}
+	plan, err := computeDeclarativeInfraPlan(ctx, provider, specs, current, planConfig, envName)
 	if err != nil {
 		return fmt.Errorf("compute plan: %w", err)
 	}
@@ -459,6 +460,15 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// goes through wfctlhelpers.ApplyPlanWithHooks (Replace + drift
 	// postcondition + IaCProviderFinalizer fan-out).
 	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	// Reconciliation remains provider-scoped, but references may point at an
+	// unchanged or just-applied resource owned by another provider group.
+	hooks.CurrentState, err = store.ListResources(ctx)
+	if err != nil {
+		return fmt.Errorf("load reference state: %w", err)
+	}
+	if isNoopStateStore(store) {
+		hooks.CurrentState = current
+	}
 	wireApplyProgressIntoHooks(&hooks, plan.Actions)
 	wireOwnershipGateIntoHooks(&hooks, provider)
 	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
@@ -662,6 +672,15 @@ func statePersistenceHooks(
 	hydratedOut map[string]string,
 ) wfctlhelpers.ApplyPlanHooks {
 	return wfctlhelpers.ApplyPlanHooks{
+		ResolveSecret: func(ctx context.Context, key string) (string, error) {
+			if value, ok := hydratedOut[key]; ok {
+				return value, nil
+			}
+			if secretsProvider == nil {
+				return "", fmt.Errorf("%w: no secrets provider configured", interfaces.ErrValidation)
+			}
+			return secretsProvider.Get(ctx, key)
+		},
 		OnResourceApplied: func(ctx context.Context, driver interfaces.ResourceDriver, action interfaces.PlanAction, out interfaces.ResourceOutput) error {
 			hyd, persistErr := persistAppliedResourceOutput(ctx, store, secretsProvider, provider, providerType, driver, action, out)
 			if persistErr != nil {
@@ -817,7 +836,7 @@ func normalizeAppliedOutputIdentity(spec interfaces.ResourceSpec, out interfaces
 	return out, nil
 }
 
-func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, secretsProvider secrets.Provider, hydratedOut map[string]string) ([]interfaces.ResourceState, error) {
+func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider, providerType string, specs, planning []interfaces.ResourceSpec, current []interfaces.ResourceState, store infraStateStore, secretsProvider secrets.Provider, hydratedOut map[string]string) ([]interfaces.ResourceState, error) {
 	if len(specs) == 0 {
 		return current, nil
 	}
@@ -841,6 +860,10 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 	}
 
 	drivers := make(map[string]interfaces.ResourceDriver)
+	planningByName := make(map[string]interfaces.ResourceSpec, len(planning))
+	for _, spec := range planning {
+		planningByName[spec.Name] = spec
+	}
 	for _, spec := range specs {
 		if _, exists := currentByName[spec.Name]; exists {
 			continue
@@ -864,7 +887,11 @@ func adoptExistingResources(ctx context.Context, provider interfaces.IaCProvider
 			}
 			drivers[spec.Type] = driver
 		}
-		ref, adoptable, err := adoptionRefForSpec(driver, spec)
+		adoptionSpec := spec
+		if prepared, ok := planningByName[spec.Name]; ok {
+			adoptionSpec = prepared
+		}
+		ref, adoptable, err := adoptionRefForSpec(driver, adoptionSpec)
 		if err != nil {
 			return nil, err
 		}
@@ -1628,6 +1655,11 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
 	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	currentState, stateErr := store.ListResources(ctx)
+	if stateErr != nil {
+		return fmt.Errorf("load state for runtime references: %w", stateErr)
+	}
+	hooks.CurrentState = currentState
 	wireApplyProgressIntoHooks(&hooks, plan.Actions)
 	wireOwnershipGateIntoHooks(&hooks, provider)
 	result, err := applyV2ApplyPlanWithHooksFn(ctx, provider, &plan, hooks)
