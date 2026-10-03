@@ -149,3 +149,19 @@ Verify exact HEAD/clean tracked bytes before execution. Preserve the unchanged
 `go test -v -race -coverprofile=coverage.out ./...` command and 600s package
 timeout. Classify environmental failures separately from code regressions; no
 retry without a falsifiable corrected cause. Scope: no manifest/task/PR change.
+
+### Backport 2026-10-03: Reproduce CI Init/Reaping
+
+Cause: non-root `runuser` as container PID 1 does not reap adopted helper
+orphans; inherited-FD/cleanup tests saw surviving PID identities with no active
+group. Matched control reproduces FAIL in 4.318s and observes PID-1-owned
+zombies. A shell PID 1 can itself reap, so a superficially similar container
+is not the negative control. No production defect was inferred from either.
+
+Correction/proof: same source/user/control with Docker `--init` passes the
+inherited-FD and seven-case crash matrix (83.503s). Fresh disk compiler cache,
+non-root user, normal init and clean plain source `40d5d6e6` pass the exact
+full CI command: 152 packages, wfctl 519.387s below the unchanged 600s limit,
+run 19:46:25-19:59:01 UTC. Go 1.26.8 real strict live Docker tests also pass
+(36.661s), with journal/container cleanup. Explicitly source evidence, not
+downloaded-release proof. Scope: no manifest/task/PR or protected-file change.
