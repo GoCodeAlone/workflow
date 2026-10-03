@@ -920,6 +920,9 @@ message ResourceUpdateRequest {
   string resource_type = 1;
   ResourceRef ref = 2;
   ResourceSpec spec = 3;
+  // Authoritative persisted state loaded at update dispatch, never a saved
+  // plan's Current or a prior Diff cache. Absent for legacy Update callers.
+  ResourceState prior_state = 4;
 }
 message ResourceUpdateResponse {
   ResourceOutput output = 1;

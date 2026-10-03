@@ -5,6 +5,19 @@ import (
 	"strings"
 )
 
+// ValidateUpdatePriorState binds an update to the same resource incarnation.
+// Diagnostics intentionally omit config, outputs, and provider identifiers.
+func ValidateUpdatePriorState(ref ResourceRef, spec ResourceSpec, prior *ResourceState) error {
+	if prior == nil {
+		return fmt.Errorf("%w: update requires persisted prior state", ErrValidation)
+	}
+	if strings.TrimSpace(ref.Name) == "" || strings.TrimSpace(ref.Type) == "" || strings.TrimSpace(ref.ProviderID) == "" ||
+		ref.Name != spec.Name || ref.Type != spec.Type || prior.Name != ref.Name || prior.Type != ref.Type || prior.ProviderID != ref.ProviderID {
+		return fmt.Errorf("%w: update prior state does not match resource identity", ErrValidation)
+	}
+	return nil
+}
+
 const (
 	JobKindPreDeploy    = "PRE_DEPLOY"
 	JobKindPostDeploy   = "POST_DEPLOY"

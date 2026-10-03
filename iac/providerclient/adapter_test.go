@@ -20,6 +20,40 @@ import (
 // Compile-time guard: *Adapter must satisfy interfaces.IaCProvider.
 var _ interfaces.IaCProvider = (*providerclient.Adapter)(nil)
 
+func TestAdapter_UpdateWithState_OptionalContract(t *testing.T) {
+	srv := grpc.NewServer()
+	server := &fakeResourceDriverServer{}
+	pb.RegisterResourceDriverServer(srv, server)
+	adapter := providerclient.New(startFakeServer(t, srv), map[string]bool{providerclient.IaCServiceResourceDriver: true})
+	driver, err := adapter.ResourceDriver("infra.fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updater, ok := driver.(interfaces.ResourceStateUpdater)
+	if !ok {
+		t.Fatal("providerclient driver omits the optional state-aware update contract")
+	}
+	prior := &interfaces.ResourceState{Name: "fixture", Type: "infra.fixture", ProviderID: "fixture-id", Outputs: map[string]any{"rotation_generation": float64(7)}}
+	_, err = updater.UpdateWithState(t.Context(), interfaces.ResourceRef{Name: prior.Name, Type: prior.Type, ProviderID: prior.ProviderID}, interfaces.ResourceSpec{Name: prior.Name, Type: prior.Type}, prior)
+	if err != nil || server.lastUpdateReq == nil {
+		t.Fatalf("state-aware Update RPC failed: %v", err)
+	}
+	state := server.lastUpdateReq.GetPriorState()
+	var outputs map[string]any
+	if state == nil || json.Unmarshal(state.GetOutputsJson(), &outputs) != nil || outputs["rotation_generation"] != float64(7) || state.GetProviderId() != prior.ProviderID || state.GetName() != prior.Name || state.GetType() != prior.Type {
+		t.Fatal("Update RPC discarded prior state")
+	}
+	server.lastUpdateReq = nil
+	wrong := *prior
+	wrong.ProviderID = "other-resource"
+	if _, err := updater.UpdateWithState(t.Context(), interfaces.ResourceRef{Name: prior.Name, Type: prior.Type, ProviderID: prior.ProviderID}, interfaces.ResourceSpec{Name: prior.Name, Type: prior.Type}, &wrong); !errors.Is(err, interfaces.ErrValidation) || server.lastUpdateReq != nil {
+		t.Fatal("mismatched state reached the providerclient Update RPC")
+	}
+	if _, err := driver.Update(t.Context(), interfaces.ResourceRef{Name: prior.Name, Type: prior.Type, ProviderID: prior.ProviderID}, interfaces.ResourceSpec{Name: prior.Name, Type: prior.Type}); err != nil || server.lastUpdateReq == nil || server.lastUpdateReq.GetPriorState() != nil {
+		t.Fatal("providerclient legacy Update did not preserve absent-state RPC")
+	}
+}
+
 // *Adapter must NOT unconditionally satisfy interfaces.IaCProviderRegionLister —
 // that interface is gated behind the RegionListerProvider accessor. The
 // negative assertion is enforced by TestAdapter_RegionLister_Unadvertised below

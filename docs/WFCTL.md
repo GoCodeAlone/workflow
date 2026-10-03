@@ -2124,6 +2124,26 @@ Provider plugins map ownership to their native mechanism, such as `managed-by:<o
 
 Reconcile cloud infrastructure to match the desired state declared in the config. Computes a diff plan via each `iac.provider` and dispatches creates/updates/replaces/deletes through the loaded provider plugin. State is persisted after every successful action so the next run sees the cloud-truth.
 
+State-aware resource updates reread the configured state backend at dispatch
+time, including when `--plan` skips `ComputePlan`. Neither the saved plan's
+`Current` record nor an earlier `Diff` supplies authoritative update state.
+Missing, ambiguous, or mismatched resource identity prevents the update before
+provider mutation. Persisted config and outputs remain reference-only; this
+does not persist or reconstruct credential values.
+
+Plugin authors can opt into `interfaces.ResourceStateUpdater.UpdateWithState`
+without changing the existing `ResourceDriver.Update` interface. The typed
+Update RPC carries additive `prior_state`; both wfctl and the reusable
+providerclient adapter support it. The SDK detects `ResourceStateUpdater` on
+the typed provider service and dispatches that method after identity validation.
+Its other RPC methods are unchanged. Legacy providers retain their original
+Update dispatch. A mixed provider's native updater may receive nil state from
+a legacy RPC and delegate non-state-dependent updates. It must reject updates
+that lack required prior state rather than using a private `Diff` cache.
+Existing public adapter callers without `LookupCurrentState` retain the legacy
+Update path; a state-dependent provider must reject that call before mutation.
+Supplying the hook enables strict prior-state lookup and identity validation.
+
 Provider-declared sensitive input paths must contain references, not literal
 credentials. Plans, hashes, persistence hooks, and applied config retain those
 references. Only the driver receives a deep runtime-resolved copy, including

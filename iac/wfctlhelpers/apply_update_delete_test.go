@@ -2,11 +2,129 @@ package wfctlhelpers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
+
+type priorStateUpdateDriver struct {
+	*fakeDriver
+	prior      *interfaces.ResourceState
+	stateCalls int
+	diffCalls  int
+}
+
+func (d *priorStateUpdateDriver) Update(context.Context, interfaces.ResourceRef, interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	d.updateCount++
+	return nil, errors.New("state-aware update used legacy dispatch")
+}
+
+func (d *priorStateUpdateDriver) UpdateWithState(_ context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
+	d.stateCalls++
+	d.prior = prior
+	if prior == nil {
+		return nil, interfaces.ErrValidation
+	}
+	return &interfaces.ResourceOutput{Name: spec.Name, Type: spec.Type, ProviderID: ref.ProviderID}, nil
+}
+
+func (d *priorStateUpdateDriver) Diff(context.Context, interfaces.ResourceSpec, *interfaces.ResourceOutput) (*interfaces.DiffResult, error) {
+	d.diffCalls++
+	return nil, errors.New("saved-plan update must not call Diff")
+}
+
+type priorStateUpdateProvider struct {
+	*fakeProvider
+	driver *priorStateUpdateDriver
+}
+
+func (p *priorStateUpdateProvider) ResourceDriver(string) (interfaces.ResourceDriver, error) {
+	return p.driver, nil
+}
+
+func TestApplyPlan_UpdateWithState_SavedPlanAfterStateRestart(t *testing.T) {
+	store := &FSStateStore{dir: t.TempDir()}
+	stale := interfaces.ResourceState{ID: "fixture", Name: "fixture", Type: "infra.fixture", ProviderID: "fixture-id", Outputs: map[string]any{"rotation_generation": float64(1)}}
+	if err := store.SaveResource(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: "update", Resource: spec(stale.Name, stale.Type), Current: &stale}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := stale
+	latest.Outputs = map[string]any{"rotation_generation": float64(2), "credential_ref": "secrets://fixture/credential"}
+	if err := store.SaveResource(t.Context(), latest); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &FSStateStore{dir: store.dir}
+	current, err := restarted.ListResources(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved interfaces.IaCPlan
+	if err := json.Unmarshal(encoded, &saved); err != nil {
+		t.Fatal(err)
+	}
+	driver := &priorStateUpdateDriver{fakeDriver: &fakeDriver{}}
+	provider := &priorStateUpdateProvider{fakeProvider: newFakeProvider(), driver: driver}
+	latest.Outputs["rotation_generation"] = float64(3)
+	result, err := ApplyPlanWithHooks(t.Context(), provider, &saved, ApplyPlanHooks{
+		CurrentState: current,
+		OnBeforeAction: func(context.Context, interfaces.PlanAction) error {
+			return restarted.SaveResource(t.Context(), latest)
+		},
+		LookupCurrentState: func(ctx context.Context, ref interfaces.ResourceRef) (*interfaces.ResourceState, error) {
+			return restarted.GetResource(ctx, ref.Name)
+		},
+	})
+	if err != nil || len(result.Errors) != 0 || driver.stateCalls != 1 || driver.updateCount != 0 || driver.diffCalls != 0 {
+		t.Fatalf("saved-plan state-aware dispatch failed: err=%v errors=%v state_calls=%d legacy_calls=%d diff_calls=%d", err, result.Errors, driver.stateCalls, driver.updateCount, driver.diffCalls)
+	}
+	if driver.prior == nil || !reflect.DeepEqual(driver.prior.Outputs, latest.Outputs) {
+		t.Fatal("update did not receive latest persisted outputs after state-store restart")
+	}
+}
+
+func TestApplyPlan_UpdateWithState_InvalidPriorNeverMutates(t *testing.T) {
+	valid := interfaces.ResourceState{Name: "fixture", Type: "infra.fixture", ProviderID: "fixture-id"}
+	for _, name := range []string{"missing_lookup", "missing_state", "wrong_name", "wrong_type", "wrong_provider_id", "lookup_failure"} {
+		t.Run(name, func(t *testing.T) {
+			prior := valid
+			hooks := ApplyPlanHooks{LookupCurrentState: func(context.Context, interfaces.ResourceRef) (*interfaces.ResourceState, error) { return &prior, nil }}
+			switch name {
+			case "missing_lookup":
+				hooks.LookupCurrentState = nil
+			case "missing_state":
+				hooks.LookupCurrentState = func(context.Context, interfaces.ResourceRef) (*interfaces.ResourceState, error) { return nil, nil }
+			case "wrong_name":
+				prior.Name = "other"
+			case "wrong_type":
+				prior.Type = "infra.other"
+			case "wrong_provider_id":
+				prior.ProviderID = "other-id"
+			case "lookup_failure":
+				hooks.LookupCurrentState = func(context.Context, interfaces.ResourceRef) (*interfaces.ResourceState, error) {
+					return nil, errors.New("fixture lookup failed")
+				}
+			}
+			driver := &priorStateUpdateDriver{fakeDriver: &fakeDriver{}}
+			provider := &priorStateUpdateProvider{fakeProvider: newFakeProvider(), driver: driver}
+			plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: "update", Resource: spec(valid.Name, valid.Type), Current: &valid}}}
+			result, err := ApplyPlanWithHooks(t.Context(), provider, plan, hooks)
+			legacyCalls := 0
+			if name == "missing_lookup" {
+				legacyCalls = 1 // The state-dependent fixture rejects legacy Update.
+			}
+			if err != nil || len(result.Errors) != 1 || driver.stateCalls != 0 || driver.updateCount != legacyCalls || driver.diffCalls != 0 {
+				t.Fatal("invalid prior state reached mutation or Diff")
+			}
+		})
+	}
+}
 
 func TestReplaceCleanup_CloudDeletionResumeUsesDurableHook(t *testing.T) {
 	for _, kind := range []string{"delete", "replace"} {

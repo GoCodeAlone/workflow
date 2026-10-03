@@ -6088,10 +6088,13 @@ func (x *ResourceReadResponse) GetOutput() *ResourceOutput {
 }
 
 type ResourceUpdateRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ResourceType  string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
-	Ref           *ResourceRef           `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
-	Spec          *ResourceSpec          `protobuf:"bytes,3,opt,name=spec,proto3" json:"spec,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	ResourceType string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	Ref          *ResourceRef           `protobuf:"bytes,2,opt,name=ref,proto3" json:"ref,omitempty"`
+	Spec         *ResourceSpec          `protobuf:"bytes,3,opt,name=spec,proto3" json:"spec,omitempty"`
+	// Authoritative persisted state loaded at update dispatch, never a saved
+	// plan's Current or a prior Diff cache. Absent for legacy Update callers.
+	PriorState    *ResourceState `protobuf:"bytes,4,opt,name=prior_state,json=priorState,proto3" json:"prior_state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6143,6 +6146,13 @@ func (x *ResourceUpdateRequest) GetRef() *ResourceRef {
 func (x *ResourceUpdateRequest) GetSpec() *ResourceSpec {
 	if x != nil {
 		return x.Spec
+	}
+	return nil
+}
+
+func (x *ResourceUpdateRequest) GetPriorState() *ResourceState {
+	if x != nil {
+		return x.PriorState
 	}
 	return nil
 }
@@ -8107,11 +8117,13 @@ const file_iac_proto_rawDesc = "" +
 	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12;\n" +
 	"\x03ref\x18\x02 \x01(\v2).workflow.plugin.external.iac.ResourceRefR\x03ref\"\\\n" +
 	"\x14ResourceReadResponse\x12D\n" +
-	"\x06output\x18\x01 \x01(\v2,.workflow.plugin.external.iac.ResourceOutputR\x06output\"\xb9\x01\n" +
+	"\x06output\x18\x01 \x01(\v2,.workflow.plugin.external.iac.ResourceOutputR\x06output\"\x87\x02\n" +
 	"\x15ResourceUpdateRequest\x12#\n" +
 	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12;\n" +
 	"\x03ref\x18\x02 \x01(\v2).workflow.plugin.external.iac.ResourceRefR\x03ref\x12>\n" +
-	"\x04spec\x18\x03 \x01(\v2*.workflow.plugin.external.iac.ResourceSpecR\x04spec\"^\n" +
+	"\x04spec\x18\x03 \x01(\v2*.workflow.plugin.external.iac.ResourceSpecR\x04spec\x12L\n" +
+	"\vprior_state\x18\x04 \x01(\v2+.workflow.plugin.external.iac.ResourceStateR\n" +
+	"priorState\"^\n" +
 	"\x16ResourceUpdateResponse\x12D\n" +
 	"\x06output\x18\x01 \x01(\v2,.workflow.plugin.external.iac.ResourceOutputR\x06output\"y\n" +
 	"\x15ResourceDeleteRequest\x12#\n" +
@@ -8588,124 +8600,125 @@ var file_iac_proto_depIdxs = []int32{
 	16,  // 78: workflow.plugin.external.iac.ResourceReadResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
 	11,  // 79: workflow.plugin.external.iac.ResourceUpdateRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
 	10,  // 80: workflow.plugin.external.iac.ResourceUpdateRequest.spec:type_name -> workflow.plugin.external.iac.ResourceSpec
-	16,  // 81: workflow.plugin.external.iac.ResourceUpdateResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
-	11,  // 82: workflow.plugin.external.iac.ResourceDeleteRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	10,  // 83: workflow.plugin.external.iac.ResourceDiffRequest.desired:type_name -> workflow.plugin.external.iac.ResourceSpec
-	16,  // 84: workflow.plugin.external.iac.ResourceDiffRequest.current:type_name -> workflow.plugin.external.iac.ResourceOutput
-	19,  // 85: workflow.plugin.external.iac.ResourceDiffResponse.result:type_name -> workflow.plugin.external.iac.DiffResult
-	11,  // 86: workflow.plugin.external.iac.ResourceScaleRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	16,  // 87: workflow.plugin.external.iac.ResourceScaleResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
-	11,  // 88: workflow.plugin.external.iac.ResourceHealthCheckRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	32,  // 89: workflow.plugin.external.iac.ResourceHealthCheckResponse.result:type_name -> workflow.plugin.external.iac.HealthResult
-	11,  // 90: workflow.plugin.external.iac.TroubleshootRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
-	33,  // 91: workflow.plugin.external.iac.TroubleshootResponse.diagnostics:type_name -> workflow.plugin.external.iac.Diagnostic
-	116, // 92: workflow.plugin.external.iac.GetStateResponse.state:type_name -> workflow.plugin.external.iac.IaCState
-	116, // 93: workflow.plugin.external.iac.SaveStateRequest.state:type_name -> workflow.plugin.external.iac.IaCState
-	145, // 94: workflow.plugin.external.iac.ListStatesRequest.filter:type_name -> workflow.plugin.external.iac.ListStatesRequest.FilterEntry
-	116, // 95: workflow.plugin.external.iac.ListStatesResponse.states:type_name -> workflow.plugin.external.iac.IaCState
-	10,  // 96: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
-	10,  // 97: workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
-	42,  // 98: workflow.plugin.external.iac.IaCProviderRequired.Initialize:input_type -> workflow.plugin.external.iac.InitializeRequest
-	44,  // 99: workflow.plugin.external.iac.IaCProviderRequired.Name:input_type -> workflow.plugin.external.iac.NameRequest
-	46,  // 100: workflow.plugin.external.iac.IaCProviderRequired.Version:input_type -> workflow.plugin.external.iac.VersionRequest
-	48,  // 101: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:input_type -> workflow.plugin.external.iac.CapabilitiesRequest
-	50,  // 102: workflow.plugin.external.iac.IaCProviderRequired.Plan:input_type -> workflow.plugin.external.iac.PlanRequest
-	52,  // 103: workflow.plugin.external.iac.IaCProviderRequired.Destroy:input_type -> workflow.plugin.external.iac.DestroyRequest
-	54,  // 104: workflow.plugin.external.iac.IaCProviderRequired.Status:input_type -> workflow.plugin.external.iac.StatusRequest
-	56,  // 105: workflow.plugin.external.iac.IaCProviderRequired.Import:input_type -> workflow.plugin.external.iac.ImportRequest
-	58,  // 106: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:input_type -> workflow.plugin.external.iac.ResolveSizingRequest
-	60,  // 107: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:input_type -> workflow.plugin.external.iac.BootstrapStateBackendRequest
-	62,  // 108: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:input_type -> workflow.plugin.external.iac.EnumerateAllRequest
-	64,  // 109: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:input_type -> workflow.plugin.external.iac.EnumerateByTagRequest
-	66,  // 110: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:input_type -> workflow.plugin.external.iac.DetectDriftRequest
-	68,  // 111: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:input_type -> workflow.plugin.external.iac.DetectDriftWithSpecsRequest
-	70,  // 112: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:input_type -> workflow.plugin.external.iac.RevokeProviderCredentialRequest
-	72,  // 113: workflow.plugin.external.iac.IaCProviderRegionLister.ListRegions:input_type -> workflow.plugin.external.iac.ListRegionsRequest
-	75,  // 114: workflow.plugin.external.iac.IaCProviderOwnership.GetOwner:input_type -> workflow.plugin.external.iac.GetOwnerRequest
-	77,  // 115: workflow.plugin.external.iac.IaCProviderOwnership.SetOwner:input_type -> workflow.plugin.external.iac.SetOwnerRequest
-	79,  // 116: workflow.plugin.external.iac.IaCProviderOwnership.ListOwners:input_type -> workflow.plugin.external.iac.ListOwnersRequest
-	82,  // 117: workflow.plugin.external.iac.IaCProviderFinalizer.FinalizeApply:input_type -> workflow.plugin.external.iac.FinalizeApplyRequest
-	84,  // 118: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:input_type -> workflow.plugin.external.iac.RepairDirtyMigrationRequest
-	86,  // 119: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:input_type -> workflow.plugin.external.iac.ValidatePlanRequest
-	88,  // 120: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:input_type -> workflow.plugin.external.iac.DetectDriftConfigRequest
-	90,  // 121: workflow.plugin.external.iac.IaCProviderLogCapture.CaptureLogs:input_type -> workflow.plugin.external.iac.CaptureLogsRequest
-	92,  // 122: workflow.plugin.external.iac.IaCProviderRunner.RunJob:input_type -> workflow.plugin.external.iac.JobSpec
-	96,  // 123: workflow.plugin.external.iac.IaCProviderRunner.JobStatus:input_type -> workflow.plugin.external.iac.JobHandle
-	96,  // 124: workflow.plugin.external.iac.IaCProviderRunner.JobLogs:input_type -> workflow.plugin.external.iac.JobHandle
-	96,  // 125: workflow.plugin.external.iac.IaCProviderJobCanceler.CancelJob:input_type -> workflow.plugin.external.iac.JobHandle
-	21,  // 126: workflow.plugin.external.iac.IaCRequirementDiscovery.DiscoverRequirements:input_type -> workflow.plugin.external.iac.DiscoverRequirementsRequest
-	25,  // 127: workflow.plugin.external.iac.IaCProviderRequirementMapper.MapRequirements:input_type -> workflow.plugin.external.iac.MapRequirementsRequest
-	98,  // 128: workflow.plugin.external.iac.ResourceDriver.Create:input_type -> workflow.plugin.external.iac.ResourceCreateRequest
-	100, // 129: workflow.plugin.external.iac.ResourceDriver.Read:input_type -> workflow.plugin.external.iac.ResourceReadRequest
-	102, // 130: workflow.plugin.external.iac.ResourceDriver.Update:input_type -> workflow.plugin.external.iac.ResourceUpdateRequest
-	104, // 131: workflow.plugin.external.iac.ResourceDriver.Delete:input_type -> workflow.plugin.external.iac.ResourceDeleteRequest
-	106, // 132: workflow.plugin.external.iac.ResourceDriver.Diff:input_type -> workflow.plugin.external.iac.ResourceDiffRequest
-	108, // 133: workflow.plugin.external.iac.ResourceDriver.Scale:input_type -> workflow.plugin.external.iac.ResourceScaleRequest
-	110, // 134: workflow.plugin.external.iac.ResourceDriver.HealthCheck:input_type -> workflow.plugin.external.iac.ResourceHealthCheckRequest
-	112, // 135: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:input_type -> workflow.plugin.external.iac.SensitiveKeysRequest
-	114, // 136: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:input_type -> workflow.plugin.external.iac.TroubleshootRequest
-	117, // 137: workflow.plugin.external.iac.IaCStateBackend.Configure:input_type -> workflow.plugin.external.iac.ConfigureRequest
-	119, // 138: workflow.plugin.external.iac.IaCStateBackend.GetState:input_type -> workflow.plugin.external.iac.GetStateRequest
-	121, // 139: workflow.plugin.external.iac.IaCStateBackend.SaveState:input_type -> workflow.plugin.external.iac.SaveStateRequest
-	123, // 140: workflow.plugin.external.iac.IaCStateBackend.ListStates:input_type -> workflow.plugin.external.iac.ListStatesRequest
-	125, // 141: workflow.plugin.external.iac.IaCStateBackend.DeleteState:input_type -> workflow.plugin.external.iac.DeleteStateRequest
-	127, // 142: workflow.plugin.external.iac.IaCStateBackend.Lock:input_type -> workflow.plugin.external.iac.LockRequest
-	129, // 143: workflow.plugin.external.iac.IaCStateBackend.Unlock:input_type -> workflow.plugin.external.iac.UnlockRequest
-	131, // 144: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:input_type -> workflow.plugin.external.iac.ListBackendNamesRequest
-	133, // 145: workflow.plugin.external.iac.ResourceSensitiveInputDeclarer.SensitiveInputPaths:input_type -> workflow.plugin.external.iac.ResourceSensitiveInputPathsRequest
-	43,  // 146: workflow.plugin.external.iac.IaCProviderRequired.Initialize:output_type -> workflow.plugin.external.iac.InitializeResponse
-	45,  // 147: workflow.plugin.external.iac.IaCProviderRequired.Name:output_type -> workflow.plugin.external.iac.NameResponse
-	47,  // 148: workflow.plugin.external.iac.IaCProviderRequired.Version:output_type -> workflow.plugin.external.iac.VersionResponse
-	49,  // 149: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:output_type -> workflow.plugin.external.iac.CapabilitiesResponse
-	51,  // 150: workflow.plugin.external.iac.IaCProviderRequired.Plan:output_type -> workflow.plugin.external.iac.PlanResponse
-	53,  // 151: workflow.plugin.external.iac.IaCProviderRequired.Destroy:output_type -> workflow.plugin.external.iac.DestroyResponse
-	55,  // 152: workflow.plugin.external.iac.IaCProviderRequired.Status:output_type -> workflow.plugin.external.iac.StatusResponse
-	57,  // 153: workflow.plugin.external.iac.IaCProviderRequired.Import:output_type -> workflow.plugin.external.iac.ImportResponse
-	59,  // 154: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:output_type -> workflow.plugin.external.iac.ResolveSizingResponse
-	61,  // 155: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:output_type -> workflow.plugin.external.iac.BootstrapStateBackendResponse
-	63,  // 156: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:output_type -> workflow.plugin.external.iac.EnumerateAllResponse
-	65,  // 157: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:output_type -> workflow.plugin.external.iac.EnumerateByTagResponse
-	67,  // 158: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:output_type -> workflow.plugin.external.iac.DetectDriftResponse
-	69,  // 159: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:output_type -> workflow.plugin.external.iac.DetectDriftWithSpecsResponse
-	71,  // 160: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:output_type -> workflow.plugin.external.iac.RevokeProviderCredentialResponse
-	74,  // 161: workflow.plugin.external.iac.IaCProviderRegionLister.ListRegions:output_type -> workflow.plugin.external.iac.ListRegionsResponse
-	76,  // 162: workflow.plugin.external.iac.IaCProviderOwnership.GetOwner:output_type -> workflow.plugin.external.iac.GetOwnerResponse
-	78,  // 163: workflow.plugin.external.iac.IaCProviderOwnership.SetOwner:output_type -> workflow.plugin.external.iac.SetOwnerResponse
-	81,  // 164: workflow.plugin.external.iac.IaCProviderOwnership.ListOwners:output_type -> workflow.plugin.external.iac.ListOwnersResponse
-	83,  // 165: workflow.plugin.external.iac.IaCProviderFinalizer.FinalizeApply:output_type -> workflow.plugin.external.iac.FinalizeApplyResponse
-	85,  // 166: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:output_type -> workflow.plugin.external.iac.RepairDirtyMigrationResponse
-	87,  // 167: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:output_type -> workflow.plugin.external.iac.ValidatePlanResponse
-	89,  // 168: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:output_type -> workflow.plugin.external.iac.DetectDriftConfigResponse
-	91,  // 169: workflow.plugin.external.iac.IaCProviderLogCapture.CaptureLogs:output_type -> workflow.plugin.external.iac.LogChunk
-	96,  // 170: workflow.plugin.external.iac.IaCProviderRunner.RunJob:output_type -> workflow.plugin.external.iac.JobHandle
-	97,  // 171: workflow.plugin.external.iac.IaCProviderRunner.JobStatus:output_type -> workflow.plugin.external.iac.JobStatusReply
-	91,  // 172: workflow.plugin.external.iac.IaCProviderRunner.JobLogs:output_type -> workflow.plugin.external.iac.LogChunk
-	147, // 173: workflow.plugin.external.iac.IaCProviderJobCanceler.CancelJob:output_type -> google.protobuf.Empty
-	24,  // 174: workflow.plugin.external.iac.IaCRequirementDiscovery.DiscoverRequirements:output_type -> workflow.plugin.external.iac.DiscoverRequirementsResponse
-	29,  // 175: workflow.plugin.external.iac.IaCProviderRequirementMapper.MapRequirements:output_type -> workflow.plugin.external.iac.MapRequirementsResponse
-	99,  // 176: workflow.plugin.external.iac.ResourceDriver.Create:output_type -> workflow.plugin.external.iac.ResourceCreateResponse
-	101, // 177: workflow.plugin.external.iac.ResourceDriver.Read:output_type -> workflow.plugin.external.iac.ResourceReadResponse
-	103, // 178: workflow.plugin.external.iac.ResourceDriver.Update:output_type -> workflow.plugin.external.iac.ResourceUpdateResponse
-	105, // 179: workflow.plugin.external.iac.ResourceDriver.Delete:output_type -> workflow.plugin.external.iac.ResourceDeleteResponse
-	107, // 180: workflow.plugin.external.iac.ResourceDriver.Diff:output_type -> workflow.plugin.external.iac.ResourceDiffResponse
-	109, // 181: workflow.plugin.external.iac.ResourceDriver.Scale:output_type -> workflow.plugin.external.iac.ResourceScaleResponse
-	111, // 182: workflow.plugin.external.iac.ResourceDriver.HealthCheck:output_type -> workflow.plugin.external.iac.ResourceHealthCheckResponse
-	113, // 183: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:output_type -> workflow.plugin.external.iac.SensitiveKeysResponse
-	115, // 184: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:output_type -> workflow.plugin.external.iac.TroubleshootResponse
-	118, // 185: workflow.plugin.external.iac.IaCStateBackend.Configure:output_type -> workflow.plugin.external.iac.ConfigureResponse
-	120, // 186: workflow.plugin.external.iac.IaCStateBackend.GetState:output_type -> workflow.plugin.external.iac.GetStateResponse
-	122, // 187: workflow.plugin.external.iac.IaCStateBackend.SaveState:output_type -> workflow.plugin.external.iac.SaveStateResponse
-	124, // 188: workflow.plugin.external.iac.IaCStateBackend.ListStates:output_type -> workflow.plugin.external.iac.ListStatesResponse
-	126, // 189: workflow.plugin.external.iac.IaCStateBackend.DeleteState:output_type -> workflow.plugin.external.iac.DeleteStateResponse
-	128, // 190: workflow.plugin.external.iac.IaCStateBackend.Lock:output_type -> workflow.plugin.external.iac.LockResponse
-	130, // 191: workflow.plugin.external.iac.IaCStateBackend.Unlock:output_type -> workflow.plugin.external.iac.UnlockResponse
-	132, // 192: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:output_type -> workflow.plugin.external.iac.ListBackendNamesResponse
-	134, // 193: workflow.plugin.external.iac.ResourceSensitiveInputDeclarer.SensitiveInputPaths:output_type -> workflow.plugin.external.iac.ResourceSensitiveInputPathsResponse
-	146, // [146:194] is the sub-list for method output_type
-	98,  // [98:146] is the sub-list for method input_type
-	98,  // [98:98] is the sub-list for extension type_name
-	98,  // [98:98] is the sub-list for extension extendee
-	0,   // [0:98] is the sub-list for field type_name
+	15,  // 81: workflow.plugin.external.iac.ResourceUpdateRequest.prior_state:type_name -> workflow.plugin.external.iac.ResourceState
+	16,  // 82: workflow.plugin.external.iac.ResourceUpdateResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
+	11,  // 83: workflow.plugin.external.iac.ResourceDeleteRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	10,  // 84: workflow.plugin.external.iac.ResourceDiffRequest.desired:type_name -> workflow.plugin.external.iac.ResourceSpec
+	16,  // 85: workflow.plugin.external.iac.ResourceDiffRequest.current:type_name -> workflow.plugin.external.iac.ResourceOutput
+	19,  // 86: workflow.plugin.external.iac.ResourceDiffResponse.result:type_name -> workflow.plugin.external.iac.DiffResult
+	11,  // 87: workflow.plugin.external.iac.ResourceScaleRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	16,  // 88: workflow.plugin.external.iac.ResourceScaleResponse.output:type_name -> workflow.plugin.external.iac.ResourceOutput
+	11,  // 89: workflow.plugin.external.iac.ResourceHealthCheckRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	32,  // 90: workflow.plugin.external.iac.ResourceHealthCheckResponse.result:type_name -> workflow.plugin.external.iac.HealthResult
+	11,  // 91: workflow.plugin.external.iac.TroubleshootRequest.ref:type_name -> workflow.plugin.external.iac.ResourceRef
+	33,  // 92: workflow.plugin.external.iac.TroubleshootResponse.diagnostics:type_name -> workflow.plugin.external.iac.Diagnostic
+	116, // 93: workflow.plugin.external.iac.GetStateResponse.state:type_name -> workflow.plugin.external.iac.IaCState
+	116, // 94: workflow.plugin.external.iac.SaveStateRequest.state:type_name -> workflow.plugin.external.iac.IaCState
+	145, // 95: workflow.plugin.external.iac.ListStatesRequest.filter:type_name -> workflow.plugin.external.iac.ListStatesRequest.FilterEntry
+	116, // 96: workflow.plugin.external.iac.ListStatesResponse.states:type_name -> workflow.plugin.external.iac.IaCState
+	10,  // 97: workflow.plugin.external.iac.DetectDriftWithSpecsRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
+	10,  // 98: workflow.plugin.external.iac.DetectDriftConfigRequest.SpecsEntry.value:type_name -> workflow.plugin.external.iac.ResourceSpec
+	42,  // 99: workflow.plugin.external.iac.IaCProviderRequired.Initialize:input_type -> workflow.plugin.external.iac.InitializeRequest
+	44,  // 100: workflow.plugin.external.iac.IaCProviderRequired.Name:input_type -> workflow.plugin.external.iac.NameRequest
+	46,  // 101: workflow.plugin.external.iac.IaCProviderRequired.Version:input_type -> workflow.plugin.external.iac.VersionRequest
+	48,  // 102: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:input_type -> workflow.plugin.external.iac.CapabilitiesRequest
+	50,  // 103: workflow.plugin.external.iac.IaCProviderRequired.Plan:input_type -> workflow.plugin.external.iac.PlanRequest
+	52,  // 104: workflow.plugin.external.iac.IaCProviderRequired.Destroy:input_type -> workflow.plugin.external.iac.DestroyRequest
+	54,  // 105: workflow.plugin.external.iac.IaCProviderRequired.Status:input_type -> workflow.plugin.external.iac.StatusRequest
+	56,  // 106: workflow.plugin.external.iac.IaCProviderRequired.Import:input_type -> workflow.plugin.external.iac.ImportRequest
+	58,  // 107: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:input_type -> workflow.plugin.external.iac.ResolveSizingRequest
+	60,  // 108: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:input_type -> workflow.plugin.external.iac.BootstrapStateBackendRequest
+	62,  // 109: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:input_type -> workflow.plugin.external.iac.EnumerateAllRequest
+	64,  // 110: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:input_type -> workflow.plugin.external.iac.EnumerateByTagRequest
+	66,  // 111: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:input_type -> workflow.plugin.external.iac.DetectDriftRequest
+	68,  // 112: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:input_type -> workflow.plugin.external.iac.DetectDriftWithSpecsRequest
+	70,  // 113: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:input_type -> workflow.plugin.external.iac.RevokeProviderCredentialRequest
+	72,  // 114: workflow.plugin.external.iac.IaCProviderRegionLister.ListRegions:input_type -> workflow.plugin.external.iac.ListRegionsRequest
+	75,  // 115: workflow.plugin.external.iac.IaCProviderOwnership.GetOwner:input_type -> workflow.plugin.external.iac.GetOwnerRequest
+	77,  // 116: workflow.plugin.external.iac.IaCProviderOwnership.SetOwner:input_type -> workflow.plugin.external.iac.SetOwnerRequest
+	79,  // 117: workflow.plugin.external.iac.IaCProviderOwnership.ListOwners:input_type -> workflow.plugin.external.iac.ListOwnersRequest
+	82,  // 118: workflow.plugin.external.iac.IaCProviderFinalizer.FinalizeApply:input_type -> workflow.plugin.external.iac.FinalizeApplyRequest
+	84,  // 119: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:input_type -> workflow.plugin.external.iac.RepairDirtyMigrationRequest
+	86,  // 120: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:input_type -> workflow.plugin.external.iac.ValidatePlanRequest
+	88,  // 121: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:input_type -> workflow.plugin.external.iac.DetectDriftConfigRequest
+	90,  // 122: workflow.plugin.external.iac.IaCProviderLogCapture.CaptureLogs:input_type -> workflow.plugin.external.iac.CaptureLogsRequest
+	92,  // 123: workflow.plugin.external.iac.IaCProviderRunner.RunJob:input_type -> workflow.plugin.external.iac.JobSpec
+	96,  // 124: workflow.plugin.external.iac.IaCProviderRunner.JobStatus:input_type -> workflow.plugin.external.iac.JobHandle
+	96,  // 125: workflow.plugin.external.iac.IaCProviderRunner.JobLogs:input_type -> workflow.plugin.external.iac.JobHandle
+	96,  // 126: workflow.plugin.external.iac.IaCProviderJobCanceler.CancelJob:input_type -> workflow.plugin.external.iac.JobHandle
+	21,  // 127: workflow.plugin.external.iac.IaCRequirementDiscovery.DiscoverRequirements:input_type -> workflow.plugin.external.iac.DiscoverRequirementsRequest
+	25,  // 128: workflow.plugin.external.iac.IaCProviderRequirementMapper.MapRequirements:input_type -> workflow.plugin.external.iac.MapRequirementsRequest
+	98,  // 129: workflow.plugin.external.iac.ResourceDriver.Create:input_type -> workflow.plugin.external.iac.ResourceCreateRequest
+	100, // 130: workflow.plugin.external.iac.ResourceDriver.Read:input_type -> workflow.plugin.external.iac.ResourceReadRequest
+	102, // 131: workflow.plugin.external.iac.ResourceDriver.Update:input_type -> workflow.plugin.external.iac.ResourceUpdateRequest
+	104, // 132: workflow.plugin.external.iac.ResourceDriver.Delete:input_type -> workflow.plugin.external.iac.ResourceDeleteRequest
+	106, // 133: workflow.plugin.external.iac.ResourceDriver.Diff:input_type -> workflow.plugin.external.iac.ResourceDiffRequest
+	108, // 134: workflow.plugin.external.iac.ResourceDriver.Scale:input_type -> workflow.plugin.external.iac.ResourceScaleRequest
+	110, // 135: workflow.plugin.external.iac.ResourceDriver.HealthCheck:input_type -> workflow.plugin.external.iac.ResourceHealthCheckRequest
+	112, // 136: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:input_type -> workflow.plugin.external.iac.SensitiveKeysRequest
+	114, // 137: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:input_type -> workflow.plugin.external.iac.TroubleshootRequest
+	117, // 138: workflow.plugin.external.iac.IaCStateBackend.Configure:input_type -> workflow.plugin.external.iac.ConfigureRequest
+	119, // 139: workflow.plugin.external.iac.IaCStateBackend.GetState:input_type -> workflow.plugin.external.iac.GetStateRequest
+	121, // 140: workflow.plugin.external.iac.IaCStateBackend.SaveState:input_type -> workflow.plugin.external.iac.SaveStateRequest
+	123, // 141: workflow.plugin.external.iac.IaCStateBackend.ListStates:input_type -> workflow.plugin.external.iac.ListStatesRequest
+	125, // 142: workflow.plugin.external.iac.IaCStateBackend.DeleteState:input_type -> workflow.plugin.external.iac.DeleteStateRequest
+	127, // 143: workflow.plugin.external.iac.IaCStateBackend.Lock:input_type -> workflow.plugin.external.iac.LockRequest
+	129, // 144: workflow.plugin.external.iac.IaCStateBackend.Unlock:input_type -> workflow.plugin.external.iac.UnlockRequest
+	131, // 145: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:input_type -> workflow.plugin.external.iac.ListBackendNamesRequest
+	133, // 146: workflow.plugin.external.iac.ResourceSensitiveInputDeclarer.SensitiveInputPaths:input_type -> workflow.plugin.external.iac.ResourceSensitiveInputPathsRequest
+	43,  // 147: workflow.plugin.external.iac.IaCProviderRequired.Initialize:output_type -> workflow.plugin.external.iac.InitializeResponse
+	45,  // 148: workflow.plugin.external.iac.IaCProviderRequired.Name:output_type -> workflow.plugin.external.iac.NameResponse
+	47,  // 149: workflow.plugin.external.iac.IaCProviderRequired.Version:output_type -> workflow.plugin.external.iac.VersionResponse
+	49,  // 150: workflow.plugin.external.iac.IaCProviderRequired.Capabilities:output_type -> workflow.plugin.external.iac.CapabilitiesResponse
+	51,  // 151: workflow.plugin.external.iac.IaCProviderRequired.Plan:output_type -> workflow.plugin.external.iac.PlanResponse
+	53,  // 152: workflow.plugin.external.iac.IaCProviderRequired.Destroy:output_type -> workflow.plugin.external.iac.DestroyResponse
+	55,  // 153: workflow.plugin.external.iac.IaCProviderRequired.Status:output_type -> workflow.plugin.external.iac.StatusResponse
+	57,  // 154: workflow.plugin.external.iac.IaCProviderRequired.Import:output_type -> workflow.plugin.external.iac.ImportResponse
+	59,  // 155: workflow.plugin.external.iac.IaCProviderRequired.ResolveSizing:output_type -> workflow.plugin.external.iac.ResolveSizingResponse
+	61,  // 156: workflow.plugin.external.iac.IaCProviderRequired.BootstrapStateBackend:output_type -> workflow.plugin.external.iac.BootstrapStateBackendResponse
+	63,  // 157: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateAll:output_type -> workflow.plugin.external.iac.EnumerateAllResponse
+	65,  // 158: workflow.plugin.external.iac.IaCProviderEnumerator.EnumerateByTag:output_type -> workflow.plugin.external.iac.EnumerateByTagResponse
+	67,  // 159: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDrift:output_type -> workflow.plugin.external.iac.DetectDriftResponse
+	69,  // 160: workflow.plugin.external.iac.IaCProviderDriftDetector.DetectDriftWithSpecs:output_type -> workflow.plugin.external.iac.DetectDriftWithSpecsResponse
+	71,  // 161: workflow.plugin.external.iac.IaCProviderCredentialRevoker.RevokeProviderCredential:output_type -> workflow.plugin.external.iac.RevokeProviderCredentialResponse
+	74,  // 162: workflow.plugin.external.iac.IaCProviderRegionLister.ListRegions:output_type -> workflow.plugin.external.iac.ListRegionsResponse
+	76,  // 163: workflow.plugin.external.iac.IaCProviderOwnership.GetOwner:output_type -> workflow.plugin.external.iac.GetOwnerResponse
+	78,  // 164: workflow.plugin.external.iac.IaCProviderOwnership.SetOwner:output_type -> workflow.plugin.external.iac.SetOwnerResponse
+	81,  // 165: workflow.plugin.external.iac.IaCProviderOwnership.ListOwners:output_type -> workflow.plugin.external.iac.ListOwnersResponse
+	83,  // 166: workflow.plugin.external.iac.IaCProviderFinalizer.FinalizeApply:output_type -> workflow.plugin.external.iac.FinalizeApplyResponse
+	85,  // 167: workflow.plugin.external.iac.IaCProviderMigrationRepairer.RepairDirtyMigration:output_type -> workflow.plugin.external.iac.RepairDirtyMigrationResponse
+	87,  // 168: workflow.plugin.external.iac.IaCProviderValidator.ValidatePlan:output_type -> workflow.plugin.external.iac.ValidatePlanResponse
+	89,  // 169: workflow.plugin.external.iac.IaCProviderDriftConfigDetector.DetectDriftConfig:output_type -> workflow.plugin.external.iac.DetectDriftConfigResponse
+	91,  // 170: workflow.plugin.external.iac.IaCProviderLogCapture.CaptureLogs:output_type -> workflow.plugin.external.iac.LogChunk
+	96,  // 171: workflow.plugin.external.iac.IaCProviderRunner.RunJob:output_type -> workflow.plugin.external.iac.JobHandle
+	97,  // 172: workflow.plugin.external.iac.IaCProviderRunner.JobStatus:output_type -> workflow.plugin.external.iac.JobStatusReply
+	91,  // 173: workflow.plugin.external.iac.IaCProviderRunner.JobLogs:output_type -> workflow.plugin.external.iac.LogChunk
+	147, // 174: workflow.plugin.external.iac.IaCProviderJobCanceler.CancelJob:output_type -> google.protobuf.Empty
+	24,  // 175: workflow.plugin.external.iac.IaCRequirementDiscovery.DiscoverRequirements:output_type -> workflow.plugin.external.iac.DiscoverRequirementsResponse
+	29,  // 176: workflow.plugin.external.iac.IaCProviderRequirementMapper.MapRequirements:output_type -> workflow.plugin.external.iac.MapRequirementsResponse
+	99,  // 177: workflow.plugin.external.iac.ResourceDriver.Create:output_type -> workflow.plugin.external.iac.ResourceCreateResponse
+	101, // 178: workflow.plugin.external.iac.ResourceDriver.Read:output_type -> workflow.plugin.external.iac.ResourceReadResponse
+	103, // 179: workflow.plugin.external.iac.ResourceDriver.Update:output_type -> workflow.plugin.external.iac.ResourceUpdateResponse
+	105, // 180: workflow.plugin.external.iac.ResourceDriver.Delete:output_type -> workflow.plugin.external.iac.ResourceDeleteResponse
+	107, // 181: workflow.plugin.external.iac.ResourceDriver.Diff:output_type -> workflow.plugin.external.iac.ResourceDiffResponse
+	109, // 182: workflow.plugin.external.iac.ResourceDriver.Scale:output_type -> workflow.plugin.external.iac.ResourceScaleResponse
+	111, // 183: workflow.plugin.external.iac.ResourceDriver.HealthCheck:output_type -> workflow.plugin.external.iac.ResourceHealthCheckResponse
+	113, // 184: workflow.plugin.external.iac.ResourceDriver.SensitiveKeys:output_type -> workflow.plugin.external.iac.SensitiveKeysResponse
+	115, // 185: workflow.plugin.external.iac.ResourceDriver.Troubleshoot:output_type -> workflow.plugin.external.iac.TroubleshootResponse
+	118, // 186: workflow.plugin.external.iac.IaCStateBackend.Configure:output_type -> workflow.plugin.external.iac.ConfigureResponse
+	120, // 187: workflow.plugin.external.iac.IaCStateBackend.GetState:output_type -> workflow.plugin.external.iac.GetStateResponse
+	122, // 188: workflow.plugin.external.iac.IaCStateBackend.SaveState:output_type -> workflow.plugin.external.iac.SaveStateResponse
+	124, // 189: workflow.plugin.external.iac.IaCStateBackend.ListStates:output_type -> workflow.plugin.external.iac.ListStatesResponse
+	126, // 190: workflow.plugin.external.iac.IaCStateBackend.DeleteState:output_type -> workflow.plugin.external.iac.DeleteStateResponse
+	128, // 191: workflow.plugin.external.iac.IaCStateBackend.Lock:output_type -> workflow.plugin.external.iac.LockResponse
+	130, // 192: workflow.plugin.external.iac.IaCStateBackend.Unlock:output_type -> workflow.plugin.external.iac.UnlockResponse
+	132, // 193: workflow.plugin.external.iac.IaCStateBackend.ListBackendNames:output_type -> workflow.plugin.external.iac.ListBackendNamesResponse
+	134, // 194: workflow.plugin.external.iac.ResourceSensitiveInputDeclarer.SensitiveInputPaths:output_type -> workflow.plugin.external.iac.ResourceSensitiveInputPathsResponse
+	147, // [147:195] is the sub-list for method output_type
+	99,  // [99:147] is the sub-list for method input_type
+	99,  // [99:99] is the sub-list for extension type_name
+	99,  // [99:99] is the sub-list for extension extendee
+	0,   // [0:99] is the sub-list for field type_name
 }
 
 func init() { file_iac_proto_init() }

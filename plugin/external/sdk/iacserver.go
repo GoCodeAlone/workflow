@@ -2,10 +2,12 @@ package sdk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
 	"github.com/GoCodeAlone/workflow/interfaces"
@@ -14,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pluginpkg "github.com/GoCodeAlone/workflow/plugin"
 	"github.com/GoCodeAlone/workflow/plugin/external/contract"
@@ -215,7 +218,11 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 		pb.RegisterIaCProviderFinalizerServer(s, v)
 	}
 	if v, ok := provider.(pb.ResourceDriverServer); ok {
-		pb.RegisterResourceDriverServer(s, v)
+		if updater, ok := provider.(interfaces.ResourceStateUpdater); ok {
+			pb.RegisterResourceDriverServer(s, &resourceStateUpdateServer{ResourceDriverServer: v, updater: updater})
+		} else {
+			pb.RegisterResourceDriverServer(s, v)
+		}
 	}
 	if v, ok := provider.(pb.ResourceSensitiveInputDeclarerServer); ok {
 		pb.RegisterResourceSensitiveInputDeclarerServer(s, v)
@@ -230,6 +237,71 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 		pb.RegisterIaCStateBackendServer(s, v)
 	}
 	return nil
+}
+
+// resourceStateUpdateServer changes only Update; the embedded typed server
+// continues to own all other RPCs. Legacy providers are registered unchanged.
+type resourceStateUpdateServer struct {
+	pb.ResourceDriverServer
+	updater interfaces.ResourceStateUpdater
+}
+
+func (s *resourceStateUpdateServer) Update(ctx context.Context, req *pb.ResourceUpdateRequest) (*pb.ResourceUpdateResponse, error) {
+	ref := interfaces.ResourceRef{Name: req.GetRef().GetName(), Type: req.GetRef().GetType(), ProviderID: req.GetRef().GetProviderId()}
+	spec := interfaces.ResourceSpec{Name: req.GetSpec().GetName(), Type: req.GetSpec().GetType(), Size: interfaces.Size(req.GetSpec().GetSize()), DependsOn: append([]string(nil), req.GetSpec().GetDependsOn()...)}
+	if req.GetResourceType() != ref.Type {
+		return nil, status.Error(codes.InvalidArgument, "update resource type does not match identity")
+	}
+	if hint := req.GetSpec().GetHints(); hint != nil {
+		spec.Hints = &interfaces.ResourceHints{CPU: hint.GetCpu(), Memory: hint.GetMemory(), Storage: hint.GetStorage()}
+	}
+	decodeMap := func(data []byte, target *map[string]any) error {
+		if len(data) == 0 {
+			return nil
+		}
+		return json.Unmarshal(data, target)
+	}
+	if err := decodeMap(req.GetSpec().GetConfigJson(), &spec.Config); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "update config JSON is invalid")
+	}
+	var prior *interfaces.ResourceState
+	if state := req.GetPriorState(); state != nil {
+		prior = &interfaces.ResourceState{
+			ID: state.GetId(), Name: state.GetName(), Type: state.GetType(), Provider: state.GetProvider(), ProviderRef: state.GetProviderRef(), ProviderID: state.GetProviderId(),
+			ConfigHash: state.GetConfigHash(), AppliedConfigSource: state.GetAppliedConfigSource(), Dependencies: append([]string(nil), state.GetDependencies()...),
+			CreatedAt: resourceUpdateTime(state.GetCreatedAt()), UpdatedAt: resourceUpdateTime(state.GetUpdatedAt()), LastDriftCheck: resourceUpdateTime(state.GetLastDriftCheck()),
+		}
+		if err := decodeMap(state.GetAppliedConfigJson(), &prior.AppliedConfig); err != nil {
+			return nil, status.Error(codes.InvalidArgument, "update prior config JSON is invalid")
+		}
+		if err := decodeMap(state.GetOutputsJson(), &prior.Outputs); err != nil {
+			return nil, status.Error(codes.InvalidArgument, "update prior outputs JSON is invalid")
+		}
+	}
+	if prior != nil {
+		if err := interfaces.ValidateUpdatePriorState(ref, spec, prior); err != nil {
+			return nil, nativeJobRPCError(err)
+		}
+	}
+	out, err := s.updater.UpdateWithState(ctx, ref, spec, prior)
+	if err != nil {
+		return nil, nativeJobRPCError(err)
+	}
+	if out == nil {
+		return &pb.ResourceUpdateResponse{}, nil
+	}
+	outputs, err := json.Marshal(out.Outputs)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "update output JSON is invalid")
+	}
+	return &pb.ResourceUpdateResponse{Output: &pb.ResourceOutput{Name: out.Name, Type: out.Type, ProviderId: out.ProviderID, OutputsJson: outputs, Sensitive: out.Sensitive, Status: out.Status}}, nil
+}
+
+func resourceUpdateTime(value *timestamppb.Timestamp) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return value.AsTime()
 }
 
 // iacPluginServiceBridge is a minimal pb.PluginServiceServer registered on

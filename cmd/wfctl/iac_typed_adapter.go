@@ -811,11 +811,29 @@ func (d *typedResourceDriver) Read(ctx context.Context, ref interfaces.ResourceR
 }
 
 func (d *typedResourceDriver) Update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec) (*interfaces.ResourceOutput, error) {
+	return d.update(ctx, ref, spec, nil)
+}
+
+func (d *typedResourceDriver) UpdateWithState(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
+	if err := interfaces.ValidateUpdatePriorState(ref, spec, prior); err != nil {
+		return nil, err
+	}
+	return d.update(ctx, ref, spec, prior)
+}
+
+func (d *typedResourceDriver) update(ctx context.Context, ref interfaces.ResourceRef, spec interfaces.ResourceSpec, prior *interfaces.ResourceState) (*interfaces.ResourceOutput, error) {
 	pbSpec, err := specToPB(spec)
 	if err != nil {
 		return nil, fmt.Errorf("typed driver %s: encode Update spec: %w", d.resourceType, err)
 	}
-	resp, err := d.client.Update(ctx, &pb.ResourceUpdateRequest{ResourceType: d.resourceType, Ref: refToPB(ref), Spec: pbSpec})
+	var pbPrior *pb.ResourceState
+	if prior != nil {
+		pbPrior, err = stateToPB(prior)
+		if err != nil {
+			return nil, fmt.Errorf("typed driver: encode Update prior state: %w", err)
+		}
+	}
+	resp, err := d.client.Update(ctx, &pb.ResourceUpdateRequest{ResourceType: d.resourceType, Ref: refToPB(ref), Spec: pbSpec, PriorState: pbPrior})
 	if err != nil {
 		return nil, err
 	}

@@ -90,6 +90,17 @@ type ResourceDriver interface {
 	SensitiveKeys() []string
 }
 
+// ResourceStateUpdater optionally receives authoritative persisted state on the
+// update call. Callers must load it at dispatch time, not from a saved plan or
+// an earlier Diff. Drivers requiring it must reject legacy Update calls before
+// mutation; ResourceDriver remains unchanged for existing implementations.
+// A typed provider bridge may receive nil prior state from a legacy RPC. It
+// must reject state-dependent updates before mutation, but may delegate updates
+// that do not require state to their existing implementation.
+type ResourceStateUpdater interface {
+	UpdateWithState(ctx context.Context, ref ResourceRef, spec ResourceSpec, prior *ResourceState) (*ResourceOutput, error)
+}
+
 // ResourceAdoptionLocator is an optional interface ResourceDriver
 // implementations may provide when a desired ResourceSpec can be resolved to a
 // live provider resource before local state exists. wfctl infra apply uses this
