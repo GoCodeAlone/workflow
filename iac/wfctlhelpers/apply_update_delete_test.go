@@ -8,6 +8,75 @@ import (
 	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
+func TestReplaceCleanup_CloudDeletionResumeUsesDurableHook(t *testing.T) {
+	for _, kind := range []string{"delete", "replace"} {
+		for _, completed := range []bool{false, true} {
+			t.Run(kind+"/"+map[bool]string{false: "pending", true: "complete"}[completed], func(t *testing.T) {
+				provider := newFakeProvider()
+				plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: kind, Resource: interfaces.ResourceSpec{Name: "database", Type: "infra.database"}, Current: &interfaces.ResourceState{Name: "database", Type: "infra.database", ProviderID: "prior-id"}}}}
+				checks, cleanups := 0, 0
+				result, err := ApplyPlanWithHooks(t.Context(), provider, plan, ApplyPlanHooks{
+					ResourceDeletionComplete: func(context.Context, interfaces.PlanAction) (bool, error) { checks++; return completed, nil },
+					OnResourceDeleted:        func(context.Context, interfaces.PlanAction) error { cleanups++; return nil },
+				})
+				wantDelete := 1
+				if completed {
+					wantDelete = 0
+				}
+				wantCreate := 0
+				if kind == "replace" {
+					wantCreate = 1
+				}
+				if err != nil || len(result.Errors) != 0 || checks != 1 || cleanups != 1 || provider.driver.deleteCount != wantDelete || provider.driver.createCount != wantCreate {
+					t.Fatalf("resume boundary invalid: err=%v result=%+v checks=%d cleanup=%d driver=%+v", err, result, checks, cleanups, provider.driver)
+				}
+			})
+		}
+	}
+}
+
+func TestReplaceCleanup_DurableLookupFailureDoesNotMutateCloud(t *testing.T) {
+	for _, kind := range []string{"delete", "replace"} {
+		t.Run(kind, func(t *testing.T) {
+			provider := newFakeProvider()
+			cause := errors.New("durable state unavailable")
+			plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: kind, Resource: interfaces.ResourceSpec{Name: "database", Type: "infra.database"}}}}
+			result, err := ApplyPlanWithHooks(t.Context(), provider, plan, ApplyPlanHooks{
+				ResourceDeletionComplete: func(context.Context, interfaces.PlanAction) (bool, error) { return false, cause },
+			})
+			if err != nil || len(result.Errors) != 1 || provider.driver.deleteCount != 0 || provider.driver.createCount != 0 {
+				t.Fatalf("failed durable lookup mutated cloud: result=%+v err=%v driver=%+v", result, err, provider.driver)
+			}
+		})
+	}
+}
+
+func TestDeleteCrash_NotFoundResumesOnlyWithDurableCleanup(t *testing.T) {
+	for _, journaled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "durable"}[journaled], func(t *testing.T) {
+			provider := newCaptureFakeProvider()
+			provider.driver.deleteErr = interfaces.ErrResourceNotFound
+			current := &interfaces.ResourceState{Name: "database", Type: "infra.database", ProviderID: "deleted-id"}
+			plan := &interfaces.IaCPlan{Actions: []interfaces.PlanAction{{Action: "delete", Resource: spec(current.Name, current.Type), Current: current}}}
+			cleanups := 0
+			hooks := ApplyPlanHooks{OnResourceDeleted: func(context.Context, interfaces.PlanAction) error { cleanups++; return nil }}
+			if journaled {
+				hooks.ResourceDeletionComplete = func(context.Context, interfaces.PlanAction) (bool, error) { return false, nil }
+			}
+			result, err := ApplyPlanWithHooks(t.Context(), provider, plan, hooks)
+			if err != nil || provider.driver.deleteRef.ProviderID != "deleted-id" || provider.driver.deleteCount != 1 {
+				t.Fatalf("did not retry exact deleted identity: result=%+v err=%v driver=%+v", result, err, provider.driver)
+			}
+			if journaled && (len(result.Errors) != 0 || cleanups != 1) {
+				t.Fatalf("crash-after-delete could not resume cleanup: errors=%v cleanup=%d", result.Errors, cleanups)
+			}
+			if !journaled && (len(result.Errors) != 1 || cleanups != 0) {
+				t.Fatal("legacy delete silently swallowed a provider error")
+			}
+		})
+	}
+}
+
 // providerIDCapturingDriver records the ResourceRef passed to Update /
 // Delete so tests can assert ProviderID propagation from action.Current
 // to the driver call.

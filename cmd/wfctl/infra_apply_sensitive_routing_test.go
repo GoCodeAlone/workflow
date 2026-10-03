@@ -55,14 +55,48 @@ type stubInfraStore struct {
 }
 
 func (s *stubInfraStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
-	return s.saved, nil
+	return latestRecordedStates(s.saved, s.deleted), nil
 }
 func (s *stubInfraStore) SaveResource(_ context.Context, st interfaces.ResourceState) error {
 	if s.saveErr != nil {
 		return s.saveErr
 	}
+	st.Lifecycle = cloneResourceLifecycle(st.Lifecycle)
 	s.saved = append(s.saved, st)
+	s.deleted = removeRecordedDeletion(s.deleted, st.Name)
 	return nil
+}
+
+func latestRecordedStates(saved []interfaces.ResourceState, deleted []string) []interfaces.ResourceState {
+	removed := make(map[string]bool, len(deleted))
+	for _, name := range deleted {
+		removed[name] = true
+	}
+	positions := make(map[string]int)
+	var current []interfaces.ResourceState
+	for _, state := range saved {
+		if removed[state.Name] {
+			continue
+		}
+		state.Lifecycle = cloneResourceLifecycle(state.Lifecycle)
+		if pos, exists := positions[state.Name]; exists {
+			current[pos] = state
+		} else {
+			positions[state.Name] = len(current)
+			current = append(current, state)
+		}
+	}
+	return current
+}
+
+func removeRecordedDeletion(deleted []string, name string) []string {
+	kept := deleted[:0]
+	for _, old := range deleted {
+		if old != name {
+			kept = append(kept, old)
+		}
+	}
+	return kept
 }
 func (s *stubInfraStore) DeleteResource(_ context.Context, n string) error {
 	s.deleted = append(s.deleted, n)
@@ -118,10 +152,10 @@ func TestPersistResourceWithSecretRouting_RoutesSensitiveAndSanitizesState(t *te
 	if err != nil {
 		t.Fatalf("persist: %v", err)
 	}
-	if len(store.saved) != 1 {
-		t.Fatalf("expected 1 saved, got %d", len(store.saved))
+	if len(store.saved) != 2 || store.saved[0].Lifecycle.Phase != interfaces.ResourcePhaseSecretRoutingPending || store.saved[1].Lifecycle.Phase != interfaces.ResourcePhaseActive {
+		t.Fatalf("expected routing intent then active state, got %+v", store.saved)
 	}
-	state := store.saved[0]
+	state := store.saved[1]
 	secretKey := sensitive.SecretKey("myres", "secret_key")
 	accessKey := sensitive.SecretKey("myres", "access_key")
 	if state.Outputs["secret_key"] != sensitive.Placeholder("myres", "secret_key") {
@@ -169,7 +203,8 @@ func TestPersistResourceWithSecretRouting_NoProviderHardFails(t *testing.T) {
 
 func TestPersistResourceWithSecretRouting_SaveFailureCompensatesWithDelete(t *testing.T) {
 	prov := newEnvTestProvider()
-	store := &stubInfraStore{saveErr: errors.New("disk full")}
+	cause := errors.New("disk full")
+	store := &stubInfraStore{saveErr: cause}
 	drv := &stubSensitiveDriver{}
 	out := interfaces.ResourceOutput{
 		Name: "myres", ProviderID: "AKIA",
@@ -181,8 +216,8 @@ func TestPersistResourceWithSecretRouting_SaveFailureCompensatesWithDelete(t *te
 	if err == nil {
 		t.Fatal("expected error from SaveResource")
 	}
-	if !strings.Contains(err.Error(), "disk full") {
-		t.Errorf("error should wrap original SaveResource err, got %q", err.Error())
+	if !errors.Is(err, cause) {
+		t.Errorf("error should preserve original SaveResource cause, got %q", err.Error())
 	}
 	if len(drv.deleteCalls) != 1 {
 		t.Errorf("expected 1 compensating Delete call, got %d", len(drv.deleteCalls))
@@ -259,8 +294,8 @@ func TestPersistResourceWithSecretRouting_Idempotent(t *testing.T) {
 	if prov.values[sensitive.SecretKey("myres", "secret_key")] != "SK" {
 		t.Errorf("provider value lost on re-Apply: %v", prov.values)
 	}
-	if len(store.saved) != 2 {
-		t.Errorf("expected 2 saved, got %d", len(store.saved))
+	if len(store.saved) != 4 {
+		t.Errorf("expected intent and active save per apply, got %d", len(store.saved))
 	}
 }
 

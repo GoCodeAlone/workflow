@@ -459,7 +459,7 @@ func applyWithProviderAndStore(ctx context.Context, provider interfaces.IaCProvi
 	// IaCProvider.Apply was hard-deleted from the interface; all routing
 	// goes through wfctlhelpers.ApplyPlanWithHooks (Replace + drift
 	// postcondition + IaCProviderFinalizer fan-out).
-	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut, cleanupProviderOptions{ConfigFile: cfgFile, Environment: envName})
 	// Reconciliation remains provider-scoped, but references may point at an
 	// unchanged or just-applied resource owned by another provider group.
 	hooks.CurrentState, err = store.ListResources(ctx)
@@ -670,8 +670,9 @@ func statePersistenceHooks(
 	providerType string,
 	planID string,
 	hydratedOut map[string]string,
+	cleanupOptions ...cleanupProviderOptions,
 ) wfctlhelpers.ApplyPlanHooks {
-	return wfctlhelpers.ApplyPlanHooks{
+	hooks := wfctlhelpers.ApplyPlanHooks{
 		ResolveSecret: func(ctx context.Context, key string) (string, error) {
 			if value, ok := hydratedOut[key]; ok {
 				return value, nil
@@ -752,6 +753,12 @@ func statePersistenceHooks(
 			return nil
 		},
 	}
+	var options cleanupProviderOptions
+	if len(cleanupOptions) > 0 {
+		options = cleanupOptions[0]
+	}
+	wireResourceSecretCleanup(&hooks, store, secretsProvider, options)
+	return hooks
 }
 
 func deleteStateAfterCloudDelete(store infraStateStore, name string) error {
@@ -819,6 +826,9 @@ func persistAppliedResourceOutput(
 }
 
 func actionCreatesReplacementResource(action interfaces.PlanAction) bool {
+	if action.CreationOwned != nil {
+		return *action.CreationOwned
+	}
 	return action.Action == "create" || action.Action == "replace"
 }
 
@@ -1004,6 +1014,11 @@ func resourceStateFromLiveOutput(spec interfaces.ResourceSpec, providerType stri
 		return interfaces.ResourceState{}, fmt.Errorf("%s/%s: live resource returned empty ProviderID; state not persisted", spec.Type, spec.Name)
 	}
 	appliedConfig := liveConfigFromOutputs(live.Outputs)
+	for key, flagged := range live.Sensitive {
+		if flagged {
+			delete(appliedConfig, key)
+		}
+	}
 	now := time.Now().UTC()
 	return interfaces.ResourceState{
 		ID:                  spec.Name,
@@ -1154,26 +1169,49 @@ func persistApplyMode(
 	out interfaces.ResourceOutput,
 	compensate bool,
 ) (map[string]string, error) {
+	var journaled bool
+	var intentErr error
+	rs, journaled, intentErr = prepareResourceRoutingIntent(ctx, store, provider, rs, out, compensate)
+	if intentErr != nil {
+		if !compensate {
+			return nil, intentErr
+		}
+		compErr := compensateCreatedResourceWithJournal(store, provider, driver, rs)
+		if compErr != nil {
+			return nil, fmt.Errorf("%s/%s: persist routing intent: %w (compensating delete failed: %v)", rs.Type, rs.Name, intentErr, compErr)
+		}
+		return nil, fmt.Errorf("%s/%s: persist routing intent: %w (compensating delete succeeded)", rs.Type, rs.Name, intentErr)
+	}
 	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
 	if err != nil {
 		if !compensate {
 			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
 		}
-		compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+		compErr := compensateCreatedResourceWithJournal(store, provider, driver, rs)
 		if compErr != nil {
 			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (compensating delete failed: %v)", rs.Type, rs.Name, err, compErr)
 		}
 		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (compensating delete succeeded)", rs.Type, rs.Name, err)
 	}
 	rs.Outputs = sanitized
-	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
+	if journaled {
+		rs.Lifecycle.Phase = interfaces.ResourcePhaseActive
+		rs.Lifecycle.RoutingCreated = false
+	}
+	var saveErr error
+	if rs.Lifecycle != nil {
+		saveErr = saveCleanupResource(ctx, store, rs)
+	} else {
+		saveErr = store.SaveResource(ctx, rs)
+	}
+	if saveErr != nil {
 		if !compensate {
 			return nil, fmt.Errorf("%s/%s: persist state after apply: %w", rs.Type, rs.Name, saveErr)
 		}
 		// Compensating Delete: the matching cloud resource is real but
 		// the state record didn't land. Roll back so a re-Apply doesn't
 		// double-create.
-		compErr := compensateAfterSaveFailure(provider, driver, rs, hydrated)
+		compErr := compensateCreatedResourceWithJournal(store, provider, driver, rs)
 		if compErr != nil {
 			return nil, fmt.Errorf("%s/%s: persist state after apply: %w (compensating delete failed: %v)", rs.Type, rs.Name, saveErr, compErr)
 		}
@@ -1189,21 +1227,9 @@ func persistAdoptRouteMode(
 	rs interfaces.ResourceState,
 	out interfaces.ResourceOutput,
 ) (map[string]string, error) {
-	sanitized, hydrated, err := sensitive.Route(ctx, provider, rs.Name, &out)
-	if err != nil {
-		if compErr := cleanupRoutedSecrets(provider, hydrated); compErr != nil {
-			return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w (routed-secret cleanup failed: %v)", rs.Type, rs.Name, err, compErr)
-		}
-		return nil, fmt.Errorf("%s/%s: route sensitive outputs: %w", rs.Type, rs.Name, err)
-	}
-	rs.Outputs = sanitized
-	if saveErr := store.SaveResource(ctx, rs); saveErr != nil {
-		if compErr := cleanupRoutedSecrets(provider, hydrated); compErr != nil {
-			return nil, fmt.Errorf("%s/%s: persist adopted state: %w (routed-secret cleanup failed: %v)", rs.Type, rs.Name, saveErr, compErr)
-		}
-		return nil, fmt.Errorf("%s/%s: persist adopted state: %w", rs.Type, rs.Name, saveErr)
-	}
-	return hydrated, nil
+	// Adoption does not own cloud creation, so retain durable routing debt
+	// on failure without deleting the pre-existing cloud resource.
+	return persistApplyMode(ctx, store, provider, nil, rs, out, false)
 }
 
 func persistReadMode(
@@ -1232,6 +1258,9 @@ func persistReadMode(
 			}
 		}
 	}
+	if prior != nil {
+		rs.Lifecycle = cloneResourceLifecycle(prior.Lifecycle)
+	}
 	sanitized := make(map[string]any, len(out.Outputs))
 	for k, v := range out.Outputs {
 		sanitized[k] = v
@@ -1259,60 +1288,17 @@ func persistReadMode(
 	return nil
 }
 
-func cleanupRoutedSecrets(provider secrets.Provider, hydrated map[string]string) error {
-	if provider == nil || len(hydrated) == 0 {
-		return nil
-	}
+// An intent write failed before any credential writes. Roll back only the
+// exact creation identity; name fallback could delete an unrelated resource.
+func compensateUnjournaledCreation(driver interfaces.ResourceDriver, rs interfaces.ResourceState) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var errs []error
-	for secretName := range hydrated {
-		if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
-			errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// compensateAfterSaveFailure rolls back routed secrets and the underlying
-// cloud resource after an apply-mode failure where the just-mutated resource is
-// known to be newly created or replacement-created. Uses a fresh 30-second
-// context: the apply context may already be canceled (operator Ctrl-C), but
-// compensation must proceed to avoid orphaning cloud resources + routed
-// secrets.
-func compensateAfterSaveFailure(
-	provider secrets.Provider,
-	driver interfaces.ResourceDriver,
-	rs interfaces.ResourceState,
-	hydrated map[string]string,
-) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	var errs []error
 	if driver == nil {
-		errs = append(errs, errors.New("driver.Delete unavailable"))
-	} else {
-		ref := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
-		if delErr := driver.Delete(ctx, ref); delErr != nil {
-			if rs.ProviderID == "" {
-				errs = append(errs, fmt.Errorf("driver.Delete: %w", delErr))
-			} else {
-				nameRef := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type}
-				if nameDelErr := driver.Delete(ctx, nameRef); nameDelErr != nil {
-					errs = append(errs, fmt.Errorf("driver.Delete: %w", errors.Join(delErr, nameDelErr)))
-				}
-			}
-		}
+		return fmt.Errorf("%w: failed-create cleanup driver missing", interfaces.ErrValidation)
 	}
-	if provider != nil {
-		for secretName := range hydrated {
-			if delErr := provider.Delete(ctx, secretName); delErr != nil && !errors.Is(delErr, secrets.ErrNotFound) {
-				errs = append(errs, fmt.Errorf("provider.Delete(%s): %w", secretName, delErr))
-			}
-		}
-	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
+	ref := interfaces.ResourceRef{Name: rs.Name, Type: rs.Type, ProviderID: rs.ProviderID}
+	if err := driver.Delete(ctx, ref); err != nil && !interfaces.IsErrResourceNotFound(err) {
+		return cleanupStateError{operation: "delete failed creation", name: rs.Name, cause: err}
 	}
 	return nil
 }
@@ -1654,7 +1640,7 @@ func applyPrecomputedPlanWithStore(ctx context.Context, plan interfaces.IaCPlan,
 	validateInputProviderIDs(provider, &plan)
 	fmt.Printf("  Plan: %d action(s) to execute.\n", len(plan.Actions))
 	// v2 is the only supported dispatch per ADR 0024 + workflow#699.
-	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut)
+	hooks := statePersistenceHooks(store, secretsProvider, provider, providerType, plan.ID, hydratedOut, cleanupProviderOptions{ConfigFile: cfgFile, Environment: envName})
 	currentState, stateErr := store.ListResources(ctx)
 	if stateErr != nil {
 		return fmt.Errorf("load state for runtime references: %w", stateErr)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	goplugin "github.com/GoCodeAlone/go-plugin"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -41,10 +42,16 @@ import (
 //	pb.IaCProviderDriftConfigDetectorServer
 //	pb.IaCProviderLogCaptureServer
 //	pb.IaCProviderRunnerServer
+//	pb.IaCProviderJobCancelerServer
 //	pb.IaCRequirementDiscoveryServer
 //	pb.IaCProviderRequirementMapperServer
 //	pb.IaCStateBackendServer
 //	pb.ResourceSensitiveInputDeclarerServer
+//
+// Native interfaces.IaCProviderRunner and interfaces.IaCProviderJobCanceler are
+// also registered through typed SDK bridges when no protobuf implementation
+// exists. Cancellation is discovered independently; neither capability implies
+// the other.
 //
 // ResourceDriver:
 //
@@ -183,6 +190,13 @@ func registerIaCServicesOnly(s *grpc.Server, provider any) error {
 	}
 	if v, ok := provider.(pb.IaCProviderRunnerServer); ok {
 		pb.RegisterIaCProviderRunnerServer(s, v)
+	} else if v, ok := provider.(interfaces.IaCProviderRunner); ok {
+		pb.RegisterIaCProviderRunnerServer(s, &nativeIaCJobRunnerServer{runner: v})
+	}
+	if v, ok := provider.(pb.IaCProviderJobCancelerServer); ok {
+		pb.RegisterIaCProviderJobCancelerServer(s, v)
+	} else if v, ok := provider.(interfaces.IaCProviderJobCanceler); ok {
+		pb.RegisterIaCProviderJobCancelerServer(s, &nativeIaCJobCancelerServer{canceler: v})
 	}
 	if v, ok := provider.(pb.IaCRequirementDiscoveryServer); ok {
 		pb.RegisterIaCRequirementDiscoveryServer(s, v)

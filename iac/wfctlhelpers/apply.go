@@ -96,6 +96,10 @@ type ApplyPlanHooks struct {
 	CurrentState []interfaces.ResourceState
 	// ResolveSecret retrieves a secret key only at the dispatch boundary.
 	ResolveSecret func(context.Context, string) (string, error)
+	// ResourceDeletionComplete reads durable cloud-deletion evidence. A true
+	// result skips only Delete; secret cleanup hooks still run before Replace
+	// may create a new resource. Lookup errors prohibit cloud mutation.
+	ResourceDeletionComplete func(context.Context, interfaces.PlanAction) (bool, error)
 	// OnBeforeAction fires PRE-DISPATCH for every PlanAction, after the
 	// per-iteration ctx.Err() check but before JIT substitution / driver
 	// resolution / cloud-side mutation. The intended use case is policy /
@@ -246,7 +250,7 @@ func applyPlanWithEnvProviderAndHooks(
 		}
 	}()
 
-	deleteHookActive := hooks.OnResourceDeleted != nil
+	deleteHookActive := hooks.OnResourceDeleted != nil || hooks.ResourceDeletionComplete != nil
 	inputNames := snapshotKeys(plan.InputSnapshot)
 	result = &interfaces.ApplyResult{
 		PlanID:               plan.ID,
@@ -465,6 +469,11 @@ func applyPlanWithEnvProviderAndHooks(
 			// doUpdate / doReplace each append on success; doDelete does not.
 			preLen := len(result.Resources)
 			actionHooks := hooks
+			if hooks.ResourceDeletionComplete != nil {
+				actionHooks.ResourceDeletionComplete = func(ctx context.Context, _ interfaces.PlanAction) (bool, error) {
+					return hooks.ResourceDeletionComplete(ctx, action)
+				}
+			}
 			actionHooks.OnResourceDeleted = func(ctx context.Context, _ interfaces.PlanAction) error {
 				if hooks.OnResourceDeleted != nil {
 					if err := hooks.OnResourceDeleted(ctx, action); err != nil {
@@ -474,7 +483,8 @@ func applyPlanWithEnvProviderAndHooks(
 				delete(syncedOutputs, action.Resource.Name)
 				return nil
 			}
-			if err := dispatchAction(ctx, d, runtimeAction, result, actionHooks, deleteHookActive); err != nil {
+			creationOwned, dispatchErr := dispatchAction(ctx, d, runtimeAction, result, actionHooks, deleteHookActive)
+			if err := dispatchErr; err != nil {
 				var hookErr hookDispatchError
 				if errors.As(err, &hookErr) {
 					// Phase 2.3 (#698): hookDispatchError wraps a hook
@@ -517,7 +527,9 @@ func applyPlanWithEnvProviderAndHooks(
 					// Phase 2.3 (#698): post-apply-hook ran AFTER cloud-side
 					// create/update succeeded — cloud-side work IS done;
 					// hook failure is post-hook semantically.
-					if err := hooks.OnResourceApplied(ctx, d, action, out); err != nil {
+					appliedAction := action
+					appliedAction.CreationOwned = &creationOwned
+					if err := hooks.OnResourceApplied(ctx, d, appliedAction, out); err != nil {
 						fatalErr = fmt.Errorf("%s/%s: post-apply hook: %w", action.Resource.Type, action.Resource.Name, err)
 						iterErr = err
 						iterStatus = statusForPostHookFailure()
@@ -704,18 +716,19 @@ func snapshotKeys(m map[string]string) []string {
 // An unknown action kind returns an error which ApplyPlan records on
 // result.Errors so an operator running a malformed plan sees a per-action
 // diagnostic rather than a silent skip.
-func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) error {
+func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks, deleteHookActive bool) (bool, error) {
 	switch action.Action {
 	case "create":
 		return doCreate(ctx, d, action, result)
 	case "update":
-		return doUpdate(ctx, d, action, result)
+		return false, doUpdate(ctx, d, action, result)
 	case "replace":
-		return doReplace(ctx, d, action, result, hooks, deleteHookActive)
+		err := doReplace(ctx, d, action, result, hooks, deleteHookActive)
+		return err == nil, err
 	case "delete":
-		return doDelete(ctx, d, action)
+		return false, deleteResourceWithRecovery(ctx, d, action, hooks)
 	default:
-		return fmt.Errorf("unknown action %q", action.Action)
+		return false, fmt.Errorf("unknown action %q", action.Action)
 	}
 }
 
@@ -753,20 +766,21 @@ func dispatchAction(ctx context.Context, d interfaces.ResourceDriver, action int
 //     prefix instead. This boundary is deliberate: ActionError carries
 //     the per-resource action context fields the wrap chain otherwise
 //     duplicates.
-func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) error {
+func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult) (bool, error) {
 	out, err := d.Create(ctx, action.Resource)
+	created := err == nil
 	if errors.Is(err, interfaces.ErrResourceAlreadyExists) {
 		us, ok := d.(interfaces.UpsertSupporter)
 		if !ok || !us.SupportsUpsert() {
-			return err // no recovery available; surface the conflict
+			return false, err // no recovery available; surface the conflict
 		}
 		ref := interfaces.ResourceRef{Name: action.Resource.Name, Type: action.Resource.Type}
 		existing, readErr := d.Read(ctx, ref)
 		if readErr != nil {
-			return fmt.Errorf("upsert: read after conflict: %w", errors.Join(err, readErr))
+			return false, fmt.Errorf("upsert: read after conflict: %w", errors.Join(err, readErr))
 		}
 		if existing == nil || existing.ProviderID == "" {
-			return fmt.Errorf("upsert: resource %q found by name but ProviderID is empty: %w", ref.Name, err)
+			return false, fmt.Errorf("upsert: resource %q found by name but ProviderID is empty: %w", ref.Name, err)
 		}
 		ref.ProviderID = existing.ProviderID
 		out, err = d.Update(ctx, ref, action.Resource)
@@ -774,7 +788,7 @@ func doCreate(ctx context.Context, d interfaces.ResourceDriver, action interface
 	if err == nil && out != nil {
 		result.Resources = append(result.Resources, *out)
 	}
-	return err
+	return created, err
 }
 
 // doUpdate invokes Update with a ResourceRef carrying action.Current's
@@ -854,7 +868,7 @@ func DefaultReplace(ctx context.Context, d interfaces.ResourceDriver, action int
 }
 
 func defaultReplaceWithHooks(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, result *interfaces.ApplyResult, hooks ApplyPlanHooks) error {
-	if err := d.Delete(ctx, refFromAction(action)); err != nil {
+	if err := deleteResourceWithRecovery(ctx, d, action, hooks); err != nil {
 		return fmt.Errorf("replace: delete: %w", err)
 	}
 	if hooks.OnResourceDeleted != nil {
@@ -1003,6 +1017,25 @@ func hasReplaceErrorPrefix(err error) bool {
 // successful delete has no resource to record.
 func doDelete(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction) error {
 	return d.Delete(ctx, refFromAction(action))
+}
+
+func deleteResourceWithRecovery(ctx context.Context, d interfaces.ResourceDriver, action interfaces.PlanAction, hooks ApplyPlanHooks) error {
+	if hooks.ResourceDeletionComplete != nil {
+		complete, err := hooks.ResourceDeletionComplete(ctx, action)
+		if err != nil {
+			return err
+		}
+		if complete {
+			return nil
+		}
+	}
+	err := doDelete(ctx, d, action)
+	// A crash may occur after Delete succeeds but before the durable
+	// completion marker lands. Only recovery-enabled callers accept absence.
+	if hooks.ResourceDeletionComplete != nil && interfaces.IsErrResourceNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 // refFromAction builds a ResourceRef from the action's resource identity,

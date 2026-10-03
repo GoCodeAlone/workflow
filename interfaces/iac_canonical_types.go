@@ -1,5 +1,10 @@
 package interfaces
 
+import (
+	"fmt"
+	"strings"
+)
+
 const (
 	JobKindPreDeploy    = "PRE_DEPLOY"
 	JobKindPostDeploy   = "POST_DEPLOY"
@@ -8,11 +13,21 @@ const (
 	JobKindEphemeral    = "EPHEMERAL"
 )
 
+// MaxProviderJobTimeoutSeconds bounds one-off provider job execution to one hour.
+const MaxProviderJobTimeoutSeconds = 3600
+
 // JobSpec describes a one-off or scheduled job workload.
 // Kind is one of: PRE_DEPLOY, POST_DEPLOY, FAILED_DEPLOY, SCHEDULED, EPHEMERAL.
 type JobSpec struct {
-	Name            string               `json:"name" yaml:"name"`
-	Kind            string               `json:"kind" yaml:"kind"`
+	Name string `json:"name" yaml:"name"`
+	Kind string `json:"kind" yaml:"kind"`
+	// Target identifies the exact existing parent. Providers validate ownership
+	// and supported resource types; core never guesses a provider-specific type.
+	Target *ResourceRef `json:"target,omitempty" yaml:"target,omitempty"`
+	// TimeoutSeconds is 1..MaxProviderJobTimeoutSeconds for targeted jobs.
+	// Zero is accepted only for untargeted legacy callers, including
+	// module/provider_ephemeral_runner.go, retaining provider-default behavior.
+	TimeoutSeconds  int                  `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
 	Image           string               `json:"image,omitempty" yaml:"image,omitempty"`
 	RunCommand      string               `json:"run_command" yaml:"run_command"`
 	EnvVars         map[string]string    `json:"env_vars,omitempty" yaml:"env_vars,omitempty"`
@@ -21,6 +36,23 @@ type JobSpec struct {
 	Termination     *TerminationSpec     `json:"termination,omitempty" yaml:"termination,omitempty"`
 	Alerts          []AlertSpec          `json:"alerts,omitempty" yaml:"alerts,omitempty"`
 	LogDestinations []LogDestinationSpec `json:"log_destinations,omitempty" yaml:"log_destinations,omitempty"`
+}
+
+// Validate checks provider-neutral target identity and timeout before dispatch.
+// Providers remain responsible for enforcing the execution timeout and cleanup.
+func (s JobSpec) Validate() error {
+	if s.TimeoutSeconds < 0 || s.TimeoutSeconds > MaxProviderJobTimeoutSeconds {
+		return fmt.Errorf("%w: provider job timeout_seconds must be between 0 and %d", ErrValidation, MaxProviderJobTimeoutSeconds)
+	}
+	if s.Target != nil {
+		if s.TimeoutSeconds == 0 {
+			return fmt.Errorf("%w: targeted provider jobs require a positive timeout_seconds", ErrValidation)
+		}
+		if strings.TrimSpace(s.Target.Name) == "" || strings.TrimSpace(s.Target.Type) == "" || strings.TrimSpace(s.Target.ProviderID) == "" {
+			return fmt.Errorf("%w: provider job target requires name, type, and provider_id", ErrValidation)
+		}
+	}
+	return nil
 }
 
 // WorkerSpec describes a long-running background worker workload.

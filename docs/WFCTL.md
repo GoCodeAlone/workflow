@@ -2132,6 +2132,21 @@ Known resolved sensitive values are masked in control-plane diagnostics, not in
 provider outputs or consumer artifacts. Regenerate older saved plans whose
 hashes were based on resolved values before applying them with this version.
 
+Routed output credentials and written `infra_output` aliases have a durable
+lifecycle journal containing exact keys, store namespaces, and a generation,
+never credential values. Routing intent is saved and read back before writes.
+Delete and replace retain state until every recorded key reads back absent
+(write-only stores use list). Interrupted cleanup resumes on apply; changing a
+store's namespace fails closed. Removing an alias generator does not remove its
+cleanup record. Adoption never deletes the pre-existing cloud resource on a
+routing failure. State backends that discard lifecycle metadata are rejected.
+An interrupted owned creation is replaced only after its exact resource and
+keys are cleaned up. Interrupted routing on a pre-existing resource blocks
+convergence until its credentials are recovered; it never authorizes automatic
+cloud deletion. Confirmed ghosts from `--refresh --auto-approve` retain their
+cleanup journal and are recreated after cleanup. Legacy routed keys remain
+tracked even if a later update omits those output fields.
+
 ```
 wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
                   [--refresh] [--allow-protected-prune] [--skip-refresh]
@@ -2936,6 +2951,15 @@ For `provider-ephemeral`, `provider` is required and must name a registered
 `iac.provider` service that advertises `IaCProviderRunner`. Secret references
 in `env` are passed through for provider-side resolution; wfctl does not resolve
 them to plaintext before the provider job boundary.
+
+The public `JobSpec` contract optionally targets an existing resource with its
+exact name, type, and provider ID. Targeted jobs require `timeout_seconds` from
+1 through 3600; negative or larger timeouts are rejected for every job. Untargeted
+legacy jobs may omit the timeout. Providers can separately advertise
+`IaCProviderJobCanceler`; it is not a required runner method. An absent or
+UNIMPLEMENTED cancellation capability returns `ErrProviderMethodUnimplemented`,
+while authorization, availability, and caller-context errors remain intact.
+Cloud-specific execution and timeout enforcement belong to the provider plugin.
 
 ---
 

@@ -50,6 +50,8 @@ const (
 	// IaCServiceRunner is the gRPC service name for the optional
 	// IaCProviderRunner service.
 	IaCServiceRunner = "workflow.plugin.external.iac.IaCProviderRunner"
+	// IaCServiceJobCanceler is the independently advertised cancellation service.
+	IaCServiceJobCanceler = "workflow.plugin.external.iac.IaCProviderJobCanceler"
 	// IaCServiceResourceDriver is the gRPC service name for the optional
 	// ResourceDriver service. When advertised, Adapter.ResourceDriver(type)
 	// returns a per-resource-type bridge that routes Create/Read/Update/Delete/
@@ -131,11 +133,32 @@ type RunnerProvider interface {
 	Runner() interfaces.IaCProviderRunner
 }
 
+// JobCancelerProvider discovers cancellation independently of Runner(). A nil
+// result means the plugin did not advertise the optional cancellation service.
+type JobCancelerProvider interface {
+	JobCanceler() interfaces.IaCProviderJobCanceler
+}
+
+type jobCancelerAdapter struct {
+	client pb.IaCProviderJobCancelerClient
+}
+
+func (c *jobCancelerAdapter) CancelJob(ctx context.Context, handle interfaces.JobHandle) error {
+	_, err := c.client.CancelJob(ctx, jobHandleToPB(handle))
+	if status.Code(err) == codes.Unimplemented {
+		return fmt.Errorf("%w: %w", interfaces.ErrProviderMethodUnimplemented, err)
+	}
+	return err
+}
+
 type runnerAdapter struct {
 	client pb.IaCProviderRunnerClient
 }
 
 func (r *runnerAdapter) RunJob(ctx context.Context, spec interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
 	resp, err := r.client.RunJob(ctx, jobSpecToPB(spec))
 	if err != nil {
 		if status.Code(err) == codes.Unimplemented {
@@ -540,6 +563,7 @@ type Adapter struct {
 	regionLister    *regionListerImpl       // nil when IaCServiceRegionLister not advertised
 	drift           *driftDetectorAdapter   // nil when IaCServiceDriftDetector not advertised
 	runner          *runnerAdapter          // nil when IaCServiceRunner not advertised
+	jobCanceler     *jobCancelerAdapter     // nil when IaCServiceJobCanceler not advertised
 	resourceDriver  pb.ResourceDriverClient // nil when IaCServiceResourceDriver not advertised
 	sensitiveInputs pb.ResourceSensitiveInputDeclarerClient
 
@@ -599,6 +623,9 @@ func New(conn grpc.ClientConnInterface, advertisedServices map[string]bool) *Ada
 	if advertisedServices[IaCServiceRunner] {
 		a.runner = &runnerAdapter{client: pb.NewIaCProviderRunnerClient(conn)}
 	}
+	if advertisedServices[IaCServiceJobCanceler] {
+		a.jobCanceler = &jobCancelerAdapter{client: pb.NewIaCProviderJobCancelerClient(conn)}
+	}
 	if advertisedServices[IaCServiceResourceDriver] {
 		a.resourceDriver = pb.NewResourceDriverClient(conn)
 	}
@@ -636,6 +663,14 @@ func (a *Adapter) Runner() interfaces.IaCProviderRunner {
 		return nil
 	}
 	return a.runner
+}
+
+// JobCanceler returns the optional cancellation capability, or nil when absent.
+func (a *Adapter) JobCanceler() interfaces.IaCProviderJobCanceler {
+	if a.jobCanceler == nil {
+		return nil
+	}
+	return a.jobCanceler
 }
 
 // ─── interfaces.IaCProvider ──────────────────────────────────────────────────
@@ -1201,13 +1236,17 @@ func driftClassFromPB(c pb.DriftClass) interfaces.DriftClass {
 
 func jobSpecToPB(s interfaces.JobSpec) *pb.JobSpec {
 	out := &pb.JobSpec{
-		Name:          s.Name,
-		Kind:          s.Kind,
-		Image:         s.Image,
-		RunCommand:    s.RunCommand,
-		EnvVars:       copyStringMap(s.EnvVars),
-		EnvVarsSecret: copyStringMap(s.EnvVarsSecret),
-		Cron:          s.Cron,
+		Name:           s.Name,
+		Kind:           s.Kind,
+		Image:          s.Image,
+		RunCommand:     s.RunCommand,
+		EnvVars:        copyStringMap(s.EnvVars),
+		EnvVarsSecret:  copyStringMap(s.EnvVarsSecret),
+		Cron:           s.Cron,
+		TimeoutSeconds: int32(s.TimeoutSeconds), //nolint:gosec // G115: validated to 0..3600 before conversion
+	}
+	if s.Target != nil {
+		out.Target = refToPB(*s.Target)
 	}
 	if s.Termination != nil {
 		out.Termination = &pb.JobTerminationSpec{

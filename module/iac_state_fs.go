@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,8 +81,77 @@ func (s *FSIaCStateStore) SaveState(ctx context.Context, state *IaCState) error 
 	if err != nil {
 		return fmt.Errorf("iac fs state: SaveState %q: marshal: %w", state.ResourceID, err)
 	}
-	if err := os.WriteFile(s.statePath(state.ResourceID), data, 0o600); err != nil {
+	if err := WriteIaCStateFile(s.statePath(state.ResourceID), data); err != nil {
 		return fmt.Errorf("iac fs state: SaveState %q: write: %w", state.ResourceID, err)
+	}
+	return nil
+}
+
+type iaCStateTempFile interface {
+	io.Writer
+	Name() string
+	Sync() error
+	Close() error
+}
+
+type iaCStateFileOps struct {
+	createTemp func(string, string) (iaCStateTempFile, error)
+	rename     func(string, string) error
+	syncDir    func(string) error
+}
+
+func nativeIaCStateFileOps() iaCStateFileOps {
+	return iaCStateFileOps{
+		createTemp: func(dir, pattern string) (iaCStateTempFile, error) {
+			return os.CreateTemp(dir, pattern)
+		},
+		rename:  replaceIaCStateFile,
+		syncDir: syncIaCStateDirectory,
+	}
+}
+
+// WriteIaCStateFile replaces a state record using the native durability boundary
+// (rename plus directory sync on Unix, write-through replacement on Windows).
+// Callers create the directory first. Temporary files are private (0600) and
+// never end in .json, so state listings cannot expose uncommitted records.
+func WriteIaCStateFile(path string, data []byte) error {
+	return writeIaCStateFile(path, data, nativeIaCStateFileOps())
+}
+
+func writeIaCStateFile(path string, data []byte, ops iaCStateFileOps) error {
+	dir := filepath.Dir(path)
+	temp, err := ops.createTemp(dir, ".iac-state-*")
+	if err != nil {
+		return fmt.Errorf("create temporary state: %w", err)
+	}
+	name := temp.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = temp.Close()
+		}
+		_ = os.Remove(name)
+	}()
+	n, err := temp.Write(data)
+	if err != nil {
+		return fmt.Errorf("write temporary state: %w", err)
+	}
+	if n != len(data) {
+		return fmt.Errorf("write temporary state: %w", io.ErrShortWrite)
+	}
+	if err := temp.Sync(); err != nil {
+		return fmt.Errorf("sync temporary state: %w", err)
+	}
+	err = temp.Close()
+	closed = true
+	if err != nil {
+		return fmt.Errorf("close temporary state: %w", err)
+	}
+	if err := ops.rename(name, path); err != nil {
+		return fmt.Errorf("rename state: %w", err)
+	}
+	if err := ops.syncDir(dir); err != nil {
+		return fmt.Errorf("sync state directory: %w", err)
 	}
 	return nil
 }

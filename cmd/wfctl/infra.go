@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -1479,6 +1480,10 @@ func runInfraApply(args []string) error {
 			return fmt.Errorf("list state for refresh: %w", statesErr)
 		}
 		groups, groupOrder := groupStatesByProvider(states, cfgFile, envName)
+		secretProvider, secretErr := loadSecretsProviderForRouting(cfgFile)
+		if secretErr != nil {
+			return secretErr
+		}
 		// Wrap each group in a helper so the deferred closer fires after the
 		// group finishes, not at runInfraApply exit. Without this, a config
 		// with N provider groups would hold N connections open throughout the
@@ -1498,7 +1503,7 @@ func runInfraApply(args []string) error {
 				}()
 			}
 			return runInfraApplyRefreshPhase(ctx, provider, g.refs, store,
-				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr)
+				*autoApprove, allowProtectedPruneFlag, states, os.Stdout, os.Stderr, secretProvider)
 		}
 		for _, moduleRef := range groupOrder {
 			if refreshErr := refreshGroup(moduleRef, groups[moduleRef]); refreshErr != nil {
@@ -1646,9 +1651,16 @@ func runInfraApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve secrets provider for infra_output sync: %w", err)
 	}
-	states, err := loadCurrentState(cfgFile, envName)
+	outputStateStore, err := resolveStateStore(cfgFile, envName)
 	if err != nil {
-		return fmt.Errorf("load current state for infra_output sync: %w", err)
+		return cleanupStateError{operation: "open infra_output journal", cause: err}
+	}
+	if closer, ok := outputStateStore.(io.Closer); ok {
+		defer func() { _ = closer.Close() }()
+	}
+	states, err := outputStateStore.ListResources(ctx)
+	if err != nil {
+		return cleanupStateError{operation: "read infra_output journal", cause: err}
 	}
 	// Only reload the workflow config when routing or env resolution is needed:
 	// store-scoped generators need secretStores, and --env needs module
@@ -1666,7 +1678,7 @@ func runInfraApply(args []string) error {
 			}
 		}
 	}
-	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope)
+	return syncInfraOutputSecretsScoped(ctx, secretsCfg, secretsProvider, states, wfCfg, envName, runHydrated, refreshOutputsFlag, infraOutputSourceScope, outputStateStore)
 }
 
 func runInfraStatus(args []string) error {

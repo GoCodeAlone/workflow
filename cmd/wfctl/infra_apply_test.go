@@ -884,7 +884,7 @@ type fakeStateStore struct {
 func (f *fakeStateStore) ListResources(_ context.Context) ([]interfaces.ResourceState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]interfaces.ResourceState(nil), f.saved...), nil
+	return latestRecordedStates(f.saved, f.deleted), nil
 }
 func (f *fakeStateStore) SaveResource(_ context.Context, s interfaces.ResourceState) error {
 	f.mu.Lock()
@@ -892,7 +892,9 @@ func (f *fakeStateStore) SaveResource(_ context.Context, s interfaces.ResourceSt
 	if f.saveErr != nil {
 		return f.saveErr
 	}
+	s.Lifecycle = cloneResourceLifecycle(s.Lifecycle)
 	f.saved = append(f.saved, s)
+	f.deleted = removeRecordedDeletion(f.deleted, s.Name)
 	return nil
 }
 func (f *fakeStateStore) DeleteResource(_ context.Context, name string) error {
@@ -1068,10 +1070,10 @@ func TestApplyWithProvider_AdoptionRoutesNewSensitiveOutputs(t *testing.T) {
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if len(store.saved) != 1 {
-		t.Fatalf("saved states = %d, want adopted state", len(store.saved))
+	if len(store.saved) != 2 || store.saved[0].Lifecycle.Phase != interfaces.ResourcePhaseSecretRoutingPending || store.saved[1].Lifecycle.Phase != interfaces.ResourcePhaseActive {
+		t.Fatalf("saved states = %+v, want adoption routing intent and active state", store.saved)
 	}
-	if got := store.saved[0].Outputs["uri"]; got != sensitive.Placeholder("adopted-db", "uri") {
+	if got := store.saved[1].Outputs["uri"]; got != sensitive.Placeholder("adopted-db", "uri") {
 		t.Fatalf("adopted uri output = %#v, want routed placeholder", got)
 	}
 	if got := os.Getenv(strings.ToUpper(secretName)); got != rawURI {

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/secrets"
 )
 
 // runInfraApplyRefreshPhase detects drift against the given provider and prunes
@@ -32,7 +33,8 @@ import (
 // Behavior:
 //   - For each DriftClassGhost result: if autoApprove is false, prints a dry-run
 //     "would prune" line. If autoApprove is true, calls store.DeleteResource and
-//     emits an audit log line to stderr.
+//     emits an audit log line to stderr. Routed resources instead persist confirmed
+//     cloud deletion so normal apply cleans their exact keys before recreation.
 //   - Protected resources (protected: true in state Outputs) are blocked unless
 //     allowProtectedPrune is also set. Without that flag, an error is returned and
 //     no prunes happen.
@@ -55,6 +57,7 @@ func runInfraApplyRefreshPhase(
 	states []interfaces.ResourceState,
 	stdout io.Writer,
 	stderr io.Writer,
+	secretProviders ...secrets.Provider,
 ) error {
 	if len(refs) == 0 {
 		fmt.Fprintln(stdout, "Refresh: no state to check.")
@@ -115,6 +118,35 @@ func runInfraApplyRefreshPhase(
 		}
 
 		isProtected := isRefProtected(states, r.Name)
+		var retained *interfaces.ResourceState
+		for i := range states {
+			state := &states[i]
+			if state.Name == r.Name && (state.Lifecycle != nil || hasRoutedPlaceholders(state.Outputs)) {
+				copy := *state
+				retained = &copy
+				break
+			}
+		}
+		if retained != nil {
+			if !autoApprove {
+				fmt.Fprintf(stdout, "Refresh: would retain %s for routed-secret cleanup during apply.\n", r.Name)
+				continue
+			}
+			var secretProvider secrets.Provider
+			if len(secretProviders) != 0 {
+				secretProvider = secretProviders[0]
+			}
+			prepared, err := prepareResourceSecretDeletion(ctx, store, secretProvider, interfaces.PlanAction{Resource: interfaces.ResourceSpec{Name: retained.Name, Type: retained.Type}, Current: retained})
+			if err != nil {
+				return err
+			}
+			prepared.Lifecycle.Phase = interfaces.ResourcePhaseCloudDeletedSecretCleanupPending
+			if err := saveCleanupResource(ctx, store, *prepared); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "Refresh: retained %s for routed-secret cleanup during apply.\n", r.Name)
+			continue
+		}
 
 		if !autoApprove {
 			// Dry-run: report what would happen without mutating.

@@ -207,6 +207,19 @@ func ComputePlan(ctx context.Context, p interfaces.IaCProvider, desired []interf
 // cache-key collisions across distinct resources.
 func classifyModification(ctx context.Context, p interfaces.IaCProvider, spec interfaces.ResourceSpec, rs interfaces.ResourceState, hash string, hashable bool, out **interfaces.PlanAction) error {
 	rsCopy := rs
+	if rs.Lifecycle != nil && rs.Lifecycle.Phase == interfaces.ResourcePhaseSecretRoutingPending {
+		if !rs.Lifecycle.RoutingCreated {
+			return fmt.Errorf("%w: resource %q has interrupted secret routing; recover its existing credentials before apply", interfaces.ErrValidation, rs.Name)
+		}
+		*out = &interfaces.PlanAction{Action: "replace", Resource: spec, Current: &rsCopy, ResolvedConfigHash: hash}
+		return nil
+	}
+	if rs.Lifecycle != nil && (rs.Lifecycle.Phase == interfaces.ResourcePhaseCloudDeletePending || rs.Lifecycle.Phase == interfaces.ResourcePhaseCloudDeletedSecretCleanupPending) {
+		// Finish the exact old generation's deletion and credential cleanup
+		// before creating the desired resource; deleted outputs are not live.
+		*out = &interfaces.PlanAction{Action: "replace", Resource: spec, Current: &rsCopy, ResolvedConfigHash: hash}
+		return nil
+	}
 
 	// Nil-provider fallback: legacy ConfigHash compare.
 	if p == nil {

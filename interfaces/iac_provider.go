@@ -415,6 +415,15 @@ type IaCProviderRunner interface {
 	JobLogs(ctx context.Context, handle JobHandle, sink LogCaptureSink) error
 }
 
+// IaCProviderJobCanceler is a separate OPTIONAL capability, preserving existing
+// IaCProviderRunner implementations. Cancellation applies only to the exact
+// provider-owned job identified by the handle, including its ownership metadata.
+// Providers own terminal cleanup and return ErrProviderMethodUnimplemented when
+// cancellation is unsupported. Callers must discover this capability separately.
+type IaCProviderJobCanceler interface {
+	CancelJob(ctx context.Context, handle JobHandle) error
+}
+
 // IaCProviderRegionLister is an OPTIONAL interface that an IaCProvider
 // implementation MAY also satisfy to expose provider-sourced region lists.
 // Callers MUST type-assert against this interface and treat the negative case

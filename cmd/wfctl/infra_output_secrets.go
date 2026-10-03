@@ -43,34 +43,10 @@ func buildStateOutputsMap(states []interfaces.ResourceState) map[string]map[stri
 // the cold-start constraint (write-only providers cannot rehydrate
 // without same-process hand-off).
 func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, stateOutputs map[string]map[string]any, hydrated map[string]string) (string, error) {
-	if source == "" {
-		return "", fmt.Errorf("infra_output: source is required (format: \"module.field\")")
+	moduleName, field, err := resolveInfraOutputSource(wfCfg, source, envName)
+	if err != nil {
+		return "", err
 	}
-	dot := strings.Index(source, ".")
-	if dot < 1 || dot >= len(source)-1 {
-		return "", fmt.Errorf("infra_output: invalid source %q: expected \"module.field\" format", source)
-	}
-	moduleName := source[:dot]
-	field := source[dot+1:]
-
-	// Apply env resolution: the state was persisted under the env-resolved name.
-	if envName != "" && wfCfg != nil {
-		for i := range wfCfg.Modules {
-			m := &wfCfg.Modules[i]
-			if m.Name != moduleName {
-				continue
-			}
-			resolved, ok := m.ResolveForEnv(envName)
-			if !ok {
-				return "", fmt.Errorf("infra_output: module %q is explicitly disabled for environment %q — cannot read infra_output from a disabled module", moduleName, envName)
-			}
-			if resolved.Name != "" {
-				moduleName = resolved.Name
-			}
-			break
-		}
-	}
-
 	if stateOutputs == nil {
 		return "", fmt.Errorf("infra_output: state outputs not available for source %q — did infra apply succeed?", source)
 	}
@@ -99,6 +75,38 @@ func resolveInfraOutput(wfCfg *config.WorkflowConfig, source, envName string, st
 		return "", fmt.Errorf("infra_output: output field %q of module %q is %T, expected string", field, moduleName, val)
 	}
 	return s, nil
+}
+
+func resolveInfraOutputSource(wfCfg *config.WorkflowConfig, source, envName string) (string, string, error) {
+	if source == "" {
+		return "", "", fmt.Errorf("infra_output: source is required (format: \"module.field\")")
+	}
+	dot := strings.Index(source, ".")
+	if dot < 1 || dot >= len(source)-1 {
+		return "", "", fmt.Errorf("infra_output: invalid source %q: expected \"module.field\" format", source)
+	}
+	moduleName := source[:dot]
+	field := source[dot+1:]
+
+	// Apply env resolution: the state was persisted under the env-resolved name.
+	if envName != "" && wfCfg != nil {
+		for i := range wfCfg.Modules {
+			m := &wfCfg.Modules[i]
+			if m.Name != moduleName {
+				continue
+			}
+			resolved, ok := m.ResolveForEnv(envName)
+			if !ok {
+				return "", "", fmt.Errorf("infra_output: module %q is explicitly disabled for environment %q — cannot read infra_output from a disabled module", moduleName, envName)
+			}
+			if resolved.Name != "" {
+				moduleName = resolved.Name
+			}
+			break
+		}
+	}
+
+	return moduleName, field, nil
 }
 
 // stateKeys returns the sorted keys of a state outputs map for error messages.
@@ -134,7 +142,10 @@ func syncInfraOutputSecrets(ctx context.Context, secretsCfg *SecretsConfig, prov
 	return syncInfraOutputSecretsScoped(ctx, secretsCfg, provider, states, wfCfg, envName, hydrated, refreshOutputs, nil)
 }
 
-func syncInfraOutputSecretsScoped(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string, refreshOutputs bool, sourceModuleScope map[string]struct{}) error {
+func syncInfraOutputSecretsScoped(ctx context.Context, secretsCfg *SecretsConfig, provider secrets.Provider, states []interfaces.ResourceState, wfCfg *config.WorkflowConfig, envName string, hydrated map[string]string, refreshOutputs bool, sourceModuleScope map[string]struct{}, stateStores ...infraStateStore) error {
+	if len(stateStores) > 1 {
+		return fmt.Errorf("%w: infra_output sync requires at most one state store", interfaces.ErrValidation)
+	}
 	if secretsCfg == nil {
 		return nil
 	}
@@ -161,7 +172,10 @@ func syncInfraOutputSecretsScoped(ctx context.Context, secretsCfg *SecretsConfig
 	for _, gen := range gens {
 		genProvider, err := providerForSecretGen(wfCfg, provider, gen, envName)
 		if err != nil {
-			return err
+			return cleanupStateError{operation: "resolve infra_output store", name: gen.Key, cause: err}
+		}
+		if genProvider == nil {
+			return fmt.Errorf("%w: infra_output secrets provider missing for %q", interfaces.ErrValidation, gen.Key)
 		}
 		lookupViaList := func(key string) (bool, error) {
 			lookup, ok := listLookups[genProvider]
@@ -190,10 +204,10 @@ func syncInfraOutputSecretsScoped(ctx context.Context, secretsCfg *SecretsConfig
 			var listLookupErr error
 			exists, listLookupErr = lookupViaList(gen.Key)
 			if listLookupErr != nil {
-				return listLookupErr
+				return cleanupStateError{operation: "check infra_output alias", name: gen.Key, cause: listLookupErr}
 			}
 		default:
-			return fmt.Errorf("check secret %q: %w", gen.Key, getErr)
+			return cleanupStateError{operation: "check infra_output alias", name: gen.Key, cause: getErr}
 		}
 
 		if exists && !refreshOutputs {
@@ -203,24 +217,26 @@ func syncInfraOutputSecretsScoped(ctx context.Context, secretsCfg *SecretsConfig
 
 		newValue, resolveErr := resolveInfraOutput(wfCfg, gen.Source, envName, stateOutputs, hydrated)
 		if resolveErr != nil {
-			return fmt.Errorf("generate infra_output secret %q: %w", gen.Key, resolveErr)
+			return cleanupStateError{operation: "resolve infra_output alias", name: gen.Key, cause: resolveErr}
 		}
 
+		if exists && isReadable && currentVal == newValue {
+			fmt.Printf("  secret %q: unchanged\n", gen.Key)
+			continue
+		}
+		// Production always supplies a store; the optional form keeps narrow
+		// sync-only callers compatible without claiming durable cleanup.
+		if len(stateStores) != 0 {
+			if err := journalInfraOutputAlias(ctx, stateStores[0], states, wfCfg, envName, gen, genProvider, provider); err != nil {
+				return err
+			}
+		}
+		if err := genProvider.Set(ctx, gen.Key, newValue); err != nil {
+			return cleanupStateError{operation: "store infra_output alias", name: gen.Key, cause: err}
+		}
 		if exists {
-			// refreshOutputs is true here (guarded by the continue above).
-			// For readable providers skip the Set when the value is unchanged.
-			if isReadable && currentVal == newValue {
-				fmt.Printf("  secret %q: unchanged\n", gen.Key)
-				continue
-			}
-			if err := genProvider.Set(ctx, gen.Key, newValue); err != nil {
-				return fmt.Errorf("store secret %q: %w", gen.Key, err)
-			}
 			fmt.Printf("  secret %q: updated from infra output\n", gen.Key)
 		} else {
-			if err := genProvider.Set(ctx, gen.Key, newValue); err != nil {
-				return fmt.Errorf("store secret %q: %w", gen.Key, err)
-			}
 			fmt.Printf("  secret %q: created from infra output\n", gen.Key)
 		}
 	}
@@ -231,26 +247,9 @@ func infraOutputSourceInScope(wfCfg *config.WorkflowConfig, source, envName stri
 	if len(scope) == 0 {
 		return true
 	}
-	dot := strings.Index(source, ".")
-	if dot < 1 {
+	moduleName, _, err := resolveInfraOutputSource(wfCfg, source, envName)
+	if err != nil {
 		return false
-	}
-	moduleName := source[:dot]
-	if envName != "" && wfCfg != nil {
-		for i := range wfCfg.Modules {
-			m := &wfCfg.Modules[i]
-			if m.Name != moduleName {
-				continue
-			}
-			resolved, ok := m.ResolveForEnv(envName)
-			if !ok {
-				return false
-			}
-			if resolved.Name != "" {
-				moduleName = resolved.Name
-			}
-			break
-		}
 	}
 	_, ok := scope[moduleName]
 	return ok

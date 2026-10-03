@@ -1,12 +1,14 @@
 package bdd_test
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/plugin/external/sdk"
 	"github.com/GoCodeAlone/workflow/wftest/bdd"
@@ -64,6 +66,7 @@ func TestAssertProviderCapabilitiesMatchRegistration_ManuallyRegisteredMissingOp
 		"ResourceDriver",
 		"IaCRequirementDiscovery",
 		"IaCProviderRequirementMapper",
+		"IaCProviderJobCanceler",
 	}
 	joined := strings.Join(rec.errors, "\n")
 	for _, name := range wantContains {
@@ -153,6 +156,7 @@ type allCapabilitiesStub struct {
 	pb.UnimplementedResourceDriverServer
 	pb.UnimplementedIaCRequirementDiscoveryServer
 	pb.UnimplementedIaCProviderRequirementMapperServer
+	pb.UnimplementedIaCProviderJobCancelerServer
 }
 
 // requiredOnlyStub satisfies Required ONLY.
@@ -162,3 +166,45 @@ type requiredOnlyStub struct {
 
 // noIaCStub satisfies no IaC interface.
 type noIaCStub struct{}
+
+type nativeJobCapabilitiesStub struct {
+	pb.UnimplementedIaCProviderRequiredServer
+}
+
+func (*nativeJobCapabilitiesStub) RunJob(context.Context, interfaces.JobSpec) (*interfaces.JobHandle, error) {
+	return nil, nil
+}
+
+func (*nativeJobCapabilitiesStub) JobStatus(context.Context, interfaces.JobHandle) (*interfaces.JobStatusReply, error) {
+	return nil, nil
+}
+
+func (*nativeJobCapabilitiesStub) JobLogs(context.Context, interfaces.JobHandle, interfaces.LogCaptureSink) error {
+	return nil
+}
+
+func (*nativeJobCapabilitiesStub) CancelJob(context.Context, interfaces.JobHandle) error {
+	return nil
+}
+
+func TestProviderJobNativeCapabilitiesBDDRegistration(t *testing.T) {
+	provider := &nativeJobCapabilitiesStub{}
+	server := grpc.NewServer()
+	if err := sdk.RegisterAllIaCProviderServices(server, provider); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recordingT{}
+	bdd.AssertProviderCapabilitiesMatchRegistration(rec, provider, server)
+	if rec.failed {
+		t.Fatalf("SDK native capabilities mismatch: %v", rec.errors)
+	}
+	server = grpc.NewServer()
+	pb.RegisterIaCProviderRequiredServer(server, provider)
+	rec = &recordingT{}
+	bdd.AssertProviderCapabilitiesMatchRegistration(rec, provider, server)
+	for _, service := range []string{"IaCProviderRunner", "IaCProviderJobCanceler"} {
+		if !strings.Contains(strings.Join(rec.errors, "\n"), service) {
+			t.Errorf("BDD did not report missing native %s registration: %v", service, rec.errors)
+		}
+	}
+}
