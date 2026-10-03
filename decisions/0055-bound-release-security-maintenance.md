@@ -1,6 +1,6 @@
 # 0055. Bound release security maintenance
 
-**Status:** Accepted
+**Status:** Superseded by 0056; six-PR scanner schedule disproved before implementation
 **Date:** 2026-10-03
 **Decision-makers:** Jon Langevin (standing autonomous follow-up approval)
 **Related:** `docs/plans/2026-10-03-release-security-design.md`; `docs/public-workflow-policy.md`

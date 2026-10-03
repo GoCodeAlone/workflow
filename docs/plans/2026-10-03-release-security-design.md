@@ -1,6 +1,6 @@
 # Workflow Release Security Maintenance
 
-**Status:** Approved under standing autonomous follow-up authority; bounded review/backport recorded below.
+**Status:** Unfinished; scanner rollout blocked by D6. Source-only slice has its own design/lock; no six-PR execution is authorized by this draft.
 **Baseline:** main `49e1803424f303f6f98cef51cc9ea2dee96c7d38`.
 **Boundary:** independent Workflow maintenance, not a Signal feature or fleet migration.
 
@@ -162,3 +162,12 @@ forbidden. Use six already-authorized transitions and a current upstream image,
 without changing the policy implementation or wrapper. The policytool module is
 not silently patched because that would change executable pins in unrelated
 current/staged CI contexts. All Signal manifest/task boundaries remain unchanged.
+
+D6 (Important, unresolved): the mutation harness itself is executable-pinned by
+active and staged CI. Its digest constant cannot change through authority-bundle
+adoption alone. Existing active CI `532f...` and unadopted staged CI `37b...`
+must be reconciled by the owner before a replacement context can authorize new
+harness bytes. No hash rewrite, fake old-image comment, harness skip, or trust
+exception is permissible. Operator clarification requested; do not execute the
+six-PR schedule above. Independently executable source remediation is designed
+in `2026-10-03-release-security-source-design.md`.
