@@ -156,6 +156,24 @@ other well-known type changes. ADR0058 adds external convert.go/tests to Task2;
 native RED/GREEN, strict negative cases and real uppercase pipeline execution
 must verify both directions. Three tasks/one PR and CI exclusions unchanged.
 
+Independent code review S1: Go Windows Process.Signal rejects SIGTERM. Retain
+both generated native compilation modes on Windows, then explicitly skip only
+the POSIX lifecycle portion before process launch. Darwin/Linux continue to
+prove real HTTP and graceful SIGTERM; forced kill is never graceful evidence.
+Windows cross-compilation is compile-only, not a native lifecycle receipt.
+
+### Backport 2026-10-04: Default App Config Has External Modules
+
+Actual wfctl init API output, compiled withGo1.27.1 and its corrected default
+plugin bootstrap, exits1 because observability.telemetry/collector are external
+plugin types, not built-ins. API/full-stack templates omit their installation
+and discovery. Per ADR0059, remove only those optional external modules from
+default configurations and disclose explicit opt-in composition in existing
+READMEs. Assert every generated app module against the actual default registry;
+rerun the real API config, changing only loopback address/response identity in
+the proof. No alternate-type substitution or proof-only config deletion.
+Task2 adds the two YAML templates; three tasks/one PR and CI exclusions remain.
+
 ### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
 
 Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker

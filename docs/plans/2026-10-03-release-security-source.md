@@ -9,6 +9,7 @@
 **Design:** `docs/plans/2026-10-03-release-security-source-design.md`.
 **Decisions:** `decisions/0056-isolate-source-security-remediation.md`; approved amendment `decisions/0057-upgrade-source-and-generated-go.md`.
 Generated-runtime owning-file amendment: `decisions/0058-repair-generated-runtime-boundaries.md`.
+Default-config owning-file amendment: `decisions/0059-use-self-contained-app-scaffolds.md`.
 
 ## Guidance And Evidence
 
@@ -27,6 +28,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 - Release tags/publication, deployment, Signal manifest changes and other-repository fleet migration. Workflow Go1.27.1/generated defaults and maintained Docker builders are explicitly included by ADR0057.
 - Cache reuse for SDK, Docker, registry, mutant or capability executables; test removal, timeout extension, GORACE changes, scanner ignores/suppression.
 - Generated strict StringValue/app bootstrap defects are Task2 per ADR0058; broader codec types, new scaffold ABI and new generator APIs remain excluded.
+- Default optional external observability config repair is Task2 per ADR0059; new external-plugin loader and replacement telemetry semantics remain excluded.
 
 **PR Grouping:**
 
@@ -34,7 +36,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Locked 2026-10-04T05:30:50Z
+**Status:** Locked 2026-10-04T05:51:09Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -64,6 +66,11 @@ existing default-plugin registry for all generated app bootstraps and preserve
 the generated strict StringValue schema with a bounded bidirectional host
 value-map adapter. Add failing tests first; invalid fields/types must still
 reject and ordinary messages retain existing behavior. No wider WKT support.
+ADR0059 adds only `cmd/wfctl/templates/{api-service,full-stack}/workflow.yaml.tmpl`:
+remove optional external observability modules from the self-contained defaults,
+document opt-in composition in existing owning READMEs, and test generated module
+types against the actual default-plugin registry. Add failing assertions first;
+rerun real generated API config with only address/identity parameterization.
 The steps below supersede earlier1.26.8 commands for final verification;
 previous tests/results remain historical receipts, not new-compiler acceptance.
 
@@ -166,3 +173,9 @@ failures map to Task2C and its added owning files; strict negative/ordinary
 message compatibility plus actual app/plugin runtime proof are explicit.
 Three tasks/one existing PR retained. Independent reviewer Ramanujan approved
 causal correction and checked ownership/coverage; strict manifest check passed.
+
+ADR0059 bounded alignment PASS: real default-config startup failure maps to
+Task2C and the two added YAML owners, existing README opt-in notes, real default
+registry assertions and generated API runtime gates. Forward/reverse trace
+and strict three-task/one-PR manifest check passed; independent Ramanujan
+confirmed the narrow coverage. Protected exclusions unchanged.
