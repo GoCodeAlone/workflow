@@ -613,24 +613,65 @@ func TestGenerateProjectStructure(t *testing.T) {
 	if !strings.Contains(string(modData), "module github.com/TestOrg/workflow-plugin-my-plugin") {
 		t.Errorf("go.mod module path unexpected: %s", string(modData))
 	}
-	if !strings.Contains(string(modData), "go "+workflowMinimumGoVersion) {
-		t.Errorf("go.mod go version should match workflow minimum %s, got:\n%s", workflowMinimumGoVersion, string(modData))
+	if !strings.Contains(string(modData), "\ngo 1.27.1\n") {
+		t.Errorf("go.mod should use Go 1.27.1, got:\n%s", string(modData))
 	}
 
 	ciData, err := os.ReadFile(filepath.Join(outputDir, ".github/workflows/ci.yml"))
 	if err != nil {
 		t.Fatalf("read ci.yml: %v", err)
 	}
-	if !strings.Contains(string(ciData), "go-version: '"+workflowMinimumGoVersion+"'") {
-		t.Errorf("ci.yml should use workflow minimum Go %s, got:\n%s", workflowMinimumGoVersion, string(ciData))
+	if !strings.Contains(string(ciData), "go-version: '1.27.1'\n") {
+		t.Errorf("ci.yml should use Go 1.27.1, got:\n%s", string(ciData))
 	}
 
 	releaseData, err := os.ReadFile(filepath.Join(outputDir, ".github/workflows/release.yml"))
 	if err != nil {
 		t.Fatalf("read release.yml: %v", err)
 	}
-	if !strings.Contains(string(releaseData), "go-version: '"+workflowMinimumGoVersion+"'") {
-		t.Errorf("release.yml should use workflow minimum Go %s, got:\n%s", workflowMinimumGoVersion, string(releaseData))
+	if !strings.Contains(string(releaseData), "go-version: '1.27.1'\n") {
+		t.Errorf("release.yml should use Go 1.27.1, got:\n%s", string(releaseData))
+	}
+}
+
+func TestGenerateProjectStructureGoVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		workflowReplace string
+		legacyContracts bool
+	}{
+		{name: "strict-local", workflowReplace: t.TempDir()},
+		{name: "legacy-local", workflowReplace: t.TempDir(), legacyContracts: true},
+		{name: "legacy-released", legacyContracts: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			if err := generateProjectStructure(GenerateOptions{
+				Name:            "workflow-plugin-go-version-proof",
+				Author:          "TestOrg",
+				OutputDir:       outputDir,
+				WorkflowReplace: tc.workflowReplace,
+				LegacyContracts: tc.legacyContracts,
+			}); err != nil {
+				t.Fatalf("generate project: %v", err)
+			}
+			for _, file := range []struct {
+				path string
+				want string
+			}{
+				{path: "go.mod", want: "\ngo 1.27.1\n"},
+				{path: ".github/workflows/ci.yml", want: "go-version: '1.27.1'\n"},
+				{path: ".github/workflows/release.yml", want: "go-version: '1.27.1'\n"},
+			} {
+				data, err := os.ReadFile(filepath.Join(outputDir, file.path))
+				if err != nil {
+					t.Fatalf("read %s: %v", file.path, err)
+				}
+				if !strings.Contains(string(data), file.want) {
+					t.Errorf("%s missing Go 1.27.1 declaration %q", file.path, file.want)
+				}
+			}
+		})
 	}
 }
 
@@ -639,8 +680,8 @@ func TestGenerateGoModWithWorkflowReplace(t *testing.T) {
 	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowStrictContractsVersion) {
 		t.Fatalf("go.mod should require local-development workflow version, got:\n%s", got)
 	}
-	if !strings.Contains(got, "go "+workflowMinimumGoVersion) {
-		t.Fatalf("strict go.mod should use workflow minimum Go version, got:\n%s", got)
+	if !strings.Contains(got, "\ngo 1.27.1\n") {
+		t.Fatalf("strict go.mod should use Go 1.27.1, got:\n%s", got)
 	}
 	if !strings.Contains(got, "replace github.com/GoCodeAlone/workflow => /workspace/workflow") {
 		t.Fatalf("go.mod should include workflow replace, got:\n%s", got)
@@ -652,8 +693,8 @@ func TestGenerateGoModLegacyWithoutWorkflowReplace(t *testing.T) {
 	if !strings.Contains(got, "github.com/GoCodeAlone/workflow "+workflowReleasedVersion) {
 		t.Fatalf("legacy go.mod should require released workflow version, got:\n%s", got)
 	}
-	if !strings.Contains(got, "go "+defaultPluginGoVersion) {
-		t.Fatalf("legacy go.mod should keep default plugin Go version, got:\n%s", got)
+	if !strings.Contains(got, "\ngo 1.27.1\n") {
+		t.Fatalf("legacy go.mod should use Go 1.27.1, got:\n%s", got)
 	}
 }
 

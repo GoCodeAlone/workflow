@@ -1,6 +1,6 @@
 module github.com/test/iac-good
 
-go 1.26.8
+go 1.27.1
 
 require github.com/GoCodeAlone/workflow v0.63.2
 

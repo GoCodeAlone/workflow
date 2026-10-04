@@ -9,7 +9,7 @@
 #       -t workflow-server-admin:local .
 
 # --- Stage 1: Build the Go server binary ---
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS go-builder
 
 ARG TARGETOS TARGETARCH
 

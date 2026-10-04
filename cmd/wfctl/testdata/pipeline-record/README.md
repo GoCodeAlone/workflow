@@ -32,7 +32,7 @@ child isolation, real SDK RPC, framing, canonical encoding, and public CLI
 stdout are not substituted. These tests do not prove live Docker health or
 container execution. All temporary paths are canonicalized before journal use.
 
-Run from the repository root with `GOWORK=off GOTOOLCHAIN=go1.26.8`:
+Run from the repository root with `GOWORK=off GOTOOLCHAIN=go1.27.1`:
 
 ```sh
 go test ./cmd/wfctl -run '^TestPipelineRecordHost' -count=1
@@ -42,7 +42,7 @@ For Task 35 step 10, first verify the selected release archive/checksum and
 check out its exact source tag for the SDK fixture and tests. Then opt in:
 
 ```sh
-GOWORK=off GOTOOLCHAIN=go1.26.8 \
+GOWORK=off GOTOOLCHAIN=go1.27.1 \
   WFCTL_RECORD_HOST_BINARY=/absolute/path/to/verified/wfctl \
   go test ./cmd/wfctl -run '^TestPipelineRecordHost' -count=1
 ```

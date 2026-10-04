@@ -184,6 +184,20 @@ remove only the invalid manual route. Test generated paths/routes RED/GREEN
 and rerun real API/health/shutdown. Task2 adds event-processor YAML alongside
 the existing two YAML owners; no new core API or endpoint/feature removal.
 
+### Backport 2026-10-04: Remove Redundant Invalid Trigger Blocks
+
+The real API now reaches trigger configuration, then exits1 because the emitted
+http-trigger key is not a registered trigger type. All three templates use this
+obsolete named/type/config shape; event-processor also has event-trigger. Actual
+HTTP/event trigger configuration expects type-keyed routes/subscriptions, not
+the nested server/topic blocks. Existing workflows.http already configures the
+real API routes; workflows.messaging already configures the event subscriptions
+and producers. Remove only these redundant invalid top-level trigger blocks,
+retaining those real workflow sections unchanged. Add actual default trigger
+registry assertions RED/GREEN and regenerate/launch the API app again. This is
+Task2C in its existing three YAML owners: no manifest, task/PR count, engine API,
+or application-route/subscription removal. Do not repair only the proof config.
+
 ### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
 
 Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker

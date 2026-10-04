@@ -240,7 +240,7 @@ ci:
           - id: goprivate_token
             env: GOPRIVATE_TOKEN
         build_args:
-          BASE_IMAGE: golang:1.26-alpine
+          BASE_IMAGE: golang:1.27.1-alpine
         platforms: [linux/amd64, linux/arm64]
         push_to: [docr]
 ```
@@ -250,7 +250,7 @@ ci:
 ```sh
 WFCTL_BUILD_DRY_RUN=1 wfctl build image --config infra.yaml
 # [dry-run] docker build --file docker/api.Dockerfile --platform linux/amd64,linux/arm64
-#   --secret id=goprivate_token,env=GOPRIVATE_TOKEN --build-arg BASE_IMAGE=golang:1.26-alpine .
+#   --secret id=goprivate_token,env=GOPRIVATE_TOKEN --build-arg BASE_IMAGE=golang:1.27.1-alpine .
 ```
 
 ### Common pitfalls

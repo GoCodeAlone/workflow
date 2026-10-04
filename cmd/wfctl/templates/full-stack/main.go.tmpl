@@ -11,6 +11,7 @@ import (
 
 	"github.com/GoCodeAlone/workflow"
 	"github.com/GoCodeAlone/workflow/config"
+	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
 	_ "github.com/GoCodeAlone/workflow/setup"
 )
 
@@ -42,6 +43,7 @@ func main() {
 	engine, err := workflow.NewEngineBuilder().
 		WithLogger(logger).
 		WithAllDefaults().
+		WithPlugins(allplugins.DefaultPlugins()...).
 		BuildFromConfig(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to build workflow: %v\n", err)

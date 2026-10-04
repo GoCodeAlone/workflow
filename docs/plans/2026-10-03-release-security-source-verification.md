@@ -2,6 +2,46 @@
 
 2026-10-03; source-only boundary, not scanner rollout or release promotion.
 
+## Go1.27.1 Amendment Checkpoint
+
+2026-10-04: earlier Go1.26.8 receipts below are historical, not new-compiler
+acceptance. Root/example/eleven fixture floors, generated defaults/CI/Docker,
+SDK/build defaults and maintained builders now use1.27.1. Explicit overrides
+remain supported. Compatible golangci-lint2.14.0 scoped lint exits0 after final
+edits. Independent literal/module/YAML/AST assertions and actual emitted
+default-build HTTP runtime tests pass under1.27.1. Protected .github/scripts
+diff against49e18034 remains empty.
+
+Real generated bootstrap, strict StringValue, optional default module, health
+route and obsolete named-trigger failures were reproduced before correcting
+their owning source/templates. Generated app defaults use the existing plugin
+registry, real health wiring and existing HTTP/messaging workflow sections;
+no test-only module/route substitution or core ABI expansion. Generated config
+module/health/trigger assertions each fail on their original template defect
+and pass after repair; ordinary message and invalid StringValue cases remain.
+
+Actual rebuilt wfctl emits a fresh API app; explicit local Workflow replacement
+is disclosed (published dependency resolution is not proved). Go1.27.1 build
+serves an unpredictable owned API identity, /health reports healthy, SIGTERM
+exits0 without forced kill and endpoint is absent. Fresh generated SDK plugin
+executes through actual plugin-dir discovery and pipeline run, returning the
+exact uppercase randomized StringValue input. Its1.0.0 internal build flag is
+local probe metadata, not a release. Default BuildBinaryStep output likewise
+builds/serves/shuts down through its real emitted bootstrap, not a copied app.
+
+Windows native-test cross-compiles pass. Its generated runtime test compiles
+the exact emitted binaries before skipping only the POSIX SIGTERM lifecycle;
+Windows graceful shutdown is not claimed. The corresponding actual POSIX
+embedded/external-config runtime cases pass.
+
+Raw current evidence: /private/tmp/workflow-go127-source-proof-20261004;
+worker bootstrap TDD: /private/tmp/workflow-go127-source-main-20261004-report.md.
+Exact final committed-source metadata/server, whole cold nonroot Linux152-
+package race/coverage within unchanged600s, maintained Docker launch, strict
+Docker/default-registry30-denial matrix, fresh full UI/scanner/called control,
+all actual PR checks and merged-main receipts remain required. CI alignment
+uses its separate locked twelve-PR plan; no source/Signal completion claim.
+
 ## Go And Host Evidence
 
 - Exact Go1.26.5 baseline govulncheck called findings retained; patched native

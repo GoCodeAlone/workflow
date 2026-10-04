@@ -66,6 +66,41 @@ func TestRenderCircleCI_NilPlan(t *testing.T) {
 	}
 }
 
+func TestRenderCircleCI_GoVersionImages(t *testing.T) {
+	files, err := cigen.RenderCircleCI(richCIPlan())
+	if err != nil {
+		t.Fatalf("RenderCircleCI: %v", err)
+	}
+	var parsed struct {
+		Jobs map[string]struct {
+			Docker []struct {
+				Image string `yaml:"image"`
+			} `yaml:"docker"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(files[".circleci/config.yml"]), &parsed); err != nil {
+		t.Fatalf("parse CircleCI config: %v", err)
+	}
+	for _, name := range []string{"plan-prereq", "plan-deploy", "apply-prereq", "apply-deploy", "smoke"} {
+		t.Run(name, func(t *testing.T) {
+			job, ok := parsed.Jobs[name]
+			if !ok {
+				t.Fatalf("missing job %s", name)
+			}
+			if len(job.Docker) != 1 {
+				t.Fatalf("job %s has %d Docker images, want 1", name, len(job.Docker))
+			}
+			want := "cimg/go:1.27.1"
+			if name == "smoke" {
+				want = "cimg/base:current"
+			}
+			if got := job.Docker[0].Image; got != want {
+				t.Errorf("job %s image = %q, want %q", name, got, want)
+			}
+		})
+	}
+}
+
 func TestRenderCircleCI_SinglePhase(t *testing.T) {
 	p := richCIPlan()
 	p.Phases = []cigen.DeployPhase{{Name: "deploy", ConfigPath: "deploy.yaml"}}

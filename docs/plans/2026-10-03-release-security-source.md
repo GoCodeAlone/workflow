@@ -77,6 +77,10 @@ ADR0060 adds `cmd/wfctl/templates/event-processor/workflow.yaml.tmpl` to the two
 existing YAML owners: preserve /health via healthPath and existing observability
 wiring, not a manual route to a non-handler service. Add generated-config path/
 route regression RED/GREEN and rerun actual API/health/SIGTERM/endpoint absence.
+Observed trigger backport additionally removes redundant invalid named trigger
+blocks from these same owners, preserving existing HTTP routes and messaging
+subscriptions/producers. Assert any emitted triggers against the actual default
+trigger registry before final generated-app proof; no manifest change.
 The steps below supersede earlier1.26.8 commands for final verification;
 previous tests/results remain historical receipts, not new-compiler acceptance.
 

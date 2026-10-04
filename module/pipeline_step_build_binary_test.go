@@ -2,12 +2,20 @@ package module
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+
+	"github.com/GoCodeAlone/workflow/config"
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildBinaryStep_FactoryRequiresConfigFile(t *testing.T) {
@@ -51,11 +59,52 @@ func TestBuildBinaryStep_Defaults(t *testing.T) {
 	if s.modulePath != "app" {
 		t.Errorf("expected default module_path %q, got %q", "app", s.modulePath)
 	}
-	if s.goVersion != "1.22" {
-		t.Errorf("expected default go_version %q, got %q", "1.22", s.goVersion)
+	if s.goVersion != "1.27.1" {
+		t.Errorf("expected default go_version %q, got %q", "1.27.1", s.goVersion)
 	}
 	if !s.embedConfig {
 		t.Error("expected embed_config to default to true")
+	}
+}
+
+func TestBuildBinaryStep_DryRun_GoVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		goVersion *string
+		want      string
+	}{
+		{name: "omitted", want: "1.27.1"},
+		{name: "empty", goVersion: new(""), want: "1.27.1"},
+		{name: "explicit-older", goVersion: new("1.22"), want: "1.22"},
+		{name: "explicit-patch", goVersion: new("1.26.5"), want: "1.26.5"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := map[string]any{
+				"config_file": writeTempConfig(t, "version: 1\nmodules: []\n"),
+				"dry_run":     true,
+			}
+			if tc.goVersion != nil {
+				cfg["go_version"] = *tc.goVersion
+			}
+			step, err := NewBuildBinaryStepFactory()("version-proof", cfg, nil)
+			if err != nil {
+				t.Fatalf("create step: %v", err)
+			}
+			result, err := step.Execute(t.Context(), &PipelineContext{})
+			if err != nil {
+				t.Fatalf("execute dry run: %v", err)
+			}
+			if got := result.Output["go_version"]; got != tc.want {
+				t.Errorf("go_version = %v, want %s", got, tc.want)
+			}
+			contents, ok := result.Output["file_contents"].(map[string]string)
+			if !ok {
+				t.Fatalf("file_contents = %T, want map[string]string", result.Output["file_contents"])
+			}
+			if got := contents["go.mod"]; !strings.Contains(got, "\ngo "+tc.want+"\n") {
+				t.Errorf("go.mod should preserve Go %s, got:\n%s", tc.want, got)
+			}
+		})
 	}
 }
 
@@ -131,6 +180,213 @@ func TestBuildBinaryStep_DryRun_GeneratesMainGo_WithEmbedDirective(t *testing.T)
 	}
 	if !strings.Contains(mainGo, `_ "embed"`) {
 		t.Errorf("main.go missing embed import, got:\n%s", mainGo)
+	}
+}
+
+func TestBuildBinaryStep_DryRun_DefaultEngineBuilder(t *testing.T) {
+	for _, embedConfig := range []bool{true, false} {
+		name := "external-config"
+		if embedConfig {
+			name = "embedded-config"
+		}
+		t.Run(name, func(t *testing.T) {
+			step, err := NewBuildBinaryStepFactory()("defaults-proof", map[string]any{
+				"config_file":  writeTempConfig(t, "version: 1\nmodules: []\n"),
+				"embed_config": embedConfig,
+				"dry_run":      true,
+			}, nil)
+			if err != nil {
+				t.Fatalf("create step: %v", err)
+			}
+			result, err := step.Execute(t.Context(), &PipelineContext{})
+			if err != nil {
+				t.Fatalf("execute dry run: %v", err)
+			}
+			contents, ok := result.Output["file_contents"].(map[string]string)
+			if !ok {
+				t.Fatalf("file_contents = %T, want map[string]string", result.Output["file_contents"])
+			}
+			mainGo := contents["main.go"]
+			for _, want := range []string{
+				`_ "github.com/GoCodeAlone/workflow/setup"`,
+				`allplugins "github.com/GoCodeAlone/workflow/plugins/all"`,
+				"engine, err := workflow.NewEngineBuilder().\n\t\tWithLogger(logger).\n\t\tWithAllDefaults().\n\t\tWithPlugins(allplugins.DefaultPlugins()...).\n\t\tBuildFromConfig(cfg)",
+			} {
+				if !strings.Contains(mainGo, want) {
+					t.Errorf("generated main must wire real engine defaults: missing %q", want)
+				}
+			}
+			for _, forbidden := range []string{"workflow.NewStdEngine(", `"github.com/GoCodeAlone/modular"`} {
+				if strings.Contains(mainGo, forbidden) {
+					t.Errorf("generated main retains bare engine wiring %q", forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildBinaryStep_DryRun_GeneratedMainHTTPRuntime(t *testing.T) {
+	sourceRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatalf("resolve source root: %v", err)
+	}
+	for _, embedConfig := range []bool{true, false} {
+		name := "external-config"
+		if embedConfig {
+			name = "embedded-config"
+		}
+		t.Run(name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			cfg, err := config.LoadFromFile(filepath.Join(sourceRoot, "example", "api-server-config.yaml"))
+			if err != nil {
+				t.Fatalf("load real HTTP example: %v", err)
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("allocate HTTP address: %v", err)
+			}
+			address := listener.Addr().String()
+			if err := listener.Close(); err != nil {
+				t.Fatalf("release HTTP address: %v", err)
+			}
+			identity := "health-" + filepath.Base(filepath.Dir(outputDir))
+			for i := range cfg.Modules {
+				switch cfg.Modules[i].Name {
+				case "api-http-server":
+					cfg.Modules[i].Config["address"] = address
+				case "health-handler":
+					cfg.Modules[i].Name = identity
+				}
+			}
+			for _, raw := range cfg.Workflows["http"].(map[string]any)["routes"].([]any) {
+				route := raw.(map[string]any)
+				if route["handler"] == "health-handler" {
+					route["handler"] = identity
+				}
+			}
+			configYAML, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatalf("parameterize HTTP example: %v", err)
+			}
+			step, err := NewBuildBinaryStepFactory()("runtime-proof", map[string]any{
+				"config_file":  writeTempConfig(t, string(configYAML)),
+				"embed_config": embedConfig,
+				"dry_run":      true,
+			}, nil)
+			if err != nil {
+				t.Fatalf("create step: %v", err)
+			}
+			result, err := step.Execute(t.Context(), &PipelineContext{})
+			if err != nil {
+				t.Fatalf("execute dry run: %v", err)
+			}
+			contents, ok := result.Output["file_contents"].(map[string]string)
+			if !ok || len(contents) != 3 {
+				t.Fatalf("file_contents = %v, want exactly three emitted files", result.Output["file_contents"])
+			}
+			for _, path := range []string{"go.mod", "main.go", "app.yaml"} {
+				data, ok := contents[path]
+				if !ok {
+					t.Fatalf("missing emitted file %s", path)
+				}
+				if err := os.WriteFile(filepath.Join(outputDir, path), []byte(data), 0600); err != nil {
+					t.Fatalf("materialize %s: %v", path, err)
+				}
+			}
+			runGo := func(args ...string) {
+				t.Helper()
+				cmd := exec.CommandContext(t.Context(), "go", args...)
+				cmd.Dir = outputDir
+				cmd.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "CGO_ENABLED=0")
+				if output, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("native go %v: %v\n%s", args, err, output)
+				}
+			}
+			// The emitter's unreleased dependency is resolved only for this source integration.
+			runGo("mod", "edit", "-replace=github.com/GoCodeAlone/workflow="+sourceRoot)
+			runGo("mod", "tidy")
+			binary := filepath.Join(outputDir, "proof-app")
+			runGo("build", "-o", binary, ".")
+			if info, err := os.Stat(binary); err != nil || info.Size() == 0 {
+				t.Fatalf("missing or empty compiled generated binary: %v", err)
+			}
+			if runtime.GOOS == "windows" {
+				t.Skip("generated binary compiled; SIGTERM lifecycle requires a POSIX platform")
+			}
+			logPath := filepath.Join(outputDir, "runtime.log")
+			logFile, err := os.Create(logPath)
+			if err != nil {
+				t.Fatalf("create runtime log: %v", err)
+			}
+			t.Cleanup(func() { _ = logFile.Close() })
+			launchCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(launchCtx, binary)
+			cmd.Dir = outputDir
+			cmd.Stdout, cmd.Stderr = logFile, logFile
+			cmd.WaitDelay = time.Second
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("launch generated binary: %v", err)
+			}
+			done := make(chan struct{})
+			var waitErr error
+			go func() {
+				waitErr = cmd.Wait()
+				close(done)
+			}()
+			t.Cleanup(func() {
+				select {
+				case <-done:
+				default:
+					_ = cmd.Process.Kill()
+					<-done
+				}
+			})
+			client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil}}
+			t.Cleanup(client.CloseIdleConnections)
+			url := "http://" + address + "/health"
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			readyDeadline := time.NewTimer(10 * time.Second)
+			defer readyDeadline.Stop()
+			for {
+				resp, err := client.Get(url)
+				if err == nil {
+					var body map[string]string
+					decodeErr := json.NewDecoder(resp.Body).Decode(&body)
+					_ = resp.Body.Close()
+					if resp.StatusCode != http.StatusOK || decodeErr != nil || body["handler"] != identity || body["status"] != "success" {
+						t.Fatalf("HTTP proof: status=%d body=%v decode=%v, want owned handler %q", resp.StatusCode, body, decodeErr, identity)
+					}
+					break
+				}
+				select {
+				case <-done:
+					logs, _ := os.ReadFile(logPath)
+					t.Fatalf("generated binary exited before HTTP readiness: %v\n%s", waitErr, logs)
+				case <-readyDeadline.C:
+					t.Fatalf("generated HTTP endpoint not ready: %v", err)
+				case <-ticker.C:
+				}
+			}
+			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+				t.Fatalf("signal generated binary: %v", err)
+			}
+			select {
+			case <-done:
+				logs, _ := os.ReadFile(logPath)
+				if waitErr != nil {
+					t.Fatalf("generated binary shutdown: %v\n%s", waitErr, logs)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("generated binary did not shut down gracefully")
+			}
+			if resp, err := client.Get(url); err == nil {
+				_ = resp.Body.Close()
+				t.Fatal("generated HTTP endpoint remains reachable after shutdown")
+			}
+			t.Logf("actual emitted binary: HTTP 200 with handler %q, SIGTERM exit 0, endpoint absent", identity)
+		})
 	}
 }
 

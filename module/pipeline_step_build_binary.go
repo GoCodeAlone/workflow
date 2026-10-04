@@ -68,7 +68,7 @@ func NewBuildBinaryStepFactory() StepFactory {
 
 		goVersion, _ := config["go_version"].(string)
 		if goVersion == "" {
-			goVersion = "1.22"
+			goVersion = "1.27.1"
 		}
 
 		dryRun, _ := config["dry_run"].(bool)
@@ -213,9 +213,10 @@ func (s *BuildBinaryStep) generateMainGo() string {
 	sb.WriteString("\t\"os/signal\"\n")
 	sb.WriteString("\t\"syscall\"\n")
 	sb.WriteString("\n")
-	sb.WriteString("\t\"github.com/GoCodeAlone/modular\"\n")
 	sb.WriteString("\tworkflow \"github.com/GoCodeAlone/workflow\"\n")
 	sb.WriteString("\t\"github.com/GoCodeAlone/workflow/config\"\n")
+	sb.WriteString("\tallplugins \"github.com/GoCodeAlone/workflow/plugins/all\"\n")
+	sb.WriteString("\t_ \"github.com/GoCodeAlone/workflow/setup\"\n")
 	sb.WriteString(")\n\n")
 
 	if s.embedConfig {
@@ -244,10 +245,12 @@ func (s *BuildBinaryStep) generateMainGo() string {
 	sb.WriteString("\t\tos.Exit(1)\n")
 	sb.WriteString("\t}\n\n")
 
-	sb.WriteString("\tapp := modular.NewStdApplication(nil, logger)\n")
-	sb.WriteString("\tengine := workflow.NewStdEngine(app, logger)\n\n")
-
-	sb.WriteString("\tif err := engine.BuildFromConfig(cfg); err != nil {\n")
+	sb.WriteString("\tengine, err := workflow.NewEngineBuilder().\n")
+	sb.WriteString("\t\tWithLogger(logger).\n")
+	sb.WriteString("\t\tWithAllDefaults().\n")
+	sb.WriteString("\t\tWithPlugins(allplugins.DefaultPlugins()...).\n")
+	sb.WriteString("\t\tBuildFromConfig(cfg)\n")
+	sb.WriteString("\tif err != nil {\n")
 	sb.WriteString("\t\tfmt.Fprintf(os.Stderr, \"build engine: %v\\n\", err)\n")
 	sb.WriteString("\t\tos.Exit(1)\n")
 	sb.WriteString("\t}\n\n")

@@ -133,7 +133,7 @@ scaffolds, see [Repository Layout](docs/REPO_LAYOUT.md).
 
 ### Requirements
 
-- Go 1.26.8+
+- Go 1.27.1+
 - Node.js 24+ (for UI development)
 
 ### Run the Server
@@ -349,7 +349,7 @@ cd ui && npm run lint
 
 | Component | Technology |
 |-----------|-----------|
-| Language | Go 1.26 |
+| Language | Go 1.27 |
 | Framework | [GoCodeAlone/modular](https://github.com/GoCodeAlone/modular) v1.12.3 |
 | UI | React, ReactFlow, Zustand, Vite, TypeScript |
 | Hot-Reload | [Yaegi](https://github.com/traefik/yaegi) Go interpreter |

@@ -102,7 +102,7 @@ func circleJobName(prefix string, phase DeployPhase, p *CIPlan) string {
 
 func writeCirclePlanJob(b *strings.Builder, jobName string, phase DeployPhase, p *CIPlan, version string) {
 	fmt.Fprintf(b, "  %s:\n", jobName)
-	b.WriteString("    docker:\n      - image: cimg/go:1.26\n")
+	b.WriteString("    docker:\n      - image: cimg/go:1.27.1\n")
 	b.WriteString("    steps:\n")
 	b.WriteString("      - checkout\n")
 	writeCircleSetup(b, p, phase, version)
@@ -111,7 +111,7 @@ func writeCirclePlanJob(b *strings.Builder, jobName string, phase DeployPhase, p
 
 func writeCircleApplyJob(b *strings.Builder, jobName string, phase DeployPhase, p *CIPlan, version string, isLast bool) {
 	fmt.Fprintf(b, "  %s:\n", jobName)
-	b.WriteString("    docker:\n      - image: cimg/go:1.26\n")
+	b.WriteString("    docker:\n      - image: cimg/go:1.27.1\n")
 	b.WriteString("    steps:\n")
 	b.WriteString("      - checkout\n")
 	writeCircleSetup(b, p, phase, version)

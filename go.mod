@@ -1,6 +1,6 @@
 module github.com/GoCodeAlone/workflow
 
-go 1.26.8
+go 1.27.1
 
 require (
 	charm.land/bubbles/v2 v2.1.1
@@ -21,6 +21,7 @@ require (
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/github/copilot-sdk/go v0.3.0
+	github.com/go-openapi/jsonpointer v0.24.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
@@ -55,6 +56,7 @@ require (
 	golang.org/x/mod v0.41.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.23.0
+	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
 	golang.org/x/time v0.15.0
 	golang.org/x/tools v0.49.0
@@ -128,7 +130,6 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-openapi/jsonpointer v0.24.0
 	github.com/go-openapi/jsonreference v0.21.6 // indirect
 	github.com/go-openapi/swag v0.27.0 // indirect
 	github.com/go-openapi/swag/cmdutils v0.27.0 // indirect
@@ -253,7 +254,6 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
 	golang.org/x/arch v0.28.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.46.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect

@@ -1,10 +1,17 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	allplugins "github.com/GoCodeAlone/workflow/plugins/all"
+	"golang.org/x/mod/modfile"
+	"gopkg.in/yaml.v3"
 )
 
 // generateMinimalConfig is a basic API service config without UI or auth.
@@ -240,6 +247,15 @@ func TestRunGenerateGithubActionsWithPlugin(t *testing.T) {
 		t.Fatalf("failed to read release.yml: %v", err)
 	}
 	content := string(data)
+	for _, name := range []string{"ci.yml", "cd.yml", "release.yml"} {
+		workflow, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatalf("read generated %s: %v", name, err)
+		}
+		t.Run(name, func(t *testing.T) {
+			assertGeneratedWorkflowGoVersion(t, workflow)
+		})
+	}
 	if strings.Contains(content, "softprops/action-gh-release") {
 		t.Error("release.yml should not use softprops/action-gh-release")
 	}
@@ -403,6 +419,7 @@ func TestCIWorkflowContent(t *testing.T) {
 		t.Fatalf("failed to read ci.yml: %v", err)
 	}
 	content := string(data)
+	assertGeneratedWorkflowGoVersion(t, data)
 
 	if !strings.Contains(content, "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3") {
 		t.Error("ci.yml should use SHA-pinned actions/checkout v6.0.3")
@@ -432,6 +449,7 @@ func TestCDWorkflowContent(t *testing.T) {
 		t.Fatalf("failed to read cd.yml: %v", err)
 	}
 	content := string(data)
+	assertGeneratedWorkflowGoVersion(t, data)
 
 	if !strings.Contains(content, "tags: ['v*']") {
 		t.Error("cd.yml should trigger on version tags")
@@ -460,6 +478,7 @@ func TestReleaseWorkflowContent(t *testing.T) {
 		t.Fatalf("failed to read release.yml: %v", err)
 	}
 	content := string(data)
+	assertGeneratedWorkflowGoVersion(t, data)
 
 	if strings.Contains(content, "softprops/action-gh-release") {
 		t.Error("release.yml should not use softprops/action-gh-release")
@@ -478,18 +497,18 @@ func TestReleaseWorkflowContent(t *testing.T) {
 // TestInitTemplatesIncludeGithubWorkflows checks that wfctl init now generates .github/workflows/.
 func TestInitTemplatesIncludeGithubWorkflows(t *testing.T) {
 	cases := []struct {
-		template string
-		wfFile   string
+		template  string
+		wfFile    string
+		goBuilder string
 	}{
-		{"api-service", ".github/workflows/ci.yml"},
-		{"event-processor", ".github/workflows/ci.yml"},
-		{"full-stack", ".github/workflows/ci.yml"},
-		{"plugin", ".github/workflows/release.yml"},
-		{"ui-plugin", ".github/workflows/release.yml"},
+		{"api-service", ".github/workflows/ci.yml", "builder"},
+		{"event-processor", ".github/workflows/ci.yml", "builder"},
+		{"full-stack", ".github/workflows/ci.yml", "go-builder"},
+		{"plugin", ".github/workflows/release.yml", ""},
+		{"ui-plugin", ".github/workflows/release.yml", ""},
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.template, func(t *testing.T) {
 			dir := t.TempDir()
 			outDir := filepath.Join(dir, "project")
@@ -498,9 +517,194 @@ func TestInitTemplatesIncludeGithubWorkflows(t *testing.T) {
 				t.Fatalf("init %s failed: %v", tc.template, err)
 			}
 			wfPath := filepath.Join(outDir, tc.wfFile)
-			if _, err := os.Stat(wfPath); os.IsNotExist(err) {
-				t.Errorf("expected %s to be created for %s template", tc.wfFile, tc.template)
+			workflow, err := os.ReadFile(wfPath)
+			if err != nil {
+				t.Fatalf("read generated %s: %v", tc.wfFile, err)
+			}
+			assertGeneratedWorkflowGoVersion(t, workflow)
+
+			modPath := filepath.Join(outDir, "go.mod")
+			modData, err := os.ReadFile(modPath)
+			if err != nil {
+				t.Fatalf("read generated go.mod: %v", err)
+			}
+			mod, err := modfile.Parse(modPath, modData, nil)
+			if err != nil {
+				t.Fatalf("parse generated go.mod: %v", err)
+			}
+			if mod.Go == nil {
+				t.Fatal("generated go.mod has no Go directive")
+			}
+			if mod.Go.Version != "1.27.1" {
+				t.Errorf("generated go.mod Go version = %q, want 1.27.1", mod.Go.Version)
+			}
+
+			if tc.goBuilder != "" {
+				assertGeneratedMainDefaultPlugins(t, filepath.Join(outDir, "main.go"))
+				configData, err := os.ReadFile(filepath.Join(outDir, "workflow.yaml"))
+				if err != nil {
+					t.Fatalf("read generated Workflow config: %v", err)
+				}
+				var appConfig struct {
+					Modules []struct {
+						Type   string `yaml:"type"`
+						Config struct {
+							HealthPath string `yaml:"healthPath"`
+						} `yaml:"config"`
+					} `yaml:"modules"`
+					Workflows struct {
+						HTTP struct {
+							Routes []struct {
+								Path string `yaml:"path"`
+							} `yaml:"routes"`
+						} `yaml:"http"`
+					} `yaml:"workflows"`
+					Triggers map[string]any `yaml:"triggers"`
+				}
+				if err := yaml.Unmarshal(configData, &appConfig); err != nil {
+					t.Fatalf("parse generated Workflow config: %v", err)
+				}
+				if len(appConfig.Modules) == 0 {
+					t.Fatal("generated application has no modules")
+				}
+				knownTypes := make(map[string]bool)
+				knownTriggers := make(map[string]bool)
+				for _, p := range allplugins.DefaultPlugins() {
+					for moduleType := range p.ModuleFactories() {
+						knownTypes[moduleType] = true
+					}
+					for triggerType := range p.TriggerFactories() {
+						knownTriggers[triggerType] = true
+					}
+				}
+				for triggerType := range appConfig.Triggers {
+					if !knownTriggers[triggerType] {
+						t.Errorf("default generated app references unavailable trigger %q", triggerType)
+					}
+				}
+				healthCheckers := 0
+				for _, m := range appConfig.Modules {
+					if !knownTypes[m.Type] {
+						t.Errorf("default generated app references unavailable module %q", m.Type)
+					}
+					if m.Type == "health.checker" {
+						healthCheckers++
+						if m.Config.HealthPath != "/health" {
+							t.Errorf("generated health checker path = %q, want /health", m.Config.HealthPath)
+						}
+					}
+				}
+				if healthCheckers != 1 {
+					t.Errorf("generated health checkers = %d, want 1", healthCheckers)
+				}
+				for _, route := range appConfig.Workflows.HTTP.Routes {
+					if route.Path == "/health" {
+						t.Error("generated /health must use the health-checker wiring, not a manual HTTP route")
+					}
+				}
+				dockerfile, err := readFileContents(filepath.Join(outDir, "Dockerfile"))
+				if err != nil {
+					t.Fatalf("read generated Dockerfile: %v", err)
+				}
+				want := "FROM golang:1.27.1-alpine AS " + tc.goBuilder
+				if !strings.Contains(dockerfile, want) {
+					t.Errorf("generated Dockerfile missing %q", want)
+				}
+				readme, err := readFileContents(filepath.Join(outDir, "README.md"))
+				if err != nil {
+					t.Fatalf("read generated README.md: %v", err)
+				}
+				if !strings.Contains(readme, "- Go 1.27.1+") {
+					t.Error("generated README.md missing Go 1.27.1+ prerequisite")
+				}
 			}
 		})
+	}
+}
+
+func assertGeneratedMainDefaultPlugins(t *testing.T, path string) {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse generated main.go: %v", err)
+	}
+	imported := false
+	for _, spec := range file.Imports {
+		if spec.Path.Value == `"github.com/GoCodeAlone/workflow/plugins/all"` && spec.Name != nil && spec.Name.Name == "allplugins" {
+			imported = true
+		}
+	}
+	if !imported {
+		t.Error("generated main.go must import plugins/all as allplugins")
+	}
+	registered := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		build, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		buildMethod, ok := build.Fun.(*ast.SelectorExpr)
+		if !ok || buildMethod.Sel.Name != "BuildFromConfig" {
+			return true
+		}
+		plugins, ok := buildMethod.X.(*ast.CallExpr)
+		if !ok || len(plugins.Args) != 1 || !plugins.Ellipsis.IsValid() {
+			return true
+		}
+		pluginsMethod, ok := plugins.Fun.(*ast.SelectorExpr)
+		if !ok || pluginsMethod.Sel.Name != "WithPlugins" {
+			return true
+		}
+		defaults, ok := pluginsMethod.X.(*ast.CallExpr)
+		if !ok || len(defaults.Args) != 0 {
+			return true
+		}
+		defaultsMethod, ok := defaults.Fun.(*ast.SelectorExpr)
+		if !ok || defaultsMethod.Sel.Name != "WithAllDefaults" {
+			return true
+		}
+		defaultPlugins, ok := plugins.Args[0].(*ast.CallExpr)
+		if !ok || len(defaultPlugins.Args) != 0 {
+			return true
+		}
+		defaultPluginsMethod, ok := defaultPlugins.Fun.(*ast.SelectorExpr)
+		if !ok || defaultPluginsMethod.Sel.Name != "DefaultPlugins" {
+			return true
+		}
+		alias, ok := defaultPluginsMethod.X.(*ast.Ident)
+		registered = ok && alias.Name == "allplugins"
+		return true
+	})
+	if !registered {
+		t.Error("generated main.go must call WithAllDefaults().WithPlugins(allplugins.DefaultPlugins()...).BuildFromConfig")
+	}
+}
+
+func assertGeneratedWorkflowGoVersion(t *testing.T, data []byte) {
+	t.Helper()
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Uses string            `yaml:"uses"`
+				With map[string]string `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(data, &workflow); err != nil {
+		t.Fatalf("parse generated workflow: %v", err)
+	}
+	found := false
+	for name, job := range workflow.Jobs {
+		for _, step := range job.Steps {
+			if strings.HasPrefix(step.Uses, "actions/setup-go@") {
+				found = true
+				if got := step.With["go-version"]; got != "1.27.1" {
+					t.Errorf("job %s setup-go version = %q, want 1.27.1", name, got)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("generated workflow has no setup-go step")
 	}
 }
