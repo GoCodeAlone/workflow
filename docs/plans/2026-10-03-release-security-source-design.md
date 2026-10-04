@@ -128,6 +128,34 @@ affects ordinary review only; no settings, failed-check or policy bypass.
 Manifest amendment: unchanged three tasks/one PR; Task2 gains S6/Go-minor and
 maintained generator/Docker ownership. No fleet, release or Signal completion.
 
+### Backport 2026-10-04: Real Generated Engine Startup
+
+Actual default BuildBinaryStep factory/Execute emitted three files withGo1.27.1;
+native generated-project compilation succeeded after disclosed local resolver
+replacement, but the real binary exited1 with unknown http.server module.
+Cause: emitted NewStdEngine constructs an empty factory registry, unlike the
+existing app scaffold's NewEngineBuilder.WithAllDefaults/setup registration.
+The first correction still failed real HTTP startup: WithAllDefaults omits
+module plugins. Reuse plugins/all.DefaultPlugins in the existing builder and
+all three application main templates. Correct the owning bootstrap and add a
+regression; rerun actual emitted binary HTTP/lifecycle proof. No mock/fake app,
+accepted compilation error or empty config proves this boundary. Task2 already
+owns generated-runtime proof; ADR0058 explicitly adds the three main templates
+to owning files, preserving three tasks/one PR and protected-file exclusions.
+
+### Backport 2026-10-04: Strict Generated StringValue Runtime
+
+Actual generated plugin compiles, starts, loads through the real host, then
+fails configuration. Initial wrong main.Version probe flag was corrected to
+the generated internal.Version before causal analysis; it is not a product bug.
+Host mapToTypedAny sends object JSON to scalar StringValue, and typedAnyToMap
+would decode scalar JSON into an object. Keep the generated strict wire schema;
+adapt only StringValue's value field with canonical protojson validation,
+empty-map default and strict unknown-field rejection. No legacy fallback or
+other well-known type changes. ADR0058 adds external convert.go/tests to Task2;
+native RED/GREEN, strict negative cases and real uppercase pipeline execution
+must verify both directions. Three tasks/one PR and CI exclusions unchanged.
+
 ### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
 
 Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker

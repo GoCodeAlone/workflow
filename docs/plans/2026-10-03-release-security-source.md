@@ -8,6 +8,7 @@
 **Base branch:** main (`49e1803424f303f6f98cef51cc9ea2dee96c7d38`).
 **Design:** `docs/plans/2026-10-03-release-security-source-design.md`.
 **Decisions:** `decisions/0056-isolate-source-security-remediation.md`; approved amendment `decisions/0057-upgrade-source-and-generated-go.md`.
+Generated-runtime owning-file amendment: `decisions/0058-repair-generated-runtime-boundaries.md`.
 
 ## Guidance And Evidence
 
@@ -25,6 +26,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 - All `.github/`, `scripts/`, policytool, authority manifests and staged workflow contexts; embedded scaffold CI templates are Task2 source, not executable repository workflows.
 - Release tags/publication, deployment, Signal manifest changes and other-repository fleet migration. Workflow Go1.27.1/generated defaults and maintained Docker builders are explicitly included by ADR0057.
 - Cache reuse for SDK, Docker, registry, mutant or capability executables; test removal, timeout extension, GORACE changes, scanner ignores/suppression.
+- Generated strict StringValue/app bootstrap defects are Task2 per ADR0058; broader codec types, new scaffold ABI and new generator APIs remain excluded.
 
 **PR Grouping:**
 
@@ -32,7 +34,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Locked 2026-10-04T04:47:52Z
+**Status:** Locked 2026-10-04T05:30:50Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -56,6 +58,12 @@ existing module/CI/release/Docker/README files, `cmd/wfctl/generate.go`,
 `module/pipeline_step_build_binary.go`, `module/pipeline_step_build_binary_test.go`,
 `cigen/render_circleci.go`, `cigen/render_circleci_test.go`, `Dockerfile.admin`,
 `Dockerfile.legacy` and active minimum-version docs. No new generator API.
+ADR0058 additionally owns `cmd/wfctl/templates/{api-service,event-processor,full-stack}/main.go.tmpl`
+and `plugin/external/convert.go`, `plugin/external/convert_test.go`. Reuse the
+existing default-plugin registry for all generated app bootstraps and preserve
+the generated strict StringValue schema with a bounded bidirectional host
+value-map adapter. Add failing tests first; invalid fields/types must still
+reject and ordinary messages retain existing behavior. No wider WKT support.
 The steps below supersede earlier1.26.8 commands for final verification;
 previous tests/results remain historical receipts, not new-compiler acceptance.
 
@@ -152,3 +160,9 @@ PASS after bounded plan-review corrections. S1 -> Task 2, S2 -> Task 3, S3 -> Ta
 Amendment alignment PASS after bounded P1/P2 proof corrections: S1/S6 -> Task2; S4 exact new compiler -> Task2A-D
 and historical Task1/3 cases rerun. Task1 -> S3/S4, Task2 -> S1/S4/S5/S6,
 Task3 -> S2/S4/S5. Three tasks/one existing PR preserved; no protected CI writes.
+
+ADR0058 bounded alignment PASS: observed generated bootstrap/strict StringValue
+failures map to Task2C and its added owning files; strict negative/ordinary
+message compatibility plus actual app/plugin runtime proof are explicit.
+Three tasks/one existing PR retained. Independent reviewer Ramanujan approved
+causal correction and checked ownership/coverage; strict manifest check passed.
