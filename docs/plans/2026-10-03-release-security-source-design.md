@@ -198,6 +198,19 @@ registry assertions RED/GREEN and regenerate/launch the API app again. This is
 Task2C in its existing three YAML owners: no manifest, task/PR count, engine API,
 or application-route/subscription removal. Do not repair only the proof config.
 
+### Backport 2026-10-04: Complete The Maintained-Default Inventory
+
+The structured33b4 version audit proves thirteen source module floors and five
+scaffold workflow pins match1.27.1, but finds two old MCP legacy driver literals,
+an old maintained e-commerce DHI builder, and five active prerequisite/default
+claims. Per ADR0061, extend Task2's owning files for those defaults only; parsed
+MCP emitter/actual CD handler regression RED/GREEN, verified DHI tag/compiler,
+and updated source audit/frozen gates are required. Do not implement new MCP
+plugin detection or count the legacy release helper as a proved host feature;
+its existing HasPlugin condition is unchanged. Historical receipts and explicit
+test overrides remain. Three tasks/one PR, no protected CI or runtime-image
+hardening change. The current33b4 cold check predates this owning-file repair.
+
 ### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
 
 Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker

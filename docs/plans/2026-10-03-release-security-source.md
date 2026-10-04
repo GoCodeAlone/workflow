@@ -11,6 +11,7 @@
 Generated-runtime owning-file amendment: `decisions/0058-repair-generated-runtime-boundaries.md`.
 Default-config owning-file amendment: `decisions/0059-use-self-contained-app-scaffolds.md`.
 Health-config owning-file amendment: `decisions/0060-use-existing-scaffold-health-wiring.md`.
+Remaining-default owning-file amendment: `decisions/0061-align-remaining-go-defaults.md`.
 
 ## Guidance And Evidence
 
@@ -38,7 +39,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Locked 2026-10-04T06:00:42Z
+**Status:** Locked 2026-10-04T06:44:30Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -81,6 +82,13 @@ Observed trigger backport additionally removes redundant invalid named trigger
 blocks from these same owners, preserving existing HTTP routes and messaging
 subscriptions/producers. Assert any emitted triggers against the actual default
 trigger registry before final generated-app proof; no manifest change.
+ADR0061 additionally owns `mcp/wfctl_tools.go`, `mcp/wfctl_tools_test.go`,
+`example/ecommerce-app/Dockerfile`, `DOCUMENTATION.md` and `CONTRIBUTING.md`.
+Assert structured Go pins in the real MCP CD result and existing release helper
+RED/GREEN; retain current MCP API/HasPlugin behavior. Verify the DHI builder's
+actual tag/compiler; update only active prerequisites/defaults in these and
+existing README/build/deploy owners. No historical-plan rewrite, runtime image
+vendor/hardening change or protected-file ownership.
 The steps below supersede earlier1.26.8 commands for final verification;
 previous tests/results remain historical receipts, not new-compiler acceptance.
 
@@ -195,3 +203,9 @@ Task2 owning YAML/default runtime proof -> S6/S4 and the observed design backpor
 S1/S3/S2 and Tasks1/3 retain their existing coverage. All tasks still ship the
 sole existing PR; strict manifest check passed with no missing task, count
 change, new health API or protected-file ownership.
+
+ADR0061 inline alignment PASS: maintained MCP/e-commerce/default-doc omissions
+map to S6 and Task2A-D plus their named owning files. Task2 remains the sole
+source PR row; Tasks1/3 and all other requirements retain coverage. Three
+tasks/one existing PR and protected exclusions unchanged. No added MCP feature
+or unverified image tag; strict manifest check required before execution.
