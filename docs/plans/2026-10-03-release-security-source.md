@@ -4,10 +4,10 @@
 
 **Goal:** Patch shipped Go/UI vulnerabilities and remove redundant record-host builds without weakening runtime evidence.
 **Architecture:** Preserve the public Workflow engine/SDK contracts and existing test cases. Patch owning module/lock resolutions; lazily reuse only identical source race-host builds in process-owned temporary custody. CI authority, scanner rollout and release promotion remain separate.
-**Tech Stack:** Go 1.26.8, OTel 1.45.0, Node 24/npm, Vitest, real Workflow binaries, Docker, digest-pinned OSV 2.6.0.
+**Tech Stack:** Go 1.27.1, golangci-lint 2.14.0, OTel 1.45.0, Node 24/npm, Vitest, real Workflow binaries, Docker, digest-pinned OSV 2.6.0.
 **Base branch:** main (`49e1803424f303f6f98cef51cc9ea2dee96c7d38`).
 **Design:** `docs/plans/2026-10-03-release-security-source-design.md`.
-**Decision:** `decisions/0056-isolate-source-security-remediation.md`.
+**Decisions:** `decisions/0056-isolate-source-security-remediation.md`; approved amendment `decisions/0057-upgrade-source-and-generated-go.md`.
 
 ## Guidance And Evidence
 
@@ -19,11 +19,11 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 
 **PR Count:** 1
 **Tasks:** 3
-**Estimated Lines of Change:** ~700
+**Estimated Lines of Change:** ~1,000
 
 **Out of scope:**
-- All `.github/`, `scripts/`, policytool, authority manifests, staged workflow contexts and Dockerfile changes.
-- Release tags/publication, deployment, Signal manifest changes and Go minor/fleet migration.
+- All `.github/`, `scripts/`, policytool, authority manifests and staged workflow contexts; embedded scaffold CI templates are Task2 source, not executable repository workflows.
+- Release tags/publication, deployment, Signal manifest changes and other-repository fleet migration. Workflow Go1.27.1/generated defaults and maintained Docker builders are explicitly included by ADR0057.
 - Cache reuse for SDK, Docker, registry, mutant or capability executables; test removal, timeout extension, GORACE changes, scanner ignores/suppression.
 
 **PR Grouping:**
@@ -32,7 +32,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Locked 2026-10-03T18:25:28Z
+**Status:** Amended 2026-10-04T04:32:00Z (see decisions/0057-upgrade-source-and-generated-go.md)
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -48,6 +48,46 @@ Requirements: S3, S4. Files: modify `cmd/wfctl/pipeline_record_host_test.go`, `c
 ### Task 2: Patch Go Runtime Dependencies And Prove Real Hosts
 
 Requirements: S1, S4, S5. Files: `go.mod`, `go.sum`, `example/go.mod`, `example/go.sum`; all eleven module pairs under `cmd/wfctl/testdata/conformance/{iac-hang,iac-pass,no-iac}/` and `cmd/wfctl/testdata/verify_capabilities/{iac-extra-service,good,name-drift,release-good,version-drift,iac-good,missing-ldflag,iac-missing-service}/`; `cmd/wfctl/plugin_registry_sync_host_test.go`, `README.md`, `cmd/wfctl/testdata/pipeline-record/README.md`, `cmd/wfctl/testdata/registry-sync/README.md`.
+
+Approved2026-10-04 amendment additionally owns S6: `cmd/wfctl/templates/`
+existing module/CI/release/Docker/README files, `cmd/wfctl/generate.go`,
+`cmd/wfctl/generate_test.go`, `cmd/wfctl/deploy.go`, `cmd/wfctl/deploy_test.go`,
+`plugin/sdk/generator.go`, `plugin/sdk/generator_test.go`,
+`module/pipeline_step_build_binary.go`, `module/pipeline_step_build_binary_test.go`,
+`cigen/render_circleci.go`, `cigen/render_circleci_test.go`, `Dockerfile.admin`,
+`Dockerfile.legacy` and active minimum-version docs. No new generator API.
+The steps below supersede earlier1.26.8 commands for final verification;
+previous tests/results remain historical receipts, not new-compiler acceptance.
+
+A. Add independent literal1.27.1 assertions for scaffold modules/workflows,
+legacy emitters, SDK module+local-replace modules, deploy Docker builder,
+binary-build default and CircleCI image; preserve explicit overrides. Run
+`GOWORK=off GOTOOLCHAIN=go1.27.1 go test ./cmd/wfctl ./plugin/sdk ./module ./cigen -run 'Test(InitTemplatesIncludeGithubWorkflows|CIWorkflowContent|CDWorkflowContent|ReleaseWorkflowContent|WriteDockerfile|GenerateProjectStructure|GenerateGoMod|BuildBinaryStep_Defaults|RenderCircleCI)' -count=1`;
+new version assertions must fail on old pins, not compiler setup.
+B. Use `go mod edit -go=1.27.1` and native targeted tidy in root/example/eleven
+fixtures, no unrelated dependency upgrade. Update owning default pins above
+and source-host expectations; preserve explicit overrides and prior dependency
+fixes. Rerun A: all assertions PASS. Compatible2.14.0 lint, vet, Windows compile
+and focused real record/registry suites use exact native1.27.1.
+C. Build actual wfctl and use its existing `init`, `plugin init`, `generate`
+and deploy-generation tests/commands. Parse emitted Go modules/YAML/Docker
+versions independently; run a real generated API app with an explicit local
+Workflow replacement, build with1.27.1/local, observe owned HTTP200/process
+shutdown. Build/load generated plugin via existing host tests. Dockerfile
+builder smoke builds and launches a real maintained image; never insert a fake
+prebuilt admin-plugin. Existing container/SDK matrices prove adjacent boundary.
+D. Rebuild four shipped commands from clean frozen plain checkout and inspect
+`go version -m`: exact frozen revision, vcs.modified=false, go1.27.1,
+OTel1.45.0 where linked. Repeat actual server HTTP/SIGTERM/endpoint absence,
+strict Docker, Linux default-API control plus30denials, and whole cold non-root
+`--init` Linux152-package race/coverage under unchanged600s wfctl deadline.
+Rerun full UI141/build and native source OSV/called-control evidence on final
+source; no CI clean claim until all actual PR checks succeed. Run unchanged
+policy harness under1.27.1 and byte-empty protected-file diff.
+E. Commit only Task2 source files; push existing PR1022, independent bounded
+review and all actual PR checks/trusted policy required before ordinary/admin
+merge. No new source PR or settings changes. Rollback: reviewed source/default
+revert, rebuild and launch; hold release because older limitations return.
 
 1. Preserve existing full-scan failure/actual code reachability evidence as RED; run exact Go 1.26.5 native `govulncheck` on shipped server/wfctl packages if needed to establish specific reachable advisory before update. Separately test policytool with its unchanged exact Go 1.26.5 compiler; errors/called vulnerable findings block, module-only uncalled findings must remain disclosed.
 2. Use structured Go resolver commands: `go mod edit -go=1.26.8`, targeted `go get` OTel API/SDK/trace/metric/exporter families at 1.45.0, `go mod tidy` under `GOWORK=off GOTOOLCHAIN=go1.26.8`. Root existing gRPC 1.83.2/x-text 0.42.0 retained; fix stale fixture pins to these established versions. Repeat edit/tidy in each owning example/fixture module; exclude policytool. No broad `go get -u` or unrelated direct-dependency changes.
@@ -89,3 +129,7 @@ Task 1 helper and Task 3 UI writes are independent; Task 2 module writes must se
 ## Alignment
 
 PASS after bounded plan-review corrections. S1 -> Task 2, S2 -> Task 3, S3 -> Task 1, S4 -> Tasks 1/2/3, S5 -> Tasks 2/3. Reverse trace: Task 1 -> S3/S4; Task 2 -> S1/S4/S5; Task 3 -> S2/S4/S5. All three task headings exist and ship only PR 1. Protected-file exclusions, policytool native proof and rollback are explicit; no workflow/trust/release task is orphaned or silently added. Programmatic strict manifest check PASS.
+
+Amendment alignment pending: S1/S6 -> Task2; S4 exact new compiler -> Task2A-D
+and historical Task1/3 cases rerun. Task1 -> S3/S4, Task2 -> S1/S4/S5/S6,
+Task3 -> S2/S4/S5. Three tasks/one existing PR preserved; no protected CI writes.

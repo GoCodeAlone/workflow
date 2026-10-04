@@ -10,6 +10,9 @@
 Ship reviewed, patched Workflow source and reliable real-host tests without
 modifying protected CI authority, unrelated staged work, or release tags.
 
+The approved2026-10-04 backport below supersedes earlier1.26.8/generator/Docker
+exclusions; earlier evidence remains historical, not finalGo1.27.1 proof.
+
 - S1: Root, example, and external-plugin fixture Go floors become 1.26.8;
   affected OTel modules become 1.45.0; vulnerable gRPC/x-text fixture pins use
   established root 1.83.2/0.42.0. Tidy each owning module. Source fixture
@@ -98,6 +101,32 @@ repository-token policy and concurrent v0.86.1 tag/run.
 Reviewed revert of the single source-remediation PR, rerun build/runtime tests,
 and hold promotion because known vulnerabilities return. No workflow trust,
 tag, registry, deployment or data rollback occurs.
+
+### Backport 2026-10-04: Approved Go And Generated Toolchains
+
+Authority: explicit operator Go1.27.1/CI/admin instruction; ADR0057 records
+original locked timestamp/hash and owning-file expansion. S1 now targets
+Go1.27.1 in root/example/eleven fixtures and source-host expectations. S6 adds
+existing wfctl app/plugin scaffold modules, workflow/release/Docker templates,
+legacy generate-CI emitters, deploy Docker generator, SDK minimum/default Go
+constants, binary-build default (explicit overrides preserved), maintained
+admin/legacy Docker builders, and cigen CircleCI cimg/go:1.27.1. Official
+CircleCI sources/registry confirm Linuxamd64/arm64 image availability.
+
+S4 requires literal independent version regressions (RED/GREEN), actual built
+wfctl-generated app/plugin output and build/launch, exact-head four-command
+metadata/server smoke, new nativeGo1.27.1 host/SDK/registry/Docker/coldLinux
+proof, and compatible golangci-lint2.14.0. Existing dependency/UI fixes remain.
+Generated instructions and active prerequisites align; historical evidence
+and deliberate explicit test overrides are not mechanically rewritten.
+
+S5 still excludes all protected CI/scripts/policy/trust writes. Its policytool
+minimum remains1.26.5; Go1.27.1 execution/CI drivers are separately governed.
+Native prior1.26.5 reachability evidence remains disclosed; new source must
+pass all actual hosted checks after the CI rollover. Approved admin exception
+affects ordinary review only; no settings, failed-check or policy bypass.
+Manifest amendment: unchanged three tasks/one PR; Task2 gains S6/Go-minor and
+maintained generator/Docker ownership. No fleet, release or Signal completion.
 
 ### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
 
