@@ -220,7 +220,7 @@ func collectProviderGroups(cfgFile, envName string, specs []interfaces.ResourceS
 	groups := map[string]*groupAcc{}
 	var order []string
 	for _, spec := range specs {
-		if !strings.HasPrefix(spec.Type, "infra.") {
+		if strings.HasPrefix(spec.Type, "platform.") {
 			continue
 		}
 		moduleRef := resolveIaCProviderRef(spec.Config)

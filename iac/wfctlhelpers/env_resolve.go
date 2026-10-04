@@ -20,6 +20,18 @@ import (
 // shared lift; cmd/wfctl/infra_env_resolve.go's writeEnvResolvedConfig is
 // a one-line shim that delegates here to avoid double maintenance.
 func WriteEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error) {
+	return WriteEnvResolvedConfigWithClassifier(cfgFile, envName, func(mod *config.ResolvedModule) (bool, error) {
+		return IsInfraType(mod.Type), nil
+	})
+}
+
+// WriteEnvResolvedConfigWithClassifier applies resource defaults using an
+// explicit caller-owned classifier. It never discovers installed plugins.
+// The caller must remove the returned temporary file.
+func WriteEnvResolvedConfigWithClassifier(cfgFile, envName string, classify func(*config.ResolvedModule) (bool, error)) (tmpPath string, err error) {
+	if classify == nil {
+		return "", fmt.Errorf("resource classifier is required")
+	}
 	cfg, err := config.LoadFromFile(cfgFile)
 	if err != nil {
 		return "", fmt.Errorf("load %s: %w", cfgFile, err)
@@ -37,7 +49,11 @@ func WriteEnvResolvedConfig(cfgFile, envName string) (tmpPath string, err error)
 		if !ok {
 			continue
 		}
-		if topEnv != nil && IsInfraType(rm.Type) {
+		resource, err := classify(rm)
+		if err != nil {
+			return "", err
+		}
+		if topEnv != nil && resource {
 			if rm.Region == "" {
 				rm.Region = topEnv.Region
 				if rm.Region != "" {

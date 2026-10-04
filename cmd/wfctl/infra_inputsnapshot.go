@@ -35,6 +35,10 @@ func collectInfraEnvVarRefs(cfgFile, envName string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	discovery, err := newIaCResourceDiscovery(cfg, envName)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]struct{}{}
 	record := func(name string) string {
 		if name != "" {
@@ -44,15 +48,15 @@ func collectInfraEnvVarRefs(cfgFile, envName string) ([]string, error) {
 	}
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
-		if !isInfraType(m.Type) {
-			continue
-		}
-		if envName == "" {
-			walkValueForEnvRefs(m.Config, record)
-			continue
-		}
-		resolved, ok := m.ResolveForEnv(envName)
+		resolved, ok := resolveDiscoveryModule(m, envName)
 		if !ok {
+			continue
+		}
+		resource, err := discovery.classify(resolved)
+		if err != nil {
+			return nil, err
+		}
+		if !resource {
 			continue
 		}
 		walkValueForEnvRefs(resolved.Config, record)
