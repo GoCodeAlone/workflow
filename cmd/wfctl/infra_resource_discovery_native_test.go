@@ -169,6 +169,38 @@ func (h *discoveryNativeHarness) reap(t *testing.T) {
 	t.Logf("owned SDK PID readback: %d children absent after CLI wait/manager shutdown", len(pids))
 }
 
+func discoveryNativeEnv(root, racePolicy string) []string {
+	env := []string{"LC_ALL=C", "CI=true", "WFCTL_NO_UPDATE_CHECK=1", "HOME=" + root, "TASK26_FIXTURE_ROOT=" + root}
+	// Preserve race reporting; fixture exit sleep must not consume the package budget.
+	env = append(env, "GORACE="+racePolicy+" atexit_sleep_ms=0")
+	if path := os.Getenv("PATH"); path != "" {
+		env = append(env, "PATH="+path)
+	}
+	return env
+}
+
+func TestIaCResourceDiscovery_FixtureRaceOptions(t *testing.T) {
+	for _, tc := range []struct{ name, policy string }{
+		{"empty", ""},
+		{"exit-code", "exitcode=77"},
+		{"halt-on-error", "halt_on_error=1"},
+		{"existing-exit-sleep", "exitcode=87 halt_on_error=1 strip_path_prefix=/task26/report-policy atexit_sleep_ms=1000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var policies []string
+			for _, variable := range discoveryNativeEnv(t.TempDir(), tc.policy) {
+				if value, ok := strings.CutPrefix(variable, "GORACE="); ok {
+					policies = append(policies, value)
+				}
+			}
+			want := tc.policy + " atexit_sleep_ms=0"
+			if len(policies) != 1 || policies[0] != want {
+				t.Fatalf("fixture must preserve race reporting policy and disable only exit sleep: got %q, want %q", policies, want)
+			}
+		})
+	}
+}
+
 func (h *discoveryNativeHarness) run(t *testing.T, binary string, extra []string, args ...string) ([]byte, error) {
 	t.Helper()
 	entries, err := os.ReadDir(h.plugins)
@@ -190,10 +222,7 @@ func (h *discoveryNativeHarness) run(t *testing.T, binary string, extra []string
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir, cmd.WaitDelay = h.root, 5*time.Second
-	cmd.Env = []string{"LC_ALL=C", "CI=true", "WFCTL_NO_UPDATE_CHECK=1", "HOME=" + h.root, "TASK26_FIXTURE_ROOT=" + h.root}
-	if path := os.Getenv("PATH"); path != "" {
-		cmd.Env = append(cmd.Env, "PATH="+path)
-	}
+	cmd.Env = discoveryNativeEnv(h.root, os.Getenv("GORACE"))
 	cmd.Env = append(cmd.Env, extra...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
