@@ -4,6 +4,39 @@
 
 ## Go1.27.1 Amendment Checkpoint
 
+Final frozen452cff8f native Linux/ARM64 cold compiler-cache command
+`go test -v -race -coverprofile=coverage.out ./...` exits0 in607s.
+All154 Workflow package results succeed; wfctl428.833s stays below its
+unchanged600s default. UID1000/registered ci, Docker-init and native source/
+temp/cache custody; source status unchanged, coverage retained, owned
+container removed. Expected negative child/plugin output is not a package
+failure; no Workflow package failure or race report. This supersedes the
+failed33b4/ee6e whole gates below, without erasing their evidence.
+
+Same clean452cff8f four actual commands report Go1.27.1/exact revision/
+vcs.modified=false and OTel1.45.0 where linked; three platform import graphs
+exclude OpenPGP. Actual owned server HTTP200/random identity, SIGTERM0,
+endpoint absence and failure-signature scrape pass. Real maintained
+Dockerfile.legacy builds/launches with the same metadata, nonroot65532,
+cap-drop/no-new-privileges/read-only root/private tmp, negative endpoints and
+clean shutdown/owned cleanup. This is not the auth-gated DHI image proof.
+
+Fresh generated SDK plugin, API/health app and default BuildBinaryStep output
+all run through their real boundaries at452cff8f; local dependency replacement
+and local plugin version flag remain disclosed below. Strict live Docker
+record-host matrix passes31.372s. Registry32.060s control/all30 denials at
+ee6eb078 remain applicable: its registry/product/module bytes are identical
+to452cff8f; the intervening change is root rate-test plus four evidence docs.
+
+Fresh UI clean install/full141 tests/types/Vite/installed-family audit pass
+at452cff8f. Native digest-pinned OSV2.6 source scanner0/reporter0 in76s,
+all14 modules discovered, genuine root/example GO-2026-5932 called:false;
+same actual called-control scanner1/reporter1 rejection. No analysis errors,
+ignore changes or clean-all-dependencies claim; local GC budget retained.
+Unchanged full policy mutation harness under Go1.27.1 exits0; protected
+`.github/`/`scripts/` diff versus49e18034 is empty. This source harness PASS
+does not resolve the separate legal-stage B2 harness failure.
+
 Native corrected-custody ee6eb078 whole command finishes622s, source clean,
 wfctl PASS460.576s below unchanged600s. Whole exit1 solely root rate-recovery
 fixture: its10ms token interval cannot require depletion after a50ms HTTP
@@ -11,7 +44,7 @@ burst. All filesystem/home failures and stale init/version assertions pass.
 Controlled25ms HTTP pause reproduces old-rate RED;60RPM/derived refill wait
 GREEN3.433s; one-variable old-rate reversal fails the same exact429 assertion.
 Independent test-only review SHIP-IT; root vet0 and scoped lint0; production
-limiter/CI/script bytes unchanged. Final restored/frozen whole gate remains.
+limiter/CI/script bytes unchanged. Final restored/frozen whole gate passes above.
 
 Actual ee6eb078 native Linux default GitHub-API/TLS proxy control plus all30
 CLI denials pass32.060s (177s with cold compile), zero failures/skips, source
@@ -73,10 +106,10 @@ embedded/external-config runtime cases pass.
 
 Raw current evidence: /private/tmp/workflow-go127-source-proof-20261004;
 worker bootstrap TDD: /private/tmp/workflow-go127-source-main-20261004-report.md.
-Exact final committed-source metadata/server, whole cold nonroot Linux152-
-package race/coverage within unchanged600s, maintained Docker launch, strict
-Docker/default-registry30-denial matrix, fresh full UI/scanner/called control,
-all actual PR checks and merged-main receipts remain required. CI alignment
+Final452cff8f source/runtime/cold/UI/scanner receipts are recorded above.
+Final static/cross-compile readback, exact-head warm relink after evidence-only
+commits, DHI authentication/build, all actual PR checks and merged-main
+receipts remain required. CI alignment
 uses its separate locked twelve-PR plan; no source/Signal completion claim.
 
 ## Go And Host Evidence
@@ -156,7 +189,8 @@ evidence retained. This is a labeled scanner control, not an application demo.
 Independent final UI/whole-boundary review SHIP-IT, no Critical/Important
 findings; the sole Minor unnecessary-resolution finding is addressed above.
 See the committed code-review disposition. Exact-head PR/CI, merge and retro
-remain. Protected .github/scripts/Dockerfile/policytool bytes are unchanged.
+remain. Protected .github/scripts/policytool bytes are unchanged; maintained
+Dockerfile source changes are explicitly owned by the Go27 amendment.
 
 The separately pinned old CI scanner cannot analyze the root floor; local
 source proof does not silently repair public scanner authority. Its failure

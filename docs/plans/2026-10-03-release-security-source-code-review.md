@@ -20,7 +20,10 @@ Scheduling stalls >=1s remain visible failures, not skipped or retried.
 
 CI B2/bootstrap and DHI401 publication/compiler/build are still HOLD;
 final corrected frozen whole-cold/runtime gates are lead verification, not
-cleared by this review. Three tasks/one source PR and protected bytes retained.
+cleared by this review. Subsequent452cff8f cold whole exit0/wfctl428.833s and
+actual runtime/UI/scanner/harness receipts are in the verification checkpoint;
+they do not clear actual PR checks or DHI. Three tasks/one source PR and
+protected bytes retained. No further broad review cycle is warranted.
 
 2026-10-03; independent bounded review of550c0f7a against49e18034.
 Tasks1/2 independent spec/quality PASS retained; final reviewer did not author
