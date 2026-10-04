@@ -86,5 +86,21 @@
     "state": "staged",
     "sha256": "47c43498b33e4ab9f410e2eeff5eb124cd953fe657d81fbcd004133a41408c3c",
     "rationale": "Exercises hermetic contract selection, provenance, runtime parity, and real local loading."
+  },
+  {
+    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
+    "path": "scripts/check-public-workflow-policy.sh",
+    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact repository executable scripts/check-public-workflow-policy.sh to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
+    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
+    "state": "staged",
+    "workflowPath": ".github/workflows/public-workflow-policy.yml"
+  },
+  {
+    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
+    "path": ".github/workflows/policytool/adoptionguard/run.sh",
+    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact repository executable .github/workflows/policytool/adoptionguard/run.sh to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
+    "sha256": "b5597c106885bdc9b1f7161f7c6a1635d92f5f9273c41ec799233d68d6dbf3e4",
+    "state": "staged",
+    "workflowPath": ".github/workflows/public-workflow-policy.yml"
   }
 ]
