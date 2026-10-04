@@ -540,22 +540,9 @@ func secretModuleKeys(moduleCfg map[string]any, field string) []string {
 }
 
 // parseInfraResourceSpecs reads an infra config (resolving imports:) and
-// returns ResourceSpecs for all infra.* and platform.* (e.g., platform.kubernetes, platform.ecs) modules.
+// returns canonical and explicitly selected provider-declared ResourceSpecs.
 func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) {
-	cfg, err := config.LoadFromFile(cfgFile)
-	if err != nil {
-		return nil, fmt.Errorf("load %s: %w", cfgFile, err)
-	}
-	secretVars := declaredSecretKeys(cfg)
-	var specs []interfaces.ResourceSpec
-	for _, m := range cfg.Modules {
-		if !isInfraType(m.Type) {
-			continue
-		}
-		r := &config.ResolvedModule{Name: m.Name, Type: m.Type, Protected: m.Protected, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)}
-		specs = append(specs, resourceSpecFromResolvedModule(r))
-	}
-	return specs, nil
+	return parseInfraResourceSpecsForEnv(cfgFile, "")
 }
 
 // parseInfraResourceSpecsForEnv returns ResourceSpecs for plan computation,
@@ -563,9 +550,6 @@ func parseInfraResourceSpecs(cfgFile string) ([]interfaces.ResourceSpec, error) 
 // --env and no-env paths produce the same ResourceSpec shape so callers never
 // need to duplicate the ResolvedModule->ResourceSpec mapping.
 func parseInfraResourceSpecsForEnv(cfgFile, envName string) ([]interfaces.ResourceSpec, error) {
-	if envName == "" {
-		return parseInfraResourceSpecs(cfgFile)
-	}
 	resolved, err := planResourcesForEnv(cfgFile, envName)
 	if err != nil {
 		return nil, err
@@ -587,6 +571,10 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", path, err)
 	}
+	discovery, err := newIaCResourceDiscovery(cfg, envName)
+	if err != nil {
+		return nil, err
+	}
 	var topEnv *config.EnvironmentConfig
 	if envName != "" && cfg.Environments != nil {
 		topEnv = cfg.Environments[envName]
@@ -595,15 +583,15 @@ func planResourcesForEnv(path, envName string) ([]*config.ResolvedModule, error)
 	var out []*config.ResolvedModule
 	for i := range cfg.Modules {
 		m := &cfg.Modules[i]
-		if !isInfraType(m.Type) {
-			continue
-		}
-		if envName == "" {
-			out = append(out, &config.ResolvedModule{Name: m.Name, Type: m.Type, Protected: m.Protected, Config: config.ExpandEnvInMapPreservingVars(m.Config, infraPreserveKeys, secretVars)})
-			continue
-		}
-		resolved, ok := m.ResolveForEnv(envName)
+		resolved, ok := resolveDiscoveryModule(m, envName)
 		if !ok {
+			continue
+		}
+		resource, err := discovery.classify(resolved)
+		if err != nil {
+			return nil, err
+		}
+		if !resource {
 			continue
 		}
 		if topEnv != nil {
@@ -1397,6 +1385,13 @@ func runInfraApply(args []string) error {
 	if dryRun {
 		return runInfraApplyDryRun(cfgFile, envName, dryRunFormat, showSensitiveVal)
 	}
+	directResources, err := hasDirectIaCResources(cfgFile, envName)
+	if err != nil {
+		return fmt.Errorf("classify IaC resources: %w", err)
+	}
+	if planFile == "" && directResources && hasPlatformModules(cfgFile) {
+		return fmt.Errorf("config %q mixes direct IaC and platform.* module types; use one style per config file", cfgFile)
+	}
 
 	if !*autoApprove {
 		ok, err := confirmAction("Apply infrastructure changes from "+cfgFile+"?", false, os.Stderr, nil)
@@ -1455,7 +1450,7 @@ func runInfraApply(args []string) error {
 	// change to --refresh.
 	refreshOutputsRan := false
 	if refreshOutputsFlag {
-		if hasInfraModules(cfgFile) {
+		if directResources {
 			if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
 				return fmt.Errorf("--refresh-outputs: %w", err)
 			}
@@ -1469,7 +1464,7 @@ func runInfraApply(args []string) error {
 	// before running the normal plan + apply. Only applicable for infra.* configs;
 	// silently skipped for legacy platform.* configs. Runs AFTER --refresh-outputs
 	// so the drift check sees the freshest possible Outputs.
-	if refreshFlag && hasInfraModules(cfgFile) {
+	if refreshFlag && directResources {
 		fmt.Println("Refreshing state (detecting drift)...")
 		store, storeErr := resolveStateStore(cfgFile, envName)
 		if storeErr != nil {
@@ -1519,7 +1514,7 @@ func runInfraApply(args []string) error {
 	// applicable for infra.* configs (legacy platform.* path doesn't
 	// flow through iac/refreshoutputs). Skipped when --refresh-outputs
 	// already ran (refreshOutputsRan guard prevents double-trigger).
-	if !refreshOutputsRan && applyPreStepRefreshEnabled(skipRefreshFlag) && hasInfraModules(cfgFile) {
+	if !refreshOutputsRan && applyPreStepRefreshEnabled(skipRefreshFlag) && directResources {
 		if err := applyPreStepRefreshOutputs(ctx, cfgFile, envName, os.Stdout); err != nil {
 			return fmt.Errorf("apply pre-step refresh-outputs: %w", err)
 		}
@@ -1564,7 +1559,7 @@ func runInfraApply(args []string) error {
 				// *StaleError: Error() yields the canonical FormatStaleError
 				// output (no sentinel prefix); Unwrap() yields ErrEnvVarChanged
 				// so errors.Is(err, inputsnapshot.ErrEnvVarChanged) still matches.
-				return inputsnapshot.NewStaleError(drift)
+				return contextualCLIError{err: inputsnapshot.NewStaleError(drift)}
 			}
 		}
 		// Stale checks hash the same declarative inputs recorded at plan time.
@@ -1596,14 +1591,14 @@ func runInfraApply(args []string) error {
 		// platform.* configs fall back to the pipeline runner (pipelines.apply).
 		// Mixing both types in the same config is not supported — fail fast with a
 		// descriptive error rather than silently skipping one class of modules.
-		if hasInfraModules(cfgFile) && hasPlatformModules(cfgFile) {
+		if directResources && hasPlatformModules(cfgFile) {
 			return fmt.Errorf(
 				"config %q mixes infra.* and platform.* module types — "+
 					"use one style per config file, or split into separate configs",
 				cfgFile,
 			)
 		}
-		if hasInfraModules(cfgFile) {
+		if directResources {
 			h, err := applyInfraModules(ctx, cfgFile, envName)
 			if err != nil {
 				return err

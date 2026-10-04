@@ -2116,6 +2116,47 @@ wfctl infra apply --dry-run --plugin-dir /tmp/ci-plugins -c infra.yaml
 wfctl infra plan --plugin-dir /tmp/ci-plugins -c infra.yaml
 ```
 
+#### Provider-Declared Resource Types
+
+In addition to legacy `infra.*` and `platform.*` modules, `infra plan` and
+`infra apply` discover exact resource types declared by installed IaC provider
+manifests. A custom resource must select a declared `iac.provider` module using
+`config.iac_provider` (preferred) or `config.provider`; the selected provider
+must advertise that exact type. Environment provider defaults and overrides,
+disabled resources/providers, and imported configurations use the same
+classification as direct apply, saved-plan apply and dry-run summaries.
+Routing references and defaults use the existing `${VAR}` / `$VAR`
+environment expansion to select the provider without expanding or mutating
+raw resource payloads and preserved input references.
+
+Discovery never selects a provider by resource prefix or by the union of
+installed types. Missing, ambiguous, malformed or conflicting **needed**
+provider declarations fail closed. Unrelated malformed or unreadable installed
+metadata cannot veto canonical/application modules or a valid selected
+provider, and damaged metadata never authorizes discovery. Ordinary application
+modules are not promoted by an unrelated `provider` key. Installed metadata
+enables discovery only: runtime typed-service, v2 capability, driver, resource identity and ownership checks
+still govern execution. Legacy no-provider canonical planning and public
+prefix-based helpers remain compatible; `platform.*` pipeline routing is not
+mixed with direct custom-resource application.
+
+Custom resources retain provider-owned `config.name` fields. Existing
+`infra.*` environment name lifting is separate from the container-only
+top-level `envVars` defaults. Preserved custom input references, including
+`env_vars`, `env_vars_secret` and `secret_env_vars`, contribute fingerprints to
+saved plans. Changing their values rejects saved-plan apply before driver
+mutation without disclosing values. The existing limitation for references
+originating solely in top-level environment `envVars` defaults is unchanged.
+
+Before custom state exists, a prior immutable release may be retained with a
+fail-closed renderer. After custom state exists, downgrading means **freeze
+automatic and manual apply/delete**, preserve configuration/state/provider
+identity, and resume only with a verified discovery-capable release. An older
+binary may omit custom desired resources and propose their deletion; never
+apply that omission-derived plan with the old binary. A discovery-capable
+consumer rejects that stale desired hash, but cannot make continued management
+by the older binary safe.
+
 #### `infra test`
 
 `wfctl infra test` validates infrastructure expectations without contacting live
