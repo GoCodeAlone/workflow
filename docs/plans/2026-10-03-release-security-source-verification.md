@@ -4,6 +4,19 @@
 
 ## Go1.27.1 Amendment Checkpoint
 
+Native corrected-custody ee6eb078 whole command finishes622s, source clean,
+wfctl PASS460.576s below unchanged600s. Whole exit1 solely root rate-recovery
+fixture: its10ms token interval cannot require depletion after a50ms HTTP
+burst. All filesystem/home failures and stale init/version assertions pass.
+Controlled25ms HTTP pause reproduces old-rate RED;60RPM/derived refill wait
+GREEN3.433s; one-variable old-rate reversal fails the same exact429 assertion.
+Independent test-only review SHIP-IT; root vet0 and scoped lint0; production
+limiter/CI/script bytes unchanged. Final restored/frozen whole gate remains.
+
+Actual ee6eb078 native Linux default GitHub-API/TLS proxy control plus all30
+CLI denials pass32.060s (177s with cold compile), zero failures/skips, source
+clean and owned container removed. No live-release or whole-suite claim.
+
 Checkpoint2026-10-04, ADR0061/0062: independent narrow delta review SHIP-IT,
 no Important/Critical findings. Real MCP CD/release pins RED on1.26.5 and
 GREEN on1.27.1; existing init/version focused tests GREEN14.532s after stale

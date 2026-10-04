@@ -1,5 +1,27 @@
 # Source Security Code Review
 
+## Go27 Delta Review 2026-10-04
+
+Independent Ramanujan reviewed33b4 Go27/source-generated repairs, then only
+the new ADR0061/0062 MCP/default-doc/DHI/test delta at bca10b34 plus owned
+working changes: SHIP-IT, no Important/Critical findings. Parsed actual MCP
+CD output and config-only release helper require literal1.27.1; default init
+checks preserve existing coverage; version test retains real stderr/final-line
+behavior and diagnostics. DHI builder changes only the official declared
+tag/builder Alpine minor, not vendor/dev/CGO0/nonroot runtime hardening.
+
+A new native-cold failure warranted one separate root-test-only review:
+6000RPM refills during real50ms HTTP burst, so200 was legitimate. Corrected
+60RPM/derived1100ms wait and25ms client pause retain all three stages and
+exact denial/recovery/JSON/configured-handler assertions. Review SHIP-IT,
+no Important/Critical findings; no production limiter/clock/deadline change.
+Old-rate control fails the429 assertion; corrected focused race/lint/vet pass.
+Scheduling stalls >=1s remain visible failures, not skipped or retried.
+
+CI B2/bootstrap and DHI401 publication/compiler/build are still HOLD;
+final corrected frozen whole-cold/runtime gates are lead verification, not
+cleared by this review. Three tasks/one source PR and protected bytes retained.
+
 2026-10-03; independent bounded review of550c0f7a against49e18034.
 Tasks1/2 independent spec/quality PASS retained; final reviewer did not author
 Task3. Read-only review inspected code, lock graph and retained real evidence;

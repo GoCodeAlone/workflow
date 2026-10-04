@@ -48,6 +48,25 @@ return401, so published digests/native compiler/image build remain unverified
 until host authentication. No guessed3.22 tag or substitute image proof.
 Both corrections stay Task2/S4/S6; three tasks/one PR and CI exclusions unchanged.
 
+### Backport 2026-10-04: Rate-Recovery Fixture Scheduling
+
+Corrected native cold ee6eb078 exits1 solely on root rate-recovery test: the
+6000RPM fixture refills a token every10ms, but its two HTTP burst requests take
+50ms; the subsequent200 is valid refill, not a middleware/compiler defect.
+wfctl passes460.576s under unchanged600s; native filesystem/home failures do not
+recur. The isolated fast-host probe passes, confirming a scheduling assumption.
+
+Task2/S4 additionally names e2e_middleware_negative_test.go. First demonstrate
+the invalid10ms assumption with a25ms client pause through the actual engine/
+HTTP test. Then use60RPM and derive a one-token refill wait plus100ms from that
+configuration, matching the existing module-test precedent. Preserve all three
+subtests, exact success/429/handler-body assertions, HTTP5s/default-package
+deadlines and production middleware bytes. No clock mock, skip or timeout
+increase; the changed wait represents the configured rate. Rerun focused
+RED/GREEN/reversal and the whole cold command on frozen corrected source.
+This test-only proof backport adds no product invariant/feature; manifest
+three tasks/one existing PR and protected exclusions remain unchanged.
+
 The approved2026-10-04 backport below supersedes earlier1.26.8/generator/Docker
 exclusions; earlier evidence remains historical, not finalGo1.27.1 proof.
 

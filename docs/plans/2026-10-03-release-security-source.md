@@ -98,6 +98,11 @@ existing generated-file/module/UI checks. In already-owned `main_test.go`,
 assert the exact final linked-version stderr line and empty stdout, retaining
 preceding dependency stderr diagnostics. Preserve the existing handler writer.
 Require authentic failure then focused GREEN; no production output change.
+The observed scheduling backport additionally owns
+`e2e_middleware_negative_test.go` for Task2/S4 only: controlled25ms client
+pause must reproduce the old10ms-refill failure;60RPM/derived refill wait must
+preserve all three actual engine/HTTP assertions and existing deadlines.
+No production limiter/clock change; rerun the exact final cold command.
 
 A. Add independent literal1.27.1 assertions for scaffold modules/workflows,
 legacy emitters, SDK module+local-replace modules, deploy Docker builder,
@@ -221,3 +226,7 @@ ADR0062 inline alignment PASS: init expectation correction -> Task2/S6/S4;
 version final-line test boundary -> existing Task1/2/S4 ownership. Reverse trace
 adds no product behavior, task, PR, dependency or protected-file change.
 Three tasks/one existing PR retained; verify the unchanged manifest hash.
+
+Rate-fixture inline alignment PASS: observed real cold failure -> Task2/S4
+full-suite acceptance; test-only owning file and RED/GREEN/reversal -> same
+runtime proof, no new API, task, PR, timeout or protected-file ownership.
