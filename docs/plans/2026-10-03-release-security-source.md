@@ -32,7 +32,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Amended 2026-10-04T04:32:00Z (see decisions/0057-upgrade-source-and-generated-go.md)
+**Status:** Locked 2026-10-04T04:47:52Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -75,7 +75,10 @@ versions independently; run a real generated API app with an explicit local
 Workflow replacement, build with1.27.1/local, observe owned HTTP200/process
 shutdown. Generate a fresh SDK plugin from built wfctl in source cwd using
 `plugin init --author GoCodeAlone --output "$PLUGIN_SOURCE" workflow-plugin-go127proof`;
-assert its absolute Workflow replacement, native compile
+inside generated source run
+`go mod edit -replace=github.com/GoCodeAlone/workflow="$SOURCE_ROOT"` to normalize
+the discovered relative replacement for this integration-only proof, then
+assert the absolute replacement, native tidy and compile
 `go build -o "$WFCTL_PLUGIN_DIR/workflow-plugin-go127proof/workflow-plugin-go127proof" ./cmd/workflow-plugin-go127proof`,
 and copy actual generated plugin.json/plugin.contracts.json alongside it.
 Through the real Workflow plugin loader, execute generated
@@ -146,6 +149,6 @@ Task 1 helper and Task 3 UI writes are independent; Task 2 module writes must se
 
 PASS after bounded plan-review corrections. S1 -> Task 2, S2 -> Task 3, S3 -> Task 1, S4 -> Tasks 1/2/3, S5 -> Tasks 2/3. Reverse trace: Task 1 -> S3/S4; Task 2 -> S1/S4/S5; Task 3 -> S2/S4/S5. All three task headings exist and ship only PR 1. Protected-file exclusions, policytool native proof and rollback are explicit; no workflow/trust/release task is orphaned or silently added. Programmatic strict manifest check PASS.
 
-Amendment alignment pending: S1/S6 -> Task2; S4 exact new compiler -> Task2A-D
+Amendment alignment PASS after bounded P1/P2 proof corrections: S1/S6 -> Task2; S4 exact new compiler -> Task2A-D
 and historical Task1/3 cases rerun. Task1 -> S3/S4, Task2 -> S1/S4/S5/S6,
 Task3 -> S2/S4/S5. Three tasks/one existing PR preserved; no protected CI writes.
