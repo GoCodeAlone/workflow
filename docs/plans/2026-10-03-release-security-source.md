@@ -12,6 +12,7 @@ Generated-runtime owning-file amendment: `decisions/0058-repair-generated-runtim
 Default-config owning-file amendment: `decisions/0059-use-self-contained-app-scaffolds.md`.
 Health-config owning-file amendment: `decisions/0060-use-existing-scaffold-health-wiring.md`.
 Remaining-default owning-file amendment: `decisions/0061-align-remaining-go-defaults.md`.
+Existing-test owning-file backport: `decisions/0062-align-scaffold-and-version-test-boundaries.md`.
 
 ## Guidance And Evidence
 
@@ -91,6 +92,12 @@ existing README/build/deploy owners. No historical-plan rewrite, runtime image
 vendor/hardening change or protected-file ownership.
 The steps below supersede earlier1.26.8 commands for final verification;
 previous tests/results remain historical receipts, not new-compiler acceptance.
+ADR0062 additionally names `cmd/wfctl/init_test.go`: align optional-module
+absence assertions with the approved self-contained defaults, retaining all
+existing generated-file/module/UI checks. In already-owned `main_test.go`,
+assert the exact final linked-version stderr line and empty stdout, retaining
+preceding dependency stderr diagnostics. Preserve the existing handler writer.
+Require authentic failure then focused GREEN; no production output change.
 
 A. Add independent literal1.27.1 assertions for scaffold modules/workflows,
 legacy emitters, SDK module+local-replace modules, deploy Docker builder,
@@ -209,3 +216,8 @@ map to S6 and Task2A-D plus their named owning files. Task2 remains the sole
 source PR row; Tasks1/3 and all other requirements retain coverage. Three
 tasks/one existing PR and protected exclusions unchanged. No added MCP feature
 or unverified image tag; strict manifest check required before execution.
+
+ADR0062 inline alignment PASS: init expectation correction -> Task2/S6/S4;
+version final-line test boundary -> existing Task1/2/S4 ownership. Reverse trace
+adds no product behavior, task, PR, dependency or protected-file change.
+Three tasks/one existing PR retained; verify the unchanged manifest hash.

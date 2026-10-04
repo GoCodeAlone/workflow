@@ -4,6 +4,30 @@
 
 ## Go1.27.1 Amendment Checkpoint
 
+Checkpoint2026-10-04, ADR0061/0062: independent narrow delta review SHIP-IT,
+no Important/Critical findings. Real MCP CD/release pins RED on1.26.5 and
+GREEN on1.27.1; existing init/version focused tests GREEN14.532s after stale
+optional-module and final stderr-line corrections. Version diagnostics remain
+visible, existing stderr behavior unchanged. Compatible full scoped source
+lint reports0issues; changed MCP/wfctl vet exits0. Protected diff remains empty.
+
+Cold33b4 Go27 whole suite exited1 (wfctl549.956s below600s), not acceptance.
+Stale init/version expectations are corrected above. Matched unchanged-source
+control with registered UID1000 and native container source/temp/cache passes
+all atomic/lock/permission/home and LRU cases, zero failures/skips, clean source;
+the host VirtioFS/unregistered UID setup was not valid CI custody. No product
+filesystem or timeout changes. Corrected final frozen-source cold run remains.
+
+Maintained e-commerce builder uses the exact official DHI catalog tag
+1.27.1-alpine3.23-dev, preserving vendor/dev/CGO0 and static3.22 nonroot runtime.
+Official definition declares both release architectures and compiler1.27.1;
+registry401 prevents published digest/native compiler/build verification here.
+Authentication is requested, not bypassed; no image-availability claim.
+Actual CI Task1 also holds on independent B2 bootstrap evidence: its legal
+five-JSON stage makes the unchanged current harness's own lifecycle fixture
+append a forbidden second staged bundle. Promoted synthetic harness PASS is
+not actual stage CI acceptance. No new CI stage/merge or exception approved.
+
 2026-10-04: earlier Go1.26.8 receipts below are historical, not new-compiler
 acceptance. Root/example/eleven fixture floors, generated defaults/CI/Docker,
 SDK/build defaults and maintained builders now use1.27.1. Explicit overrides

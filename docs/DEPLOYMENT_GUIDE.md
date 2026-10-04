@@ -30,7 +30,7 @@ The workflow engine is a Go binary with an embedded React UI. Building requires 
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.25+ | Server binary |
+| Go | 1.27.1+ | Server binary |
 | Node.js | 18+ | UI build |
 | Docker | 24+ | Container builds (optional) |
 | golangci-lint | latest | Go linting (development) |

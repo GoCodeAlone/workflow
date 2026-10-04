@@ -5,10 +5,48 @@
 **Authority:** independent source-only maintenance. Existing Signal scope unchanged.
 **Decision:** `decisions/0056-isolate-source-security-remediation.md`.
 
+### Backport 2026-10-04: Existing Test Boundary Corrections
+
+Evidence: cold Linux checkpoint33b4 failed the two init default-module
+expectations and linked-version combined-output assertion. Defaults correctly
+omit optional external observability plugins per ADR0059; the final version
+line is v9.9.9 and stderr also includes a dependency compatibility warning.
+The focused channel probe disproves a stdout assumption: the existing handler
+uses stderr for version output, with empty stdout.
+See decisions/0062-align-scaffold-and-version-test-boundaries.md.
+
+Correction: Task2 additionally names init_test.go; assert absent optional
+types without dropping existing file/module/UI checks. Already-owned
+main_test.go checks empty stdout and the exact final stderr version line,
+retaining preceding stderr diagnostics/logs.
+No warning suppression, dependency change or production-version change.
+The existing default-registry/health/runtime tests cover the product invariant;
+this is a stale expectation/channel correction, not a new product feature.
+Manifest scope stays three tasks/one existing PR, protected exclusions intact.
+
 ## Goal And Requirements
 
 Ship reviewed, patched Workflow source and reliable real-host tests without
 modifying protected CI authority, unrelated staged work, or release tags.
+
+### Backport 2026-10-04: Native Linux Proof Custody And DHI Builder
+
+Cold33b4 used an unregistered UID501 and host VirtioFS source/temp/cache paths.
+The resulting home-resolution, inode, lock, permission and LRU failures are
+environmental: unchanged33b4 with registered UID1000, container-native source/
+temp/cache and Docker --init passes every matched case (wfctl173s, LRU2s), with
+unchanged tracked source. Final cold proof uses that corrected custody; retain
+the exact CI test command/default600s limit and move coverage output outside
+source before clean-status readback. No filesystem/test-runtime product changes.
+
+The immutable official DHI catalog615555cd declares Go1.27.1 dev only on
+Alpine3.23, not3.22. Use exact dhi.io/golang:1.27.1-alpine3.23-dev while retaining
+DHI/dev/musl, CGO_ENABLED=0 and the existing nonroot static3.22 runtime. This is
+a builder-OS-minor change, not a vendor/runtime/hardening change. Official
+metadata declares amd64/arm64 and compiler1.27.1; both old/new registry probes
+return401, so published digests/native compiler/image build remain unverified
+until host authentication. No guessed3.22 tag or substitute image proof.
+Both corrections stay Task2/S4/S6; three tasks/one PR and CI exclusions unchanged.
 
 The approved2026-10-04 backport below supersedes earlier1.26.8/generator/Docker
 exclusions; earlier evidence remains historical, not finalGo1.27.1 proof.

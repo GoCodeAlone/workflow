@@ -3,7 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // --- Test YAML fixtures ---
@@ -821,6 +824,7 @@ func TestGenerateGithubActions(t *testing.T) {
 	if !contains(cdYAML, "name: CD") {
 		t.Error("CD workflow should have name")
 	}
+	assertMCPWorkflowGoVersion(t, cdYAML)
 
 	features, _ := data["features"].(map[string]any)
 	if features == nil {
@@ -839,6 +843,41 @@ func TestGenerateGithubActions(t *testing.T) {
 	// plan should be present (new cigen-derived field)
 	if _, hasPlan := data["plan"]; !hasPlan {
 		t.Error("expected 'plan' field in result (cigen CIPlan)")
+	}
+}
+
+func TestMCPGenerateReleaseWorkflowGoVersion(t *testing.T) {
+	assertMCPWorkflowGoVersion(t, mcpGenerateReleaseWorkflow())
+}
+
+func assertMCPWorkflowGoVersion(t *testing.T, content string) {
+	t.Helper()
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Uses string `yaml:"uses"`
+				With struct {
+					GoVersion string `yaml:"go-version"`
+				} `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(content), &workflow); err != nil {
+		t.Fatalf("parse MCP workflow output: %v", err)
+	}
+	found := false
+	for jobName, job := range workflow.Jobs {
+		for _, step := range job.Steps {
+			if strings.HasPrefix(step.Uses, "actions/setup-go@") {
+				found = true
+				if step.With.GoVersion != "1.27.1" {
+					t.Errorf("MCP job %s Go version = %q, want 1.27.1", jobName, step.With.GoVersion)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("MCP workflow has no setup-go step")
 	}
 }
 

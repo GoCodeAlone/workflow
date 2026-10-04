@@ -136,7 +136,7 @@ event-broker --> notification-handler
 
 ### Prerequisites
 
-- **Go 1.25+** installed
+- **Go 1.27.1+** installed
 - The workflow repository cloned and built:
 
 ```bash

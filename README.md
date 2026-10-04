@@ -1,6 +1,6 @@
 # Workflow Engine
 
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.27.1+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built on Modular](https://img.shields.io/badge/Built%20on-GoCodeAlone%2Fmodular-green)](https://github.com/GoCodeAlone/modular)
 [![Go Reference](https://pkg.go.dev/badge/github.com/GoCodeAlone/workflow.svg)](https://pkg.go.dev/github.com/GoCodeAlone/workflow)
