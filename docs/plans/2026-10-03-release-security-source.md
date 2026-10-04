@@ -73,7 +73,23 @@ C. Build actual wfctl and use its existing `init`, `plugin init`, `generate`
 and deploy-generation tests/commands. Parse emitted Go modules/YAML/Docker
 versions independently; run a real generated API app with an explicit local
 Workflow replacement, build with1.27.1/local, observe owned HTTP200/process
-shutdown. Build/load generated plugin via existing host tests. Dockerfile
+shutdown. Generate a fresh SDK plugin from built wfctl in source cwd using
+`plugin init --author GoCodeAlone --output "$PLUGIN_SOURCE" workflow-plugin-go127proof`;
+assert its absolute Workflow replacement, native compile
+`go build -o "$WFCTL_PLUGIN_DIR/workflow-plugin-go127proof/workflow-plugin-go127proof" ./cmd/workflow-plugin-go127proof`,
+and copy actual generated plugin.json/plugin.contracts.json alongside it.
+Through the real Workflow plugin loader, execute generated
+`step.go127proof_example` with a run-specific protobuf StringValue input;
+require exact uppercase output, successful discovery/lifecycle/cleanup.
+Record generated plugin output, not record-fixture binary, as this proof.
+Exercise actual default BuildBinaryStep factory/Execute dry-run with no
+go_version override, independently assert output go.mod1.27.1, materialize
+those exact emitted files outside the repo, add explicit local Workflow
+replacement via `go mod edit -replace` solely for unreleased source integration,
+native tidy/build and launch the generated embedded-config binary. Require
+owned HTTP200/identity and graceful shutdown. Existing compile test that accepts
+an error cannot satisfy this gate; this proves generated output, not published
+v0.0.0 dependency resolution. Dockerfile
 builder smoke builds and launches a real maintained image; never insert a fake
 prebuilt admin-plugin. Existing container/SDK matrices prove adjacent boundary.
 D. Rebuild four shipped commands from clean frozen plain checkout and inspect
