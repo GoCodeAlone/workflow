@@ -10,6 +10,7 @@
 **Decisions:** `decisions/0056-isolate-source-security-remediation.md`; approved amendment `decisions/0057-upgrade-source-and-generated-go.md`.
 Generated-runtime owning-file amendment: `decisions/0058-repair-generated-runtime-boundaries.md`.
 Default-config owning-file amendment: `decisions/0059-use-self-contained-app-scaffolds.md`.
+Health-config owning-file amendment: `decisions/0060-use-existing-scaffold-health-wiring.md`.
 
 ## Guidance And Evidence
 
@@ -29,6 +30,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 - Cache reuse for SDK, Docker, registry, mutant or capability executables; test removal, timeout extension, GORACE changes, scanner ignores/suppression.
 - Generated strict StringValue/app bootstrap defects are Task2 per ADR0058; broader codec types, new scaffold ABI and new generator APIs remain excluded.
 - Default optional external observability config repair is Task2 per ADR0059; new external-plugin loader and replacement telemetry semantics remain excluded.
+- Existing health endpoint wiring is Task2 per ADR0060; no new health API or handler substitute.
 
 **PR Grouping:**
 
@@ -36,7 +38,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Locked 2026-10-04T05:51:09Z
+**Status:** Locked 2026-10-04T06:00:42Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -71,6 +73,10 @@ remove optional external observability modules from the self-contained defaults,
 document opt-in composition in existing owning READMEs, and test generated module
 types against the actual default-plugin registry. Add failing assertions first;
 rerun real generated API config with only address/identity parameterization.
+ADR0060 adds `cmd/wfctl/templates/event-processor/workflow.yaml.tmpl` to the two
+existing YAML owners: preserve /health via healthPath and existing observability
+wiring, not a manual route to a non-handler service. Add generated-config path/
+route regression RED/GREEN and rerun actual API/health/SIGTERM/endpoint absence.
 The steps below supersede earlier1.26.8 commands for final verification;
 previous tests/results remain historical receipts, not new-compiler acceptance.
 
@@ -179,3 +185,9 @@ Task2C and the two added YAML owners, existing README opt-in notes, real default
 registry assertions and generated API runtime gates. Forward/reverse trace
 and strict three-task/one-PR manifest check passed; independent Ramanujan
 confirmed the narrow coverage. Protected exclusions unchanged.
+
+ADR0060 inline alignment PASS: health path/service correction -> Task2C;
+Task2 owning YAML/default runtime proof -> S6/S4 and the observed design backport.
+S1/S3/S2 and Tasks1/3 retain their existing coverage. All tasks still ship the
+sole existing PR; strict manifest check passed with no missing task, count
+change, new health API or protected-file ownership.

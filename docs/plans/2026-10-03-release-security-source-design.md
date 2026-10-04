@@ -174,6 +174,16 @@ rerun the real API config, changing only loopback address/response identity in
 the proof. No alternate-type substitution or proof-only config deletion.
 Task2 adds the two YAML templates; three tasks/one PR and CI exclusions remain.
 
+### Backport 2026-10-04: Default Health Route Is Not A Handler
+
+Fresh generated API now initializes all modules, then rejects its manual GET
+/health route because the named health.checker service is not an HTTP handler.
+All three app configs share that invalid route. Per ADR0060, set healthPath to
+/health and let the existing observability hook mount its real health handler;
+remove only the invalid manual route. Test generated paths/routes RED/GREEN
+and rerun real API/health/shutdown. Task2 adds event-processor YAML alongside
+the existing two YAML owners; no new core API or endpoint/feature removal.
+
 ### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
 
 Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker
