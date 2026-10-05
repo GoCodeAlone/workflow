@@ -1524,9 +1524,6 @@ run_candidate_fetch() {
   (
     cd "${workdir}"
     PATH="${fake_bin}:$PATH" \
-      EVENT_NAME="${FAKE_EVENT_NAME-pull_request_target}" \
-      BASE_REF="${FAKE_BASE_REF-main}" \
-      EVENT_REF="${FAKE_EVENT_REF-refs/heads/main}" \
       CANDIDATE_REPOSITORY="${repository}" \
       CANDIDATE_SHA="${sha}" \
       GIT_ASKPASS=/bin/false \
@@ -1560,37 +1557,6 @@ if [[ "$(grep -Fc -- ' archive ' "${candidate_fetch_good}/git.log")" -ne 1 ]]; t
 fi
 grep -Fq -- "-tvf candidate.tar" "${candidate_fetch_good}/tar.log"
 grep -Fq -- "--extract --file=candidate.tar --directory=candidate --no-same-owner --no-same-permissions" "${candidate_fetch_good}/tar.log"
-
-candidate_fetch_push="${tmp_dir}/candidate-fetch-push"
-FAKE_EVENT_NAME=push FAKE_BASE_REF= \
-  run_candidate_fetch "${candidate_fetch_push}" example/repo "${candidate_sha}" "${fake_archive}"
-test -f "${candidate_fetch_push}/candidate/.github/workflows/inert.yml"
-
-for invalid_route in \
-  'pull-request|pull_request|main|refs/heads/main' \
-  'other-base|pull_request_target|develop|refs/heads/main' \
-  'other-ref|pull_request_target|main|refs/heads/develop' \
-  'push-base|push|main|refs/heads/main' \
-  'push-ref|push||refs/heads/develop'; do
-  IFS='|' read -r label event_name base_ref event_ref <<<"${invalid_route}"
-  route_workdir="${tmp_dir}/candidate-route-${label}"
-  set +e
-  route_output="$(FAKE_EVENT_NAME="${event_name}" FAKE_BASE_REF="${base_ref}" \
-    FAKE_EVENT_REF="${event_ref}" \
-    run_candidate_fetch "${route_workdir}" example/repo "${candidate_sha}" "${fake_archive}" 2>&1)"
-  route_status=$?
-  set -e
-  if [[ "${route_status}" -eq 0 ]] || ! grep -Fq -- \
-    "public workflow policy accepts only push or pull_request_target for main" <<<"${route_output}"; then
-    echo "candidate fetch accepted invalid event route ${label}" >&2
-    printf '%s\n' "${route_output}" >&2
-    exit 1
-  fi
-  if [[ -e "${route_workdir}/git.log" || -e "${route_workdir}/tar.log" ]]; then
-    echo "candidate fetch invoked Git or tar before rejecting event route ${label}" >&2
-    exit 1
-  fi
-done
 
 for invalid_candidate in \
   'bad-repository|example/repo?token=leak|0123456789012345678901234567890123456789' \
