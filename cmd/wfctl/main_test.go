@@ -36,7 +36,12 @@ func TestMain(m *testing.M) {
 	if err := os.Setenv("WFCTL_DIFFCACHE", "disabled"); err != nil {
 		panic("setenv WFCTL_DIFFCACHE: " + err.Error())
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if err := closeInvocationFixtureBuilds(); err != nil {
+		fmt.Fprintf(os.Stderr, "fixture artifact teardown: %v\n", err)
+		code = 1
+	}
+	os.Exit(code)
 }
 
 func TestHelpFlagDoesNotLeakEngineError(t *testing.T) {
