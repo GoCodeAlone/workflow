@@ -155,11 +155,20 @@ func TestLinkedVersionOverridesBuildInfo(t *testing.T) {
 
 	run := exec.Command(exe, "--version")
 	run.Env = append(os.Environ(), "WFCTL_NO_UPDATE_CHECK=1", "CI=true")
-	out, err := run.CombinedOutput()
+	var stderr bytes.Buffer
+	run.Stderr = &stderr
+	out, err := run.Output()
 	if err != nil {
-		t.Fatalf("wfctl --version: %v\n%s", err, out)
+		t.Fatalf("wfctl --version: %v\nstdout: %s\nstderr: %s", err, out, stderr.String())
 	}
-	if got := strings.TrimSpace(string(out)); got != "v9.9.9" {
+	if len(out) != 0 {
+		t.Fatalf("wfctl --version unexpectedly wrote stdout: %s", out)
+	}
+	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
+	if len(lines) > 1 {
+		t.Logf("wfctl --version diagnostics: %s", strings.Join(lines[:len(lines)-1], "\n"))
+	}
+	if got := lines[len(lines)-1]; got != "v9.9.9" {
 		t.Fatalf("linked version = %q, want v9.9.9", got)
 	}
 }
