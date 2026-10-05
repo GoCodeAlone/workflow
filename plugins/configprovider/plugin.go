@@ -189,10 +189,6 @@ func (p *Plugin) configTransformHook(cfg *config.WorkflowConfig) error {
 	return nil
 }
 
-func configTransformHook(cfg *config.WorkflowConfig) error {
-	return New().configTransformHook(cfg)
-}
-
 func processConfigProvider(registry *module.ConfigRegistry, cfg map[string]any) error {
 	return module.LoadConfigProvider(registry, cfg)
 }
