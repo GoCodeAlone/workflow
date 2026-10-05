@@ -21,8 +21,8 @@ github.com/GoCodeAlone/modular/modules/auth v1.19.0 h1:ughD47BqEAhg7+3trucwcs5Kz
 github.com/GoCodeAlone/modular/modules/auth v1.19.0/go.mod h1:pGPazN7Irlza8kUxE7WsXri44PhURKYBGym1tlBUl+k=
 github.com/GoCodeAlone/modular/modules/cache v1.19.0 h1:s+3aFI7wncV0NhbPrJheFyVYr1WXwLJXOvSAP9RRaYU=
 github.com/GoCodeAlone/modular/modules/cache v1.19.0/go.mod h1:bj/yS2FPdEDb8Vdmd5hjs5W4hchzMAC57eoIB3YY9S4=
-github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 h1:2ljVafd/1LYchF47WrnA1+ji8mcmVXMJ4F5qDrhZZi4=
-github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0/go.mod h1:AKLcRGsw5gp2Q1zhuK0TBnMJOsaRe3aJ2OKnLFE2O5w=
+github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.0 h1:58xUt5rMMdSHZ7XWOBc7rf8kajrdcKPO4nVm67U8+iE=
+github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.0/go.mod h1:tH+3zxfUCKRofm6BcGDSCX5izdb+ox7nP8FYAm4zwvc=
 github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0 h1:zoWioqUvuNNDfnjHA1sHixdlHfBreJdGhnnEBtxkzI8=
 github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0/go.mod h1:GDU/jsD6AddmXKedj0wZwieUIaQsTBSGMzuj+XHXMrw=
 github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0 h1:+2M/ecyCxDiXfJM4ibcERuu/BBeIbLTQNcVgRsllR64=
