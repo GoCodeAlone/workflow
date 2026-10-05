@@ -50,7 +50,7 @@ func registrySyncActualCLIBinary(t *testing.T, host, apiURL string) string {
 	defer cancel()
 	build := exec.CommandContext(buildCtx, "go", registrySyncHostBuildArguments(host, binary, apiURL)...)
 	build.Env = registrySyncHostEnvironment(os.Environ())
-	if out, err := build.CombinedOutput(); err != nil {
+	if out, err := buildFixtureArtifact(t, buildCtx, build, "../..", binary); err != nil {
 		t.Fatalf("build actual CLI: %v\n%s", err, out)
 	}
 	return binary

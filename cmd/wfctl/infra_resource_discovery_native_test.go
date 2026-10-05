@@ -48,7 +48,14 @@ func discoveryBuild(t *testing.T, cwd, output, source string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-race", "-o", output, source)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = cwd, discoveryBuildEnv(), 5*time.Second
-	if out, err := cmd.CombinedOutput(); err != nil {
+	var out []byte
+	var err error
+	if source == "./cmd/wfctl" {
+		out, err = buildFixtureArtifact(t, ctx, cmd, cwd, output)
+	} else {
+		out, err = cmd.CombinedOutput()
+	}
+	if err != nil {
 		t.Fatalf("build actual artifact: %v\n%s", err, out)
 	}
 	t.Logf("go build -race -o %s %s: exit 0", output, source)
