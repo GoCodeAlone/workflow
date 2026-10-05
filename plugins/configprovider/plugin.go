@@ -6,10 +6,13 @@
 package configprovider
 
 import (
+	"encoding/json"
 	"fmt"
+	"sync"
 
 	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 )
@@ -18,6 +21,12 @@ import (
 // that resolves {{config "key"}} references at config load time.
 type Plugin struct {
 	plugin.BaseEnginePlugin
+	mu           sync.Mutex
+	credentialed bool
+	constructed  bool
+	providerName string
+	registry     *module.ConfigRegistry
+	grants       []interfaces.StepCredentialGrant
 }
 
 // New creates a new config provider plugin.
@@ -45,6 +54,15 @@ func New() *Plugin {
 func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 	return map[string]plugin.ModuleFactory{
 		"config.provider": func(name string, cfg map[string]any) modular.Module {
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			if p.credentialed {
+				if p.constructed || p.registry == nil || name != p.providerName {
+					return module.NewConfigProviderModuleWithCredentials(name, nil, nil)
+				}
+				p.constructed = true
+				return module.NewConfigProviderModuleWithCredentials(name, p.registry, p.grants)
+			}
 			return module.NewConfigProviderModule(name, cfg)
 		},
 	}
@@ -62,15 +80,50 @@ func (p *Plugin) ConfigTransformHooks() []plugin.ConfigTransformHook {
 		{
 			Name:     "config-provider-expansion",
 			Priority: 1000, // Run before other transform hooks
-			Hook:     configTransformHook,
+			Hook:     p.configTransformHook,
 		},
 	}
 }
 
 // configTransformHook processes all config.provider modules in the configuration.
-func configTransformHook(cfg *config.WorkflowConfig) error {
-	registry := module.GetConfigRegistry()
-	registry.Reset()
+func (p *Plugin) configTransformHook(cfg *config.WorkflowConfig) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.credentialed {
+		return fmt.Errorf("credentialed configprovider plugin cannot be reused; create a separate instance per application")
+	}
+	if cfg == nil {
+		return fmt.Errorf("config is required")
+	}
+	var grants []interfaces.StepCredentialGrant
+	providerCount := 0
+	for _, modCfg := range cfg.Modules {
+		if modCfg.Type != "config.provider" {
+			continue
+		}
+		providerCount++
+		if raw, exists := modCfg.Config["step_credentials"]; exists {
+			decoded, err := module.DecodeStepCredentialGrants(raw)
+			if err != nil {
+				return err
+			}
+			grants = append(grants, decoded...)
+		}
+	}
+	var registry *module.ConfigRegistry
+	if len(grants) > 0 {
+		if providerCount != 1 {
+			return fmt.Errorf("step credentials require exactly one config.provider module")
+		}
+		if err := validateOriginalCredentialSteps(cfg, grants); err != nil {
+			return err
+		}
+		p.credentialed = true
+		registry = module.NewConfigRegistry()
+	} else {
+		registry = module.GetConfigRegistry()
+		registry.Reset()
+	}
 
 	found := false
 	for _, modCfg := range cfg.Modules {
@@ -82,6 +135,9 @@ func configTransformHook(cfg *config.WorkflowConfig) error {
 		if err := processConfigProvider(registry, modCfg.Config); err != nil {
 			return fmt.Errorf("config.provider module %q: %w", modCfg.Name, err)
 		}
+		if p.credentialed {
+			p.providerName = modCfg.Name
+		}
 	}
 
 	if !found {
@@ -89,6 +145,11 @@ func configTransformHook(cfg *config.WorkflowConfig) error {
 	}
 
 	registry.Freeze()
+	if p.credentialed {
+		p.registry = registry
+		p.grants = append([]interfaces.StepCredentialGrant(nil), grants...)
+		module.MirrorConfigRegistry(registry)
+	}
 
 	// Expand {{config "key"}} in all module configs (except config.provider itself)
 	for i := range cfg.Modules {
@@ -128,45 +189,45 @@ func configTransformHook(cfg *config.WorkflowConfig) error {
 	return nil
 }
 
-// processConfigProvider parses a single config.provider module's config,
-// loads sources, and validates required keys.
+func configTransformHook(cfg *config.WorkflowConfig) error {
+	return New().configTransformHook(cfg)
+}
+
 func processConfigProvider(registry *module.ConfigRegistry, cfg map[string]any) error {
-	// Parse schema
-	schemaRaw, ok := cfg["schema"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("config.provider requires a 'schema' section")
-	}
-	schemaEntries, err := module.ParseSchema(schemaRaw)
-	if err != nil {
-		return fmt.Errorf("invalid schema: %w", err)
-	}
+	return module.LoadConfigProvider(registry, cfg)
+}
 
-	// Parse and load sources
-	sourcesRaw, ok := cfg["sources"]
-	if !ok {
-		return fmt.Errorf("config.provider requires a 'sources' section")
-	}
-	sourcesSlice, ok := sourcesRaw.([]any)
-	if !ok {
-		return fmt.Errorf("'sources' must be a list")
-	}
-	sources := make([]map[string]any, 0, len(sourcesSlice))
-	for _, s := range sourcesSlice {
-		sm, ok := s.(map[string]any)
-		if !ok {
-			return fmt.Errorf("each source must be a map")
+// validateOriginalCredentialSteps checks literals before any template expansion.
+func validateOriginalCredentialSteps(cfg *config.WorkflowConfig, grants []interfaces.StepCredentialGrant) error {
+	// Parse declared pipeline topology, not arbitrary nested maps or schema hints.
+	var steps []config.PipelineStepConfig
+	for _, raw := range cfg.Pipelines {
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("invalid credentialed pipeline")
 		}
-		sources = append(sources, sm)
+		var pl config.PipelineConfig
+		if err := json.Unmarshal(data, &pl); err != nil {
+			return fmt.Errorf("invalid credentialed pipeline")
+		}
+		steps = append(steps, pl.Steps...)
+		steps = append(steps, pl.Compensation...)
 	}
-
-	if err := module.LoadConfigSources(registry, sources, schemaEntries); err != nil {
-		return fmt.Errorf("loading config sources: %w", err)
+	for _, g := range grants {
+		matches := 0
+		for _, step := range steps {
+			if step.Type != g.StepType || step.Name != g.StepName {
+				continue
+			}
+			matches++
+			literal, ok := step.Config[g.Field].(string)
+			if !ok || literal != g.Ref {
+				return fmt.Errorf("original step credential literal does not match grant")
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("step credential target is missing or ambiguous")
+		}
 	}
-
-	// Validate required keys
-	if err := module.ValidateRequired(registry, schemaEntries); err != nil {
-		return err
-	}
-
 	return nil
 }

@@ -1,11 +1,205 @@
 package configprovider
 
 import (
+	"context"
+	"log/slog"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
 	"github.com/GoCodeAlone/workflow/config"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 )
+
+func stepCredentialConfig(token, endpoint string) *config.WorkflowConfig {
+	return &config.WorkflowConfig{
+		Modules: []config.ModuleConfig{{Name: "settings", Type: "config.provider", Config: map[string]any{
+			"schema": map[string]any{
+				"compute_token": map[string]any{"default": token, "env": "STEP_CREDENTIAL_TEST_TOKEN"},
+				"server_url":    map[string]any{"default": endpoint, "env": "STEP_CREDENTIAL_TEST_URL"},
+			},
+			"sources":          []any{map[string]any{"type": "defaults"}},
+			"step_credentials": []any{map[string]any{"plugin": "test-plugin", "step_type": "step.capture", "step_name": "capture", "field": "auth_token_ref", "ref": "config:compute_token", "scope": "application"}},
+		}}},
+		Pipelines: map[string]any{"main": map[string]any{"steps": []any{map[string]any{
+			"name": "capture", "type": "step.capture", "config": map[string]any{"auth_token_ref": "config:compute_token", "url": `{{config "server_url"}}`},
+		}}}},
+	}
+}
+
+func TestConfigProviderModuleApplicationOwned(t *testing.T) {
+	t.Cleanup(module.GetConfigRegistry().Reset)
+	a, b := New(), New()
+	ca, cb := stepCredentialConfig("dummy-a", "http://app-a"), stepCredentialConfig("dummy-b", "http://app-b")
+	if err := a.ConfigTransformHooks()[0].Hook(ca); err != nil {
+		t.Fatal(err)
+	}
+	ma := a.ModuleFactories()["config.provider"]("settings", ca.Modules[0].Config).(*module.ConfigProviderModule)
+	appA := modular.NewStdApplication(modular.NewStdConfigProvider(nil), slog.Default())
+	appA.RegisterModule(ma)
+	if err := appA.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ConfigTransformHooks()[0].Hook(cb); err != nil {
+		t.Fatal(err)
+	}
+	mb := b.ModuleFactories()["config.provider"]("settings", cb.Modules[0].Config).(*module.ConfigProviderModule)
+	appB := modular.NewStdApplication(modular.NewStdConfigProvider(nil), slog.Default())
+	appB.RegisterModule(mb)
+	if err := appB.Init(); err != nil {
+		t.Fatal(err)
+	}
+	var appRegistry *module.ConfigRegistry
+	if err := appA.GetService("config.registry", &appRegistry); err != nil || appRegistry != ma.Registry() {
+		t.Fatal("app DI lost exact registry")
+	}
+	if got, ok := ma.Registry().Get("compute_token"); !ok || got != "dummy-a" {
+		t.Fatal("application A registry was replaced by application B")
+	}
+	if got, ok := mb.Registry().Get("compute_token"); !ok || got != "dummy-b" {
+		t.Fatal("application B registry did not retain its source")
+	}
+	for _, c := range []struct {
+		cfg *config.WorkflowConfig
+		url string
+	}{{ca, "http://app-a"}, {cb, "http://app-b"}} {
+		step := c.cfg.Pipelines["main"].(map[string]any)["steps"].([]any)[0].(map[string]any)["config"].(map[string]any)
+		if step["url"] != c.url {
+			t.Fatal("application transform expansion crossed sources")
+		}
+	}
+}
+
+func TestConfigTransformApplicationOwned(t *testing.T) {
+	t.Cleanup(module.GetConfigRegistry().Reset)
+	t.Setenv("STEP_CREDENTIAL_TEST_TOKEN", "dummy-before")
+	t.Setenv("STEP_CREDENTIAL_TEST_URL", "http://before")
+	p := New()
+	cfg := stepCredentialConfig("", "")
+	cfg.Modules[0].Config["sources"] = []any{map[string]any{"type": "env"}}
+	if err := p.ConfigTransformHooks()[0].Hook(cfg); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STEP_CREDENTIAL_TEST_TOKEN", "dummy-after")
+	t.Setenv("STEP_CREDENTIAL_TEST_URL", "http://after")
+	b := New()
+	if err := b.ConfigTransformHooks()[0].Hook(stepCredentialConfig("dummy-b", "http://app-b")); err != nil {
+		t.Fatal(err)
+	}
+	m := p.ModuleFactories()["config.provider"]("settings", cfg.Modules[0].Config).(*module.ConfigProviderModule)
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), slog.Default())
+	app.RegisterModule(m)
+	if err := app.Init(); err != nil {
+		t.Fatal(err)
+	}
+	var binder interfaces.StepCredentialBinder
+	if err := app.GetService(module.StepCredentialsService, &binder); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := binder.BindStep(interfaces.StepCredentialTarget{Plugin: "test-plugin", StepType: "step.capture", StepName: "capture"}, map[string]any{"auth_token_ref": "config:compute_token"})
+	if err != nil || bound == nil {
+		t.Fatal("missing app binding")
+	}
+	values, err := bound.Resolve(context.Background())
+	if err != nil || len(values) != 1 || values[0].Value != "dummy-before" {
+		t.Fatal("Init reloaded token source")
+	}
+	step := cfg.Pipelines["main"].(map[string]any)["steps"].([]any)[0].(map[string]any)["config"].(map[string]any)
+	if step["url"] != "http://before" {
+		t.Fatal("transform did not use declared environment")
+	}
+	if got, ok := m.Registry().Get("server_url"); !ok || got != step["url"] {
+		t.Fatal("module endpoint differs from transform snapshot")
+	}
+	if got, ok := m.Registry().Get("compute_token"); !ok || got != "dummy-before" {
+		t.Fatal("module token differs from transform snapshot")
+	}
+}
+
+func TestConfigTransformStepCredentialPreflight(t *testing.T) {
+	t.Cleanup(module.GetConfigRegistry().Reset)
+	for _, tc := range []struct {
+		name   string
+		change func(*config.WorkflowConfig)
+	}{
+		{"template alias", func(c *config.WorkflowConfig) {
+			c.Modules[0].Config["schema"].(map[string]any)["alias"] = map[string]any{"default": "config:compute_token"}
+			c.Pipelines["main"].(map[string]any)["steps"].([]any)[0].(map[string]any)["config"].(map[string]any)["auth_token_ref"] = `{{config "alias"}}`
+		}},
+		{"ref mutation", func(c *config.WorkflowConfig) {
+			c.Pipelines["main"].(map[string]any)["steps"].([]any)[0].(map[string]any)["config"].(map[string]any)["auth_token_ref"] = "config:other"
+		}},
+		{"missing field", func(c *config.WorkflowConfig) {
+			delete(c.Pipelines["main"].(map[string]any)["steps"].([]any)[0].(map[string]any)["config"].(map[string]any), "auth_token_ref")
+		}},
+		{"ambiguous target", func(c *config.WorkflowConfig) { c.Pipelines["other"] = c.Pipelines["main"] }},
+		{"missing target", func(c *config.WorkflowConfig) { c.Pipelines = nil }},
+		{"multiple providers", func(c *config.WorkflowConfig) {
+			c.Modules = append(c.Modules, config.ModuleConfig{Name: "other", Type: "config.provider", Config: map[string]any{}})
+		}},
+		{"unknown grant field", func(c *config.WorkflowConfig) {
+			c.Modules[0].Config["step_credentials"].([]any)[0].(map[string]any)["sensitive"] = true
+		}},
+		{"duplicates", func(c *config.WorkflowConfig) {
+			gs := c.Modules[0].Config["step_credentials"].([]any)
+			c.Modules[0].Config["step_credentials"] = append(gs, gs[0])
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := stepCredentialConfig("dummy", "http://app")
+			tc.change(cfg)
+			if err := New().ConfigTransformHooks()[0].Hook(cfg); err == nil {
+				t.Fatal("invalid granted build accepted")
+			}
+		})
+	}
+}
+
+func TestConfigTransformStepCredentialReuse(t *testing.T) {
+	t.Cleanup(module.GetConfigRegistry().Reset)
+	t.Run("normal reuse and empty grants", func(t *testing.T) {
+		p := New()
+		for i := 0; i < 2; i++ {
+			cfg := stepCredentialConfig("dummy", "http://normal")
+			cfg.Modules[0].Config["step_credentials"] = []any{}
+			if err := p.ConfigTransformHooks()[0].Hook(cfg); err != nil {
+				t.Fatal(err)
+			}
+			m := p.ModuleFactories()["config.provider"]("settings", cfg.Modules[0].Config).(*module.ConfigProviderModule)
+			if m.Registry() != module.GetConfigRegistry() {
+				t.Fatal("normal source behavior changed")
+			}
+			app := module.CreateIsolatedApp(t)
+			if err := m.Init(app); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := app.GetServiceEntry(module.StepCredentialsService); exists {
+				t.Fatal("empty grants authorized private service")
+			}
+		}
+	})
+	t.Run("granted reuse fails before source reload", func(t *testing.T) {
+		p := New()
+		cfg := stepCredentialConfig("dummy-a", "http://a")
+		if err := p.ConfigTransformHooks()[0].Hook(cfg); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.ConfigTransformHooks()[0].Hook(stepCredentialConfig("dummy-b", "http://b")); err == nil {
+			t.Fatal("granted plugin reused")
+		}
+		if v, _ := module.GetConfigRegistry().Get("compute_token"); v != "dummy-a" {
+			t.Fatal("reuse reloaded global")
+		}
+		m := p.ModuleFactories()["config.provider"]("settings", cfg.Modules[0].Config)
+		if err := m.Init(module.CreateIsolatedApp(t)); err != nil {
+			t.Fatal(err)
+		}
+		duplicate := p.ModuleFactories()["config.provider"]("settings", cfg.Modules[0].Config)
+		if err := duplicate.Init(module.CreateIsolatedApp(t)); err == nil {
+			t.Fatal("granted module constructed twice")
+		}
+	})
+}
 
 func TestPluginMetadata(t *testing.T) {
 	p := New()
