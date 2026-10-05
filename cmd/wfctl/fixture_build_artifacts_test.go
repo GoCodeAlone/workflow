@@ -35,6 +35,19 @@ type fixtureBuildEntry struct {
 
 var invocationFixtureBuilds fixtureBuildArtifacts
 
+// External native inputs are not fingerprinted, so recognized overrides bypass.
+var fixtureNativeOverrideNames = []string{
+	"CC", "CXX", "AR", "PKG_CONFIG",
+	"CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS",
+	"CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
+	"LIBRARY_PATH", "COMPILER_PATH", "GCC_EXEC_PREFIX",
+	"SDKROOT", "DEVELOPER_DIR", "TOOLCHAINS",
+	"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR", "PKG_CONFIG_TOP_BUILD_DIR",
+	"LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT", "LD_RUN_PATH",
+	"DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
+	"DYLD_FALLBACK_FRAMEWORK_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_ROOT_PATH",
+}
+
 // Only the fixed committed fixture callers opt in. Modules, native tools and
 // VCS state must remain immutable for this invocation; the suite driver checks
 // them before/after. Unclosed inputs take the original command, unchanged.
@@ -283,7 +296,7 @@ func fixtureBuildKey(ctx context.Context, cmd *exec.Cmd, sourceRoot string) (str
 			values[name] = value
 		}
 	}
-	for _, name := range []string{"CC", "CXX", "AR", "PKG_CONFIG", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS"} {
+	for _, name := range fixtureNativeOverrideNames {
 		if values[name] != "" {
 			return "", 0, errors.New("external native override")
 		}

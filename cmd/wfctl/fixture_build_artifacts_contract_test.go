@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,7 +43,13 @@ func fixtureControlCommand(ctx context.Context, root, output string, extra ...st
 	args := append([]string{"build", "-o", output}, extra...)
 	cmd := exec.CommandContext(ctx, "go", append(args, ".")...)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOTOOLCHAIN=go1.27.1")
+	for _, item := range os.Environ() {
+		name, _, _ := strings.Cut(item, "=")
+		if !slices.Contains(fixtureNativeOverrideNames, name) {
+			cmd.Env = append(cmd.Env, item)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOTOOLCHAIN=go1.27.1")
 	return cmd
 }
 
@@ -236,7 +243,7 @@ func TestFixtureBuildArtifactsExternalInputsBypass(t *testing.T) {
 					}
 					fixtureControlWrite(t, config, setting)
 					cmd.Env = append(cmd.Env, "GOENV="+config)
-					// Empty process values would mask GOENV. Remove those control defaults.
+					// Remove inherited overrides before checking the GOENV settings.
 					var env []string
 					for _, item := range cmd.Env {
 						if !strings.HasPrefix(item, "GOFLAGS=") && !strings.HasPrefix(item, "CGO_CFLAGS=") {
@@ -264,6 +271,135 @@ func TestFixtureBuildArtifactsExternalInputsBypass(t *testing.T) {
 			}
 		})
 	}
+}
+
+var fixtureControlNativeEnvironmentNames = []string{
+	"CC", "CXX", "AR", "PKG_CONFIG",
+	"CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS",
+	"CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
+	"LIBRARY_PATH", "COMPILER_PATH", "GCC_EXEC_PREFIX",
+	"SDKROOT", "DEVELOPER_DIR", "TOOLCHAINS",
+	"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR", "PKG_CONFIG_TOP_BUILD_DIR",
+	"LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT", "LD_RUN_PATH",
+	"DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
+	"DYLD_FALLBACK_FRAMEWORK_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_ROOT_PATH",
+}
+
+// These callbacks read external bytes directly to control publication/bypass.
+// They do not prove cgo compilation or invalidation of Go's own native cache.
+func TestFixtureBuildArtifactsNativeExternalPathMutationBypass(t *testing.T) {
+	for _, name := range fixtureControlNativeEnvironmentNames {
+		t.Run(name, func(t *testing.T) {
+			var c fixtureBuildArtifacts
+			t.Cleanup(func() { _ = c.close() })
+			root := fixtureControlSource(t)
+			externalRoot := t.TempDir()
+			header := filepath.Join(externalRoot, "external.h")
+			calls := 0
+			for _, want := range []string{"external-header-A", "external-header-B"} {
+				fixtureControlWrite(t, header, want)
+				output := filepath.Join(t.TempDir(), "executable")
+				cmd := fixtureControlCommand(t.Context(), root, output)
+				var env []string
+				for _, item := range cmd.Env {
+					key, _, _ := strings.Cut(item, "=")
+					native := false
+					for _, known := range fixtureControlNativeEnvironmentNames {
+						if key == known {
+							native = true
+							break
+						}
+					}
+					if !native {
+						env = append(env, item)
+					}
+				}
+				cmd.Env = append(env, name+"="+externalRoot)
+				wantArgs, wantEnv := strings.Join(cmd.Args, "\x00"), strings.Join(cmd.Env, "\x00")
+				run := func(got *exec.Cmd) ([]byte, error) {
+					calls++
+					if strings.Join(got.Args, "\x00") != wantArgs || strings.Join(got.Env, "\x00") != wantEnv {
+						t.Errorf("native path bypass rewrote original argv/environment for %s", name)
+					}
+					data, err := os.ReadFile(header)
+					if err != nil {
+						return nil, err
+					}
+					for i, arg := range got.Args {
+						if arg == "-o" {
+							return nil, os.WriteFile(got.Args[i+1], data, 0700)
+						}
+					}
+					return nil, errors.New("native path control has no output")
+				}
+				if out, err := c.build(t.Context(), cmd, root, output, run); err != nil {
+					t.Fatalf("native path control: %v\n%s", err, out)
+				}
+				got, err := os.ReadFile(output)
+				if err != nil || string(got) != want {
+					t.Errorf("same-path external bytes became stale for %s: got %q, want %q: %v", name, got, want, err)
+				}
+			}
+			if calls != 2 {
+				t.Errorf("native external path callback ran %d times; want 2", calls)
+			}
+			if c.root != "" {
+				t.Error("native external path bypass allocated a cache root")
+			}
+			fixtureControlCounts(t, &c, 2, 0, 2)
+		})
+	}
+}
+
+func TestFixtureBuildArtifactsControlCommandHermeticNativeEnvironment(t *testing.T) {
+	root := fixtureControlSource(t)
+	customPath := t.TempDir()
+	for _, name := range fixtureControlNativeEnvironmentNames {
+		value := customPath
+		switch name {
+		case "CC":
+			value = "clang"
+		case "CXX":
+			value = "clang++"
+		case "AR":
+			value = "ar"
+		case "PKG_CONFIG":
+			value = "pkg-config"
+		case "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS":
+			value = "-DFIXTURE_INHERITED_NATIVE"
+		}
+		t.Setenv(name, value)
+	}
+	t.Setenv("WFCTL_FIXTURE_CONTROL_ENV_SENTINEL", "unit-must-retain")
+	parentEnv := strings.Join(os.Environ(), "\x00")
+	var c fixtureBuildArtifacts
+	t.Cleanup(func() { _ = c.close() })
+	for i := 0; i < 2; i++ {
+		output := filepath.Join(t.TempDir(), "executable")
+		cmd := fixtureControlCommand(t.Context(), root, output)
+		sentinel := false
+		for _, item := range cmd.Env {
+			key, value, _ := strings.Cut(item, "=")
+			for _, native := range fixtureControlNativeEnvironmentNames {
+				if key == native && value != "" {
+					t.Errorf("unit control retained inherited native override %s", key)
+				}
+			}
+			if item == "WFCTL_FIXTURE_CONTROL_ENV_SENTINEL=unit-must-retain" {
+				sentinel = true
+			}
+		}
+		if !sentinel {
+			t.Error("unit control discarded an unrelated environment variable")
+		}
+		if strings.Join(os.Environ(), "\x00") != parentEnv {
+			t.Error("unit command normalization rewrote the process environment")
+		}
+		if out, err := c.build(t.Context(), cmd, root, output, fixtureControlSentinel); err != nil {
+			t.Fatalf("hermetic native environment control: %v\n%s", err, out)
+		}
+	}
+	fixtureControlCounts(t, &c, 1, 1, 0)
 }
 
 func TestFixtureBuildArtifactsRealOverlayMutation(t *testing.T) {
