@@ -432,22 +432,6 @@
     "rationale": "Pinned ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d for reviewed pre-release.yml automation."
   },
   {
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-    "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
-    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
-    "state": "active",
-    "rationale": "Pinned actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 for reviewed public-workflow-policy.yml automation."
-  },
-  {
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
-    "nodeSHA256": "3c2f0c49ba03bc87e0aeebcd40257f3285d9b3e4a0b79982f795d6bfd5117bf9",
-    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
-    "state": "active",
-    "rationale": "Pinned actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff for reviewed public-workflow-policy.yml automation."
-  },
-  {
     "path": ".github/workflows/release.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "3349aa71987f307abdb6a6e8d8de5e2bfb551aafaf23c183d6bf045e2d91c7b4",
@@ -676,7 +660,7 @@
     "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
     "path": ".github/workflows/public-workflow-policy.yml",
     "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
-    "state": "staged",
+    "state": "active",
     "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
   },
   {
@@ -684,7 +668,7 @@
     "nodeSHA256": "65d08e860e0e0ba32c867339a375a514ee8887326bb4cff3543aec359932ac1a",
     "path": ".github/workflows/public-workflow-policy.yml",
     "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
-    "state": "staged",
+    "state": "active",
     "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
   },
   {
@@ -692,7 +676,7 @@
     "nodeSHA256": "a280f2ecccaed15b220dc27221b587c4285d6fad210ce7683db38a5eaa555cb4",
     "path": ".github/workflows/public-workflow-policy.yml",
     "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
-    "state": "staged",
+    "state": "active",
     "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
   }
 ]
