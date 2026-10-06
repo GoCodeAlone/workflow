@@ -2,12 +2,16 @@ package external
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
@@ -18,6 +22,273 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+func TestRemoteStepNoGrantContractMatrix(t *testing.T) {
+	for _, mode := range []pb.ContractMode{-1, pb.ContractMode_CONTRACT_MODE_UNSPECIFIED, pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT, pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT, pb.ContractMode_CONTRACT_MODE_STRICT_PROTO} {
+		for _, appMode := range []string{"nil app", "no service", "foreign binding"} {
+			t.Run(fmt.Sprintf("%d/%s", mode, appMode), func(t *testing.T) {
+				var contract *pb.ContractDescriptor
+				if mode != -1 {
+					contract = &pb.ContractDescriptor{Kind: pb.ContractKind_CONTRACT_KIND_STEP, StepType: "step.generic", Mode: mode, ConfigMessage: "workflow.plugin.v1.Manifest", InputMessage: "workflow.plugin.v1.Manifest", OutputMessage: "workflow.plugin.v1.Manifest"}
+				}
+				a, c, app := scopedCredentialFixture(t, nil, contract)
+				if appMode == "nil app" {
+					app = nil
+				}
+				if appMode == "no service" {
+					app = modular.NewStdApplication(modular.NewStdConfigProvider(nil), nil)
+				}
+				cfg := map[string]any{"name": "ordinary-config"}
+				v, err := a.StepFactories()["step.generic"]("ungranted", cfg, app)
+				if err != nil {
+					t.Fatal("no-grant creation changed")
+				}
+				legacyOutput, err := mapToStruct(map[string]any{"name": "ordinary-output"})
+				if err != nil {
+					t.Fatal("fixture output failed")
+				}
+				c.response = &pb.ExecuteStepResponse{Output: legacyOutput, TypedOutput: mustAnyFromMapForTest(t, "workflow.plugin.v1.Manifest", map[string]any{"name": "ordinary-output"})}
+				pc := module.NewPipelineContext(map[string]any{"name": "ordinary-input"}, nil)
+				result, err := v.(*RemoteStep).Execute(context.Background(), pc)
+				if err != nil || result == nil || !reflect.DeepEqual(result.Output, map[string]any{"name": "ordinary-output"}) {
+					t.Fatal("no-grant output changed")
+				}
+				typed := mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT || mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO
+				strict := mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO
+				if (c.lastRequest.TypedConfig != nil) != typed || (c.lastRequest.TypedInput != nil) != typed || (c.lastRequest.Config == nil) != strict || (c.lastRequest.Current == nil) != strict {
+					t.Fatal("no-grant typed/legacy transport changed")
+				}
+				if !strict && !reflect.DeepEqual(c.lastRequest.Config.AsMap(), cfg) {
+					t.Fatal("no-grant config changed")
+				}
+			})
+		}
+	}
+}
+
+func TestRemoteStepScopedFailures(t *testing.T) {
+	for _, name := range []string{"missing", "empty", "cancelled", "provider", "raw reference mutation", "post-resolution validation", "collision", "config resolve", "config encode", "current encode", "trigger encode", "step output encode", "RPC echo", "response error echo", "RPC escaped echo", "response escaped error", "nil response", "empty resolution", "invalid resolved ref", "empty resolved value"} {
+		t.Run(name, func(t *testing.T) {
+			values := map[string]string{"client.token": "dummy-private-a"}
+			if name == "missing" {
+				delete(values, "client.token")
+			}
+			if name == "empty" {
+				values["client.token"] = ""
+			}
+			a, c, app := scopedCredentialFixture(t, values, nil)
+			app, b := trackedCredentialApp(t, app)
+			cfg := map[string]any{"auth_ref": "config:client.token"}
+			pc := module.NewPipelineContext(nil, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			wantRPC := false
+			switch name {
+			case "cancelled":
+				cancel()
+			case "provider":
+				b.resolveErr = errors.New("provider dummy-private-a")
+			case "post-resolution validation":
+				b.validateErrAt = 2
+			case "collision":
+				cfg["config"] = map[string]any{"existing": "ordinary"}
+			case "config resolve":
+				cfg["dummy-private-a"] = "{{ .missing }}"
+				pc.StrictTemplates = true
+			case "current encode":
+				pc.Current["bad"] = "dummy-private-a" + string([]byte{0xff})
+			case "trigger encode":
+				pc.TriggerData["bad"] = "dummy-private-a" + string([]byte{0xff})
+			case "step output encode":
+				pc.StepOutputs["dummy-private-a"] = map[string]any{"bad": make(chan int)}
+			case "RPC echo":
+				wantRPC = true
+				c.execute = func(context.Context, *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error) {
+					return nil, errors.New("RPC dummy-private-a")
+				}
+			case "response error echo":
+				wantRPC = true
+				c.response = &pb.ExecuteStepResponse{Error: "provider dummy-private-a", StopPipeline: true}
+			case "RPC escaped echo":
+				wantRPC = true
+				c.execute = func(context.Context, *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error) {
+					return nil, errors.New(`RPC error {"echo":"\u0064ummy-private-a"}`)
+				}
+			case "response escaped error":
+				wantRPC = true
+				c.response = &pb.ExecuteStepResponse{Error: `provider error {"echo":"\u0064ummy-private-a"}`, StopPipeline: true}
+			case "nil response":
+				wantRPC = true
+				c.execute = func(context.Context, *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error) { return nil, nil }
+			case "empty resolution":
+				b.resolved = []interfaces.ResolvedStepCredential{}
+			case "invalid resolved ref":
+				b.resolved = []interfaces.ResolvedStepCredential{{Ref: "secret:client.token", Value: "dummy-private-a"}}
+			case "empty resolved value":
+				b.resolved = []interfaces.ResolvedStepCredential{{Ref: "config:client.token"}}
+			}
+			step := scopedFactoryStep(t, a, app, cfg)
+			if name == "config encode" {
+				step.config["bad"] = "dummy-private-a" + string([]byte{0xff})
+			}
+			if name == "raw reference mutation" {
+				step.config["auth_ref"] = "config:other.token"
+			}
+			defer func() {
+				if recover() != nil {
+					t.Error("credentialed execution panicked instead of failing closed")
+				}
+			}()
+			result, err := step.Execute(ctx, pc)
+			if err == nil || result != nil {
+				t.Fatal("unsafe execution did not fail closed")
+			}
+			if strings.Contains(err.Error(), "dummy-private-a") {
+				t.Fatal("credential leaked in execution error")
+			}
+			if (strings.Contains(name, "echo") || name == "response escaped error") && err.Error() != "remote step credential execution rejected" {
+				t.Fatal("encoded echo did not return fixed safe error")
+			}
+			if (c.executeCalls != 0) != wantRPC {
+				t.Fatal("unexpected execution RPC boundary")
+			}
+			if name == "raw reference mutation" && (b.resolves != 0 || b.lookups != 0) {
+				t.Fatal("runtime reference became source authority")
+			}
+			if name == "post-resolution validation" && b.validates != 2 {
+				t.Fatal("resolved config was not revalidated")
+			}
+		})
+	}
+}
+
+func TestRemoteStepScopedUnknownContractMode(t *testing.T) {
+	for _, mode := range []pb.ContractMode{99, -99} {
+		t.Run(mode.String(), func(t *testing.T) {
+			a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, nil)
+			app, b := trackedCredentialApp(t, app)
+			step := scopedFactoryStep(t, a, app, map[string]any{"auth_ref": "config:client.token"})
+			// Defend execution too if a descriptor changes after valid construction.
+			step.contract = &pb.ContractDescriptor{Mode: mode, ConfigMessage: "google.protobuf.Struct", InputMessage: "google.protobuf.Struct", OutputMessage: "google.protobuf.Struct"}
+			result, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil))
+			if result != nil || err == nil || err.Error() != "remote step credential execution rejected" || b.resolves != 0 || b.lookups != 0 || c.executeCalls != 0 {
+				t.Fatal("unknown credential contract mode reached lookup or Execute RPC")
+			}
+		})
+	}
+}
+
+func TestRemoteStepScopedEchoes(t *testing.T) {
+	for _, tc := range []struct {
+		name, token string
+		output      func(string) map[string]any
+		stop        bool
+	}{
+		{"nested string", "dummy-private-a", func(v string) map[string]any {
+			return map[string]any{"nested": []any{map[string]any{"message": "echo " + v}}}
+		}, false},
+		{"map key", "dummy-private-a", func(v string) map[string]any { return map[string]any{"nested": map[string]any{v: "ordinary"}} }, true},
+		{"escaped JSON", "dummy-\"private\na", func(v string) map[string]any {
+			raw, _ := json.Marshal(map[string]any{"echo": v})
+			return map[string]any{"receipt": string(raw)}
+		}, false},
+		{"unicode escaped JSON", "dummy-private-a", func(string) map[string]any { return map[string]any{"receipt": `{"echo":"\u0064ummy-private-a"}`} }, false},
+		{"marker equals value", "[REDACTED:credential0]", func(v string) map[string]any { return map[string]any{"message": v} }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": tc.token}, nil)
+			output := tc.output(tc.token)
+			wire, err := mapToStruct(output)
+			if err != nil {
+				t.Fatal("fixture output encode failed")
+			}
+			c.response = &pb.ExecuteStepResponse{Output: wire, StopPipeline: tc.stop}
+			step := scopedFactoryStep(t, a, app, map[string]any{"auth_ref": "config:client.token"})
+			result, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil))
+			if err == nil || result != nil || strings.Contains(err.Error(), tc.token) {
+				t.Fatal("credential echo escaped fail-closed boundary")
+			}
+			if err.Error() != "remote step credential execution rejected" {
+				t.Fatal("credential echo did not return fixed safe error")
+			}
+			if !reflect.DeepEqual(c.response.Output.AsMap(), output) {
+				t.Fatal("consumer output was rewritten")
+			}
+		})
+	}
+}
+
+func TestRemoteStepScopedOrdinaryPayload(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, nil)
+		app, b := trackedCredentialApp(t, app)
+		output := map[string]any{"signed_receipt": `{"original":"exact\\bytes"}`, "nested": []any{map[string]any{"count": float64(3)}}, "ordinary_marker": "[REDACTED:other]"}
+		wire, err := mapToStruct(output)
+		if err != nil {
+			t.Fatal("fixture output encode failed")
+		}
+		c.response = &pb.ExecuteStepResponse{Output: wire, StopPipeline: stop}
+		step := scopedFactoryStep(t, a, app, map[string]any{"auth_ref": "config:client.token"})
+		for range 2 {
+			result, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil))
+			if err != nil || result == nil || result.Stop != stop || !reflect.DeepEqual(result.Output, output) {
+				t.Fatal("legitimate consumer payload changed")
+			}
+		}
+		if b.resolves != 2 || b.validates != 4 {
+			t.Fatal("per-call resolution/validation missing")
+		}
+		c.response = &pb.ExecuteStepResponse{Error: "POST /tasks: got status 403", StopPipeline: true}
+		_, err = step.Execute(context.Background(), module.NewPipelineContext(nil, nil))
+		if err == nil || err.Error() != "remote step execute: POST /tasks: got status 403" {
+			t.Fatal("ordinary consumer error changed")
+		}
+	}
+}
+
+func TestRemoteStepScopedCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		contract *pb.ContractDescriptor
+	}{
+		{"absent", nil},
+		{"unspecified", &pb.ContractDescriptor{Kind: pb.ContractKind_CONTRACT_KIND_STEP, StepType: "step.generic"}},
+		{"legacy", &pb.ContractDescriptor{Kind: pb.ContractKind_CONTRACT_KIND_STEP, StepType: "step.generic", Mode: pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, tc.contract)
+			cfg := map[string]any{"auth_ref": "config:client.token", "payload": map[string]any{"value": "ordinary"}}
+			step := scopedFactoryStep(t, a, app, cfg)
+			if c.lastCreateStepReq == nil || !reflect.DeepEqual(c.lastCreateStepReq.Config.AsMap(), cfg) {
+				t.Fatal("creation did not remain ref-only")
+			}
+			pc := module.NewPipelineContext(map[string]any{"item": "ordinary"}, map[string]any{"pipeline": "parent"})
+			before := module.NewPipelineContext(map[string]any{"item": "ordinary"}, map[string]any{"pipeline": "parent"})
+			_, err := step.Execute(context.Background(), pc)
+			if err != nil {
+				t.Fatal("credentialed execute failed")
+			}
+			if c.lastRequest == nil {
+				t.Fatal("execution RPC missing")
+			}
+			carrier, ok := c.lastRequest.Config.AsMap()["config"].(map[string]any)
+			if !ok || carrier["client.token"] != "dummy-private-a" || len(carrier) != 1 {
+				t.Fatal("missing exact private credential carrier")
+			}
+			if _, exists := cfg["config"]; exists {
+				t.Fatal("raw config was mutated")
+			}
+			if !reflect.DeepEqual(pc, before) {
+				t.Fatal("shared pipeline data mutated")
+			}
+			for _, data := range []any{pc.Current, pc.TriggerData, pc.Metadata, pc.StepOutputs, c.lastRequest.Current.AsMap(), c.lastRequest.TriggerData.AsMap(), c.lastRequest.Metadata.AsMap()} {
+				if strings.Contains(fmt.Sprint(data), "dummy-private-a") {
+					t.Fatal("credential escaped private carrier")
+				}
+			}
+		})
+	}
+}
 
 // stubPluginServiceClient is a minimal PluginServiceClient that captures
 // ExecuteStep requests for assertion in tests.
