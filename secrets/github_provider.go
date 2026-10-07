@@ -204,7 +204,8 @@ func validGitHubTargetName(name string) bool {
 		return false
 	}
 	for _, c := range name {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+		allowed := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.'
+		if !allowed {
 			return false
 		}
 	}
@@ -303,7 +304,8 @@ func validGitHubSecretKey(key string) bool {
 		return false
 	}
 	for i, c := range key {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '_' || i > 0 && c >= '0' && c <= '9') {
+		allowed := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '_' || i > 0 && c >= '0' && c <= '9'
+		if !allowed {
 			return false
 		}
 	}
@@ -723,11 +725,12 @@ func githubSecretNextLink(headers []string) (string, error) {
 		inTarget, quoted, escaped := false, false, false
 		for i, c := range header {
 			if quoted {
-				if escaped {
+				switch {
+				case escaped:
 					escaped = false
-				} else if c == '\\' {
+				case c == '\\':
 					escaped = true
-				} else if c == '"' {
+				case c == '"':
 					quoted = false
 				}
 				continue
@@ -777,17 +780,18 @@ func githubSecretNextLink(headers []string) (string, error) {
 			relCount, paramStart := 0, 1
 			quoted, escaped = false, false
 			for i := 1; i <= len(tail); i++ {
-				if i == len(tail) || tail[i] == ';' && !quoted {
+				switch {
+				case i == len(tail) || tail[i] == ';' && !quoted:
 					name, _, _ := strings.Cut(strings.TrimSpace(tail[paramStart:i]), "=")
 					if strings.EqualFold(strings.TrimSpace(name), "rel") {
 						relCount++
 					}
 					paramStart = i + 1
-				} else if escaped {
+				case escaped:
 					escaped = false
-				} else if tail[i] == '\\' && quoted {
+				case tail[i] == '\\' && quoted:
 					escaped = true
-				} else if tail[i] == '"' {
+				case tail[i] == '"':
 					quoted = !quoted
 				}
 			}
