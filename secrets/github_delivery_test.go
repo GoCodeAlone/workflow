@@ -699,3 +699,128 @@ func TestGitHubDeliveryRejectsUnsafeSecretPagination(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubDeliverySecretPaginationAllLinkHeaders(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		for _, metadata := range []bool{false, true} {
+			t.Run(fmt.Sprintf("direct=%v/metadata=%v", direct, metadata), func(t *testing.T) {
+				p := newPaginationProvider(t, GitHubScopeRepo, direct)
+				var calls []string
+				p.client.Transport = deliveryRoundTripper(func(r *http.Request) (*http.Response, error) {
+					calls = append(calls, r.URL.RequestURI())
+					if r.Method != http.MethodGet || r.URL.EscapedPath() != "/repos/owner/repo/actions/secrets" {
+						t.Fatal("unexpected secret-list destination")
+					}
+					name := "FIRST"
+					headers := http.Header{}
+					if r.URL.Query().Get("page") == "2" {
+						name = "SECOND"
+					} else {
+						headers.Add("Link", `<https://api.github.com/repos/owner/repo/actions/secrets?per_page=100&page=2>; rel="last"`)
+						headers.Add("Link", `<https://api.github.com/repos/owner/repo/actions/secrets?per_page=100&page=2>; rel="next"; title="page, two"`)
+					}
+					body, _ := json.Marshal(map[string]any{"secrets": []ghSecretEntry{{Name: name}}})
+					return &http.Response{StatusCode: 200, Header: headers, Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
+				})
+				var names []string
+				if metadata {
+					metas, err := p.StatAll(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, meta := range metas {
+						names = append(names, meta.Name)
+					}
+				} else {
+					var err error
+					names, err = p.List(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				want := []string{"/repos/owner/repo/actions/secrets?per_page=100", "/repos/owner/repo/actions/secrets?page=2&per_page=100"}
+				if !reflect.DeepEqual(names, []string{"FIRST", "SECOND"}) || !reflect.DeepEqual(calls, want) {
+					t.Fatalf("split Link inventory = %v, requests = %v", names, calls)
+				}
+			})
+		}
+	}
+}
+
+func TestGitHubDeliverySecretPaginationRejectsMalformedNext(t *testing.T) {
+	for _, headers := range [][]string{
+		{`https://api.github.com/repos/owner/repo/actions/secrets?page=2; rel="next"`},
+		{`<https://api.github.com/repos/owner/repo/actions/secrets?page=2; rel="next"`},
+		{`<https://api.github.com/repos/owner/repo/actions/secrets?page=2>; rel="next`},
+		{`<https://api.github.com/repos/owner/repo/actions/secrets?page=2>; rel="next"`, `<https://api.github.com/repos/owner/repo/actions/secrets?page=3>; rel="next"`},
+		{`<https://api.github.com/repos/owner/repo/actions/secrets?page=2>; rel="next"; rel="next"`},
+	} {
+		for _, direct := range []bool{false, true} {
+			for _, metadata := range []bool{false, true} {
+				t.Run(fmt.Sprintf("headers=%q/direct=%v/metadata=%v", headers, direct, metadata), func(t *testing.T) {
+					p := newPaginationProvider(t, GitHubScopeRepo, direct)
+					calls := 0
+					p.client.Transport = deliveryRoundTripper(func(r *http.Request) (*http.Response, error) {
+						calls++
+						return &http.Response{StatusCode: 200, Header: http.Header{"Link": headers}, Body: io.NopCloser(strings.NewReader(`{"secrets":[{"name":"FIRST"}]}`)), Request: r}, nil
+					})
+					var err error
+					if metadata {
+						_, err = p.StatAll(context.Background())
+					} else {
+						_, err = p.List(context.Background())
+					}
+					if err == nil || calls != 1 {
+						t.Fatalf("malformed/ambiguous Link error = %v, requests = %d", err, calls)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestGitHubDeliveryRejectsMetadataBeyondReadLimit(t *testing.T) {
+	const prefix = `{"name":"NEW_TOKEN"}`
+	// A valid JSON prefix and padding fill the old reader limit; the real
+	// response continues with another JSON value past that artificial EOF.
+	body := prefix + strings.Repeat(" ", (1<<20)-len(prefix)) + `{"name":"OTHER_TOKEN"}`
+	p := newDeliveryProvider(t, GitHubScopeRepo)
+	p.client.Transport = deliveryRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+	if meta, err := p.Stat(context.Background(), "NEW_TOKEN"); err == nil || meta.Exists {
+		t.Fatalf("oversized metadata was accepted: %+v, %v", meta, err)
+	}
+}
+
+func TestGitHubDeliveryListingPreservesCancellation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		for _, metadata := range []bool{false, true} {
+			t.Run(fmt.Sprintf("deadline=%v/metadata=%v", deadline, metadata), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				want := context.Canceled
+				if deadline {
+					cancel()
+					ctx, cancel = context.WithDeadline(context.Background(), time.Unix(0, 0))
+					want = context.DeadlineExceeded
+				} else {
+					cancel()
+				}
+				defer cancel()
+				p := newDeliveryProvider(t, GitHubScopeRepo)
+				p.client.Transport = deliveryRoundTripper(func(*http.Request) (*http.Response, error) {
+					return nil, fmt.Errorf("transport echoed %s", deliveryCredential)
+				})
+				var err error
+				if metadata {
+					_, err = p.StatAll(ctx)
+				} else {
+					_, err = p.List(ctx)
+				}
+				if !errors.Is(err, want) || strings.Contains(err.Error(), deliveryCredential) {
+					t.Fatalf("listing cancellation = %v, want %v without transport details", err, want)
+				}
+			})
+		}
+	}
+}

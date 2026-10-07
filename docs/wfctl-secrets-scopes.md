@@ -188,7 +188,8 @@ without placing the GitHub credential in an environment variable:
 - `Stat(ctx, key)` fetches one exact secret's metadata. A `404` returns
   `secrets.ErrNotFound`; permission failures remain errors. `List` and `StatAll`
   follow all pages, rejecting links outside the configured origin and namespace
-  or repeated pages.
+  or repeated pages. All Link header fields are parsed; malformed or ambiguous
+  next relations fail instead of reporting an incomplete inventory.
 - `SetWithReceipt(ctx, key, value)` reuses GitHub's sealed-box encryption and
   returns `GitHubSecretWriteReceipt{Created, MayHaveWritten}`. It does not return
   a value, ciphertext, or upstream response body.
@@ -196,7 +197,9 @@ without placing the GitHub credential in an environment variable:
 The new metadata and receipt methods bound each request to 30 seconds and refuse
 redirects, including on providers built with the legacy constructors. They omit
 raw response bodies and transport error details. Direct-token providers also
-use safe errors for `List` and `StatAll`. The new exact-key methods accept ASCII
+use safe errors for `List` and `StatAll`, retaining context cancellation/deadline
+sentinels. Metadata responses exceeding 1 MiB are rejected before decoding. The
+new exact-key methods accept ASCII
 letters, digits, and underscores, require a letter or underscore first, reject
 the reserved `GITHUB_` prefix case-insensitively, and apply their own conservative
 256-byte name bound. Existing constructors and `Set` remain compatible.

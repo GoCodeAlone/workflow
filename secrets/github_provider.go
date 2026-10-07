@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -332,7 +333,12 @@ func (p *GitHubSecretsProvider) deliveryDo(ctx context.Context, req *http.Reques
 }
 
 func decodeGitHubDelivery(body io.Reader, out any) error {
-	decoder := json.NewDecoder(io.LimitReader(body, 1<<20))
+	const limit = 1 << 20
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil || len(data) > limit {
+		return errors.New("secrets: github metadata response is unreadable or oversized")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(out); err != nil {
 		return errors.New("secrets: github metadata response is invalid")
 	}
@@ -657,6 +663,9 @@ func (p *GitHubSecretsProvider) listSecretEntries(ctx context.Context) ([]ghSecr
 		resp, err := githubDeliveryClient(p.client).Do(req)
 		if err != nil {
 			if p.safeErrors {
+				if ctx.Err() != nil {
+					return nil, fmt.Errorf("secrets: github list request failed: %w", ctx.Err())
+				}
 				return nil, errors.New("secrets: github list request failed")
 			}
 			return nil, err
@@ -681,9 +690,112 @@ func (p *GitHubSecretsProvider) listSecretEntries(ctx context.Context) ([]ghSecr
 			return nil, errors.New("secrets: github secret list is missing")
 		}
 		entries = append(entries, (*result.Secrets)...)
-		nextURL = githubNextLink(resp.Header.Get("Link"))
+		nextURL, err = githubSecretNextLink(resp.Header.Values("Link"))
+		if err != nil {
+			return nil, err
+		}
 	}
 	return entries, nil
+}
+
+// githubSecretNextLink parses every Link field and fails closed instead of
+// silently treating a malformed or ambiguous next relation as end of inventory.
+// Variable and environment pagers retain their existing parser separately.
+func githubSecretNextLink(headers []string) (string, error) {
+	invalid := errors.New("secrets: github secret pagination Link is malformed or ambiguous")
+	var next string
+	for _, header := range headers {
+		if strings.TrimSpace(header) == "" {
+			continue
+		}
+		// Commas inside URI references or quoted parameters are not separators.
+		var parts []string
+		start := 0
+		inTarget, quoted, escaped := false, false, false
+		for i, c := range header {
+			if quoted {
+				if escaped {
+					escaped = false
+				} else if c == '\\' {
+					escaped = true
+				} else if c == '"' {
+					quoted = false
+				}
+				continue
+			}
+			if inTarget {
+				if c == '<' {
+					return "", invalid
+				}
+				if c == '>' {
+					inTarget = false
+				}
+				continue
+			}
+			switch c {
+			case '<':
+				inTarget = true
+			case '>':
+				return "", invalid
+			case '"':
+				quoted = true
+			case ',':
+				parts = append(parts, header[start:i])
+				start = i + 1
+			}
+		}
+		if inTarget || quoted || escaped {
+			return "", invalid
+		}
+		parts = append(parts, header[start:])
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			end := strings.IndexByte(part, '>')
+			if !strings.HasPrefix(part, "<") || end <= 1 {
+				return "", invalid
+			}
+			tail := strings.TrimSpace(part[end+1:])
+			if tail != "" && !strings.HasPrefix(tail, ";") {
+				return "", invalid
+			}
+			_, params, err := mime.ParseMediaType("application/link" + tail)
+			if err != nil {
+				return "", invalid
+			}
+			// MIME permits repeated parameters when their values are equal.
+			// A pagination relation must still be declared exactly once; scan
+			// parameter names without treating quoted semicolons as separators.
+			relCount, paramStart := 0, 1
+			quoted, escaped = false, false
+			for i := 1; i <= len(tail); i++ {
+				if i == len(tail) || tail[i] == ';' && !quoted {
+					name, _, _ := strings.Cut(strings.TrimSpace(tail[paramStart:i]), "=")
+					if strings.EqualFold(strings.TrimSpace(name), "rel") {
+						relCount++
+					}
+					paramStart = i + 1
+				} else if escaped {
+					escaped = false
+				} else if tail[i] == '\\' && quoted {
+					escaped = true
+				} else if tail[i] == '"' {
+					quoted = !quoted
+				}
+			}
+			if relCount > 1 || params["rel"] != "" && relCount != 1 {
+				return "", invalid
+			}
+			for _, relation := range strings.Fields(params["rel"]) {
+				if strings.EqualFold(relation, "next") {
+					if next != "" {
+						return "", invalid
+					}
+					next = part[1:end]
+				}
+			}
+		}
+	}
+	return next, nil
 }
 
 // List returns the names of all GitHub Actions secrets for the repo.
