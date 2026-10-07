@@ -59,6 +59,7 @@ type GitHubSecretsProvider struct {
 	token           string
 	client          *http.Client
 	baseURL         string // overridden in tests to point at an httptest.Server
+	safeErrors      bool   // direct-token providers omit upstream bodies and errors
 }
 
 // base returns the API base URL, using baseURL when set (for tests).
@@ -122,6 +123,350 @@ func NewGitHubOrgSecretsProvider(org string, tokenEnvVar string, visibility GitH
 		token:           token,
 		client:          &http.Client{},
 	}, nil
+}
+
+// NewGitHubSecretsProviderWithToken creates a repository provider from an
+// in-memory credential. It does not read environment variables. Requests are
+// bounded and redirects are refused. Stat, Identity, SetWithReceipt, List, and
+// StatAll omit upstream bodies and causes. Legacy Set retains upsert semantics.
+func NewGitHubSecretsProviderWithToken(repo, token string) (*GitHubSecretsProvider, error) {
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || !validGitHubTargetName(parts[0]) || !validGitHubTargetName(parts[1]) {
+		return nil, errors.New("secrets: github repo must be owner/repo")
+	}
+	if !validGitHubToken(token) {
+		return nil, errors.New("secrets: github token is empty or invalid")
+	}
+	return &GitHubSecretsProvider{
+		scope: GitHubScopeRepo, owner: parts[0], repo: parts[1], token: token,
+		client: githubDeliveryClient(nil), safeErrors: true,
+	}, nil
+}
+
+// NewGitHubOrgSecretsProviderWithToken creates an organization provider from an
+// in-memory credential. Repository IDs are copied and must be unique positive
+// IDs used only with selected visibility. Empty visibility defaults to private.
+func NewGitHubOrgSecretsProviderWithToken(org, token string, visibility GitHubOrgVisibility, selectedRepoIDs []int64) (*GitHubSecretsProvider, error) {
+	if !validGitHubTargetName(org) {
+		return nil, errors.New("secrets: github organization name is invalid")
+	}
+	if !validGitHubToken(token) {
+		return nil, errors.New("secrets: github token is empty or invalid")
+	}
+	if visibility == "" {
+		visibility = OrgVisibilityPrivate
+	}
+	if err := validateGitHubSelection(visibility, selectedRepoIDs); err != nil {
+		return nil, err
+	}
+	return &GitHubSecretsProvider{
+		scope: GitHubScopeOrg, org: org, token: token, orgVisibility: visibility,
+		selectedRepoIDs: append([]int64(nil), selectedRepoIDs...),
+		client:          githubDeliveryClient(nil), safeErrors: true,
+	}, nil
+}
+
+func validGitHubTargetName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+func validGitHubToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	for _, c := range token {
+		if c < 33 || c > 126 {
+			return false
+		}
+	}
+	return true
+}
+
+func validateGitHubSelection(visibility GitHubOrgVisibility, ids []int64) error {
+	switch visibility {
+	case OrgVisibilityAll, OrgVisibilityPrivate:
+		if len(ids) != 0 {
+			return errors.New("secrets: github selected repository IDs require selected visibility")
+		}
+	case OrgVisibilitySelected:
+		if len(ids) == 0 {
+			return errors.New("secrets: github selected visibility requires repository IDs")
+		}
+		seen := make(map[int64]bool, len(ids))
+		for _, id := range ids {
+			if id <= 0 || seen[id] {
+				return errors.New("secrets: github selected repository IDs must be unique positive IDs")
+			}
+			seen[id] = true
+		}
+	default:
+		return errors.New("secrets: github organization visibility must be all, selected, or private")
+	}
+	return nil
+}
+
+// githubDeliveryClient copies the caller's client so safe methods cannot inherit
+// an unbounded timeout or a redirect policy that forwards authorization.
+func githubDeliveryClient(client *http.Client) *http.Client {
+	bounded := &http.Client{}
+	if client != nil {
+		*bounded = *client
+	}
+	if bounded.Timeout <= 0 || bounded.Timeout > 30*time.Second {
+		bounded.Timeout = 30 * time.Second
+	}
+	bounded.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	return bounded
+}
+
+// GitHubSecretIdentity describes immutable IDs for the configured namespace.
+// Organization selection describes the intended write policy, not a remote
+// secret's current visibility. Names alone do not identify a namespace forever.
+type GitHubSecretIdentity struct {
+	Scope                 GitHubSecretScope   `json:"scope"`
+	RepositoryID          int64               `json:"repository_id,omitempty"`
+	OwnerID               int64               `json:"owner_id,omitempty"`
+	OrganizationID        int64               `json:"organization_id,omitempty"`
+	EnvironmentID         int64               `json:"environment_id,omitempty"`
+	Visibility            GitHubOrgVisibility `json:"visibility,omitempty"`
+	SelectedRepositoryIDs []int64             `json:"selected_repository_ids,omitempty"`
+}
+
+// GitHubSecretWriteReceipt reports what a PUT response establishes. Created
+// means GitHub returned 201, not an atomic create-only guarantee. MayHaveWritten
+// also covers successful updates and ambiguous transport/server failures.
+type GitHubSecretWriteReceipt struct {
+	Created        bool `json:"created"`
+	MayHaveWritten bool `json:"may_have_written"`
+}
+
+func (p *GitHubSecretsProvider) validateDeliveryTarget() error {
+	if p.scope == GitHubScopeOrg {
+		if !validGitHubTargetName(p.org) {
+			return errors.New("secrets: github organization target is invalid")
+		}
+		return validateGitHubSelection(p.orgVisibility, p.selectedRepoIDs)
+	}
+	if p.scope != "" && p.scope != GitHubScopeRepo && p.scope != GitHubScopeEnv {
+		return errors.New("secrets: github secret scope is invalid")
+	}
+	if !validGitHubTargetName(p.owner) || !validGitHubTargetName(p.repo) || p.scope == GitHubScopeEnv && p.env == "" {
+		return errors.New("secrets: github repository or environment target is invalid")
+	}
+	return nil
+}
+
+func validGitHubSecretKey(key string) bool {
+	// The 256-byte limit is this helper's bound, not an asserted GitHub API limit.
+	if key == "" || len(key) > 256 || strings.HasPrefix(strings.ToUpper(key), "GITHUB_") {
+		return false
+	}
+	for i, c := range key {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c == '_' || i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func (p *GitHubSecretsProvider) deliveryRequest(ctx context.Context, method, target string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	if err != nil {
+		return nil, errors.New("secrets: github request is invalid")
+	}
+	p.setHeaders(req)
+	return p.deliveryDo(ctx, req)
+}
+
+func (p *GitHubSecretsProvider) deliveryDo(ctx context.Context, req *http.Request) (*http.Response, error) {
+	resp, err := githubDeliveryClient(p.client).Do(req)
+	if err != nil {
+		// Transport errors can embed request URLs, headers, or body fragments.
+		// Context sentinel errors are safe and retain cancellation semantics.
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("secrets: github request failed: %w", ctx.Err())
+		}
+		return nil, errors.New("secrets: github request failed")
+	}
+	return resp, nil
+}
+
+func decodeGitHubDelivery(body io.Reader, out any) error {
+	decoder := json.NewDecoder(io.LimitReader(body, 1<<20))
+	if err := decoder.Decode(out); err != nil {
+		return errors.New("secrets: github metadata response is invalid")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errors.New("secrets: github metadata response is invalid")
+	}
+	return nil
+}
+
+func (p *GitHubSecretsProvider) deliveryMetadata(ctx context.Context, target string, out any) error {
+	resp, err := p.deliveryRequest(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("secrets: github metadata request: HTTP %d", resp.StatusCode)
+	}
+	return decodeGitHubDelivery(resp.Body, out)
+}
+
+// Stat fetches metadata for one exact secret name without reading its value.
+// HTTP 404 returns ErrNotFound; authorization and response errors remain errors.
+func (p *GitHubSecretsProvider) Stat(ctx context.Context, key string) (SecretMeta, error) {
+	meta := SecretMeta{Name: key}
+	if !validGitHubSecretKey(key) {
+		return meta, ErrInvalidKey
+	}
+	if err := p.validateDeliveryTarget(); err != nil {
+		return meta, err
+	}
+	var entry ghSecretEntry
+	if err := p.deliveryMetadata(ctx, p.secretURL(key), &entry); err != nil {
+		return meta, err
+	}
+	if !strings.EqualFold(entry.Name, key) {
+		return meta, errors.New("secrets: github secret metadata name does not match")
+	}
+	meta.Exists = true
+	meta.UpdatedAt = entry.UpdatedAt
+	if meta.UpdatedAt.IsZero() {
+		meta.UpdatedAt = entry.CreatedAt
+	}
+	return meta, nil
+}
+
+// Identity resolves the immutable repository/owner, organization, and optional
+// environment IDs. It does not create environments or change permissions.
+func (p *GitHubSecretsProvider) Identity(ctx context.Context) (GitHubSecretIdentity, error) {
+	identity := GitHubSecretIdentity{Scope: p.scope}
+	if err := p.validateDeliveryTarget(); err != nil {
+		return identity, err
+	}
+	if p.scope == GitHubScopeOrg {
+		var org struct {
+			ID int64 `json:"id"`
+		}
+		if err := p.deliveryMetadata(ctx, p.base()+"/orgs/"+url.PathEscape(p.org), &org); err != nil {
+			return identity, err
+		}
+		if org.ID <= 0 {
+			return identity, errors.New("secrets: github organization ID is missing or invalid")
+		}
+		identity.OrganizationID = org.ID
+		identity.Visibility = p.orgVisibility
+		identity.SelectedRepositoryIDs = append([]int64(nil), p.selectedRepoIDs...)
+		return identity, nil
+	}
+	var repo struct {
+		ID    int64 `json:"id"`
+		Owner struct {
+			ID int64 `json:"id"`
+		} `json:"owner"`
+	}
+	target := p.base() + "/repos/" + url.PathEscape(p.owner) + "/" + url.PathEscape(p.repo)
+	if err := p.deliveryMetadata(ctx, target, &repo); err != nil {
+		return identity, err
+	}
+	if repo.ID <= 0 || repo.Owner.ID <= 0 {
+		return identity, errors.New("secrets: github repository or owner ID is missing or invalid")
+	}
+	identity.Scope = GitHubScopeRepo
+	identity.RepositoryID, identity.OwnerID = repo.ID, repo.Owner.ID
+	if p.scope == GitHubScopeEnv {
+		var env struct {
+			ID int64 `json:"id"`
+		}
+		if err := p.deliveryMetadata(ctx, p.environmentURL(p.env), &env); err != nil {
+			return identity, err
+		}
+		if env.ID <= 0 {
+			return identity, errors.New("secrets: github environment ID is missing or invalid")
+		}
+		identity.Scope, identity.EnvironmentID = GitHubScopeEnv, env.ID
+	}
+	return identity, nil
+}
+
+// SetWithReceipt encrypts and upserts a secret, exposing only a metadata receipt
+// and safe errors. It never provides an atomic create-only operation. A caller
+// requiring a fresh name must check Stat and control concurrent writers itself.
+func (p *GitHubSecretsProvider) SetWithReceipt(ctx context.Context, key, value string) (GitHubSecretWriteReceipt, error) {
+	receipt := GitHubSecretWriteReceipt{}
+	if !validGitHubSecretKey(key) {
+		return receipt, ErrInvalidKey
+	}
+	if err := p.validateDeliveryTarget(); err != nil {
+		return receipt, err
+	}
+	var publicKey repoPublicKeyResponse
+	if err := p.deliveryMetadata(ctx, p.publicKeyURL(), &publicKey); err != nil {
+		return receipt, err
+	}
+	if publicKey.KeyID == "" {
+		return receipt, errors.New("secrets: github public key ID is missing")
+	}
+	encrypted, err := encryptSecret(publicKey.Key, value)
+	if err != nil {
+		return receipt, errors.New("secrets: github secret encryption failed")
+	}
+	body, err := json.Marshal(p.secretPayload(publicKey.KeyID, encrypted))
+	if err != nil {
+		return receipt, errors.New("secrets: github secret payload is invalid")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, p.secretURL(key), bytes.NewReader(body))
+	if err != nil {
+		return receipt, errors.New("secrets: github secret write request is invalid")
+	}
+	p.setHeaders(req)
+	if ctx.Err() != nil {
+		return receipt, fmt.Errorf("secrets: github secret write canceled before upload: %w", ctx.Err())
+	}
+	resp, err := p.deliveryDo(ctx, req)
+	if err != nil {
+		receipt.MayHaveWritten = true
+		return receipt, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusCreated:
+		receipt.Created, receipt.MayHaveWritten = true, true
+		return receipt, nil
+	case http.StatusNoContent:
+		receipt.MayHaveWritten = true
+		return receipt, nil
+	default:
+		// Only explicit client rejections establish that the PUT failed. A
+		// timeout, server failure, redirect, or unexpected success is uncertain.
+		receipt.MayHaveWritten = resp.StatusCode < 400 || resp.StatusCode >= 500 || resp.StatusCode == http.StatusRequestTimeout
+		return receipt, fmt.Errorf("secrets: github secret write: HTTP %d", resp.StatusCode)
+	}
+}
+
+func (p *GitHubSecretsProvider) secretPayload(keyID, encrypted string) map[string]any {
+	payload := map[string]any{"encrypted_value": encrypted, "key_id": keyID}
+	if p.scope == GitHubScopeOrg {
+		payload["visibility"] = string(p.orgVisibility)
+		if p.orgVisibility == OrgVisibilitySelected {
+			payload["selected_repository_ids"] = p.selectedRepoIDs
+		}
+	}
+	return payload
 }
 
 // Scope reports the current scope.
@@ -195,17 +540,7 @@ func (p *GitHubSecretsProvider) Set(ctx context.Context, key, value string) erro
 		return fmt.Errorf("secrets: github encrypt: %w", err)
 	}
 
-	payload := map[string]any{
-		"encrypted_value": encrypted,
-		"key_id":          pubKeyID,
-	}
-	if p.scope == GitHubScopeOrg {
-		payload["visibility"] = string(p.orgVisibility)
-		if p.orgVisibility == OrgVisibilitySelected {
-			payload["selected_repository_ids"] = p.selectedRepoIDs
-		}
-	}
-	body, _ := json.Marshal(payload)
+	body, _ := json.Marshal(p.secretPayload(pubKeyID, encrypted))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, p.secretURL(key), bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -255,26 +590,68 @@ type ghSecretEntry struct {
 
 // listSecretEntries fetches and decodes all secret entries (name + timestamps).
 func (p *GitHubSecretsProvider) listSecretEntries(ctx context.Context) ([]ghSecretEntry, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.secretsURL(), nil)
+	if p.safeErrors {
+		if err := p.validateDeliveryTarget(); err != nil {
+			return nil, err
+		}
+	}
+	initial, err := url.Parse(p.secretsURL())
 	if err != nil {
-		return nil, err
+		return nil, errors.New("secrets: github list URL is invalid")
 	}
-	p.setHeaders(req)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
+	query := initial.Query()
+	query.Set("per_page", "100")
+	initial.RawQuery = query.Encode()
+	nextURL := initial.String()
+	seen := map[string]bool{}
+	var entries []ghSecretEntry
+	for nextURL != "" {
+		next, err := url.Parse(nextURL)
+		if err != nil || next.Scheme != initial.Scheme || next.Host != initial.Host || next.User != nil || next.EscapedPath() != initial.EscapedPath() || next.Fragment != "" {
+			return nil, errors.New("secrets: github secret pagination escaped the configured namespace")
+		}
+		// Canonical query ordering also catches cycles with reordered parameters.
+		next.RawQuery = next.Query().Encode()
+		canonical := next.String()
+		if seen[canonical] || len(seen) >= 10000 {
+			return nil, errors.New("secrets: github secret pagination repeated or exceeded the page limit")
+		}
+		seen[canonical] = true
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, canonical, nil)
+		if err != nil {
+			return nil, errors.New("secrets: github list request is invalid")
+		}
+		p.setHeaders(req)
+		resp, err := githubDeliveryClient(p.client).Do(req)
+		if err != nil {
+			if p.safeErrors {
+				return nil, errors.New("secrets: github list request failed")
+			}
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			detail := ""
+			if !p.safeErrors {
+				detail = readErrorBody(resp)
+			}
+			resp.Body.Close()
+			return nil, fmt.Errorf("secrets: github list secrets: HTTP %d%s", resp.StatusCode, detail)
+		}
+		var result struct {
+			Secrets *[]ghSecretEntry `json:"secrets"`
+		}
+		err = decodeGitHubDelivery(resp.Body, &result)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if result.Secrets == nil {
+			return nil, errors.New("secrets: github secret list is missing")
+		}
+		entries = append(entries, (*result.Secrets)...)
+		nextURL = githubNextLink(resp.Header.Get("Link"))
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("secrets: github list secrets: HTTP %d%s", resp.StatusCode, readErrorBody(resp))
-	}
-	var result struct {
-		Secrets []ghSecretEntry `json:"secrets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("secrets: github list decode: %w", err)
-	}
-	return result.Secrets, nil
+	return entries, nil
 }
 
 // List returns the names of all GitHub Actions secrets for the repo.

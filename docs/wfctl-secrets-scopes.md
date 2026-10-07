@@ -167,6 +167,50 @@ printf 'alice\nhunter2\nJBSWY3DPEHPK3PXP\n' | \
   --scope org --org GoCodeAlone
 ```
 
+## Private delivery from an owner-run plugin
+
+Plugins that receive a one-time credential can use the canonical Go provider
+without placing the GitHub credential in an environment variable:
+
+- `NewGitHubSecretsProviderWithToken(repo, token)` accepts an in-memory GitHub
+  credential; `SetEnvironment` selects an existing environment.
+- `NewGitHubOrgSecretsProviderWithToken(org, token, visibility, selectedRepoIDs)`
+  copies and validates positive, unique repository IDs. IDs are accepted only
+  with `selected` visibility; empty visibility defaults to `private`.
+- `Identity(ctx)` resolves immutable repository and owner IDs, an organization
+  ID, or repository, owner, and environment IDs. Organization visibility and
+  selected repository IDs describe the intended write policy.
+- `Stat(ctx, key)` fetches one exact secret's metadata. A `404` returns
+  `secrets.ErrNotFound`; permission failures remain errors. `List` and `StatAll`
+  follow all pages, rejecting links outside the configured origin and namespace
+  or repeated pages.
+- `SetWithReceipt(ctx, key, value)` reuses GitHub's sealed-box encryption and
+  returns `GitHubSecretWriteReceipt{Created, MayHaveWritten}`. It does not return
+  a value, ciphertext, or upstream response body.
+
+The new metadata and receipt methods bound each request to 30 seconds and refuse
+redirects, including on providers built with the legacy constructors. They omit
+raw response bodies and transport error details. Direct-token providers also
+use safe errors for `List` and `StatAll`. The new exact-key methods accept ASCII
+letters, digits, and underscores, require a letter or underscore first, reject
+the reserved `GITHUB_` prefix case-insensitively, and apply their own conservative
+256-byte name bound. Existing constructors and `Set` remain compatible.
+
+`201` means GitHub reported a created secret: both receipt fields are true.
+`204` means GitHub accepted an update: `Created` is false and `MayHaveWritten`
+is true. A transport failure after starting the PUT, a timeout response, or a
+server failure returns an error with `MayHaveWritten` true. Failures before the
+PUT and explicit client rejection responses have `MayHaveWritten` false.
+
+GitHub's PUT is an upsert with no atomic create-only or compare-and-swap option.
+A caller that requires a fresh secret must approve a versioned name, check its
+absence, and control concurrent writers in that namespace. An absence check
+followed by PUT cannot close a race with another writer. An unexpected `204`
+must be reconciled as a possible collision; the receipt cannot recover a prior
+value. Metadata cannot prove which value GitHub currently holds. These helpers
+do not retry an ambiguous upload, revoke tokens, or delete secrets; the
+owner-run action must retain uncertainty and apply its explicit recovery policy.
+
 ## PAT scope cheat sheet
 
 | Token use | Required scopes |
