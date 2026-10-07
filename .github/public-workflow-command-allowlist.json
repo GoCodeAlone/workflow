@@ -3126,5 +3126,229 @@
     "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact shell statement invoking check-public-workflow-policy.sh to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
     "state": "staged",
     "statementSHA256": "89a1f75b6db0c513cc68634a7b1e7983e88d121f09db4dbfe7aaa6edd1e9978c"
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cd",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "npm",
+    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "go",
+    "statementSHA256": "3c1b589932f67a655ff6bfb1741a31b1c9ab4668b3e6b408e4fcf96472c20edb",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "go",
+    "statementSHA256": "0b169221a14ced8d9e2626373a08ecd6cc5d98b45fb962b73b7c5e8fa649b676",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "go",
+    "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "tee",
+    "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "6911dc69ba1aa10a01cd1b0563efbb02d008c9e0ffd5c72471177bf8db8f0eec",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cat",
+    "statementSHA256": "6911dc69ba1aa10a01cd1b0563efbb02d008c9e0ffd5c72471177bf8db8f0eec",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "e5b7e17a95219aa32ca80405727547a9c29b9780744e115583f6c1a68a224750",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "ffd4c2588e960687e8be3db328048a0dcb944a9c1426e6afaafafef832109740",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "50b89f8af205b68cf50a606470fdea48d51311de3bf807c03fe8aca0b92ef7c1",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "50b89f8af205b68cf50a606470fdea48d51311de3bf807c03fe8aca0b92ef7c1",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "dabc56d53c8b4b869174d2673fb6759252ac3f41af4529dd558943edda60a0b7",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "aa9a819f2f2977ec77ec813b0fa8b8ab2b753db0eb369df762eb7bb9010892a8",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "benchstat",
+    "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "8c1c7655a9bddd70fe48d0aef7fd3bcb7cd34152622e7355e07f7e042a5d9197",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "6ea234c2788bcc4ba388da39084e63ae28c829e83006b91554859019723f2c07",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cp",
+    "statementSHA256": "ecf28d9064234b3ad9daccf68db49f1f91c65c21c2ac8f1dae3c06b65132d9d8",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "175ed3056dc0639f05e3a0de9d2616f294cfadefd6089f69cbac1dffbd6490dd",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "1a21be8bb1dc4721d30cc1850ead617faa55ae9aebf416da4369668bdeaf0824",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair command."
   }
 ]
