@@ -361,7 +361,13 @@ func (p *GitHubSecretsProvider) deliveryMetadata(ctx context.Context, target str
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("secrets: github metadata request: HTTP %d", resp.StatusCode)
 	}
-	return decodeGitHubDelivery(resp.Body, out)
+	if err := decodeGitHubDelivery(resp.Body, out); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("secrets: github metadata read failed: %w", ctx.Err())
+		}
+		return err
+	}
+	return nil
 }
 
 // Stat fetches metadata for one exact secret name without reading its value.
@@ -684,6 +690,9 @@ func (p *GitHubSecretsProvider) listSecretEntries(ctx context.Context) ([]ghSecr
 		err = decodeGitHubDelivery(resp.Body, &result)
 		resp.Body.Close()
 		if err != nil {
+			if p.safeErrors && ctx.Err() != nil {
+				return nil, fmt.Errorf("secrets: github list response read failed: %w", ctx.Err())
+			}
 			return nil, err
 		}
 		if result.Secrets == nil {

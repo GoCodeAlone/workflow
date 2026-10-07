@@ -824,3 +824,42 @@ func TestGitHubDeliveryListingPreservesCancellation(t *testing.T) {
 		}
 	}
 }
+
+type deliveryCancelingBody struct{ cancel context.CancelFunc }
+
+func (b deliveryCancelingBody) Read([]byte) (int, error) {
+	b.cancel()
+	return 0, fmt.Errorf("body reader echoed %s", deliveryCredential)
+}
+
+func (deliveryCancelingBody) Close() error { return nil }
+
+func TestGitHubDeliveryBodyReadPreservesSafeCancellation(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		for _, method := range []string{"stat", "identity", "list", "stat-all"} {
+			t.Run(fmt.Sprintf("direct=%v/method=%s", direct, method), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				p := newPaginationProvider(t, GitHubScopeRepo, direct)
+				p.client.Transport = deliveryRoundTripper(func(r *http.Request) (*http.Response, error) {
+					return &http.Response{StatusCode: 200, Header: http.Header{}, Body: deliveryCancelingBody{cancel: cancel}, Request: r}, nil
+				})
+				var err error
+				switch method {
+				case "stat":
+					_, err = p.Stat(ctx, "NEW_TOKEN")
+				case "identity":
+					_, err = p.Identity(ctx)
+				case "list":
+					_, err = p.List(ctx)
+				case "stat-all":
+					_, err = p.StatAll(ctx)
+				}
+				wantSentinel := direct || method == "stat" || method == "identity"
+				if err == nil || errors.Is(err, context.Canceled) != wantSentinel || strings.Contains(err.Error(), deliveryCredential) {
+					t.Fatalf("HTTP200 read cancellation = %v; want context sentinel = %v without read error details", err, wantSentinel)
+				}
+			})
+		}
+	}
+}
