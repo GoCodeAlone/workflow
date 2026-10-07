@@ -62,6 +62,30 @@ type GitHubSecretsProvider struct {
 	safeErrors      bool   // direct-token providers omit upstream bodies and errors
 }
 
+// GitHubSecretsOption configures only the transport used by direct-token
+// providers. The API destination, timeout bound, and redirect policy remain fixed.
+type GitHubSecretsOption struct {
+	transport http.RoundTripper
+}
+
+// WithGitHubSecretsHTTPTransport substitutes the HTTP service boundary without
+// changing global clients or the GitHub API URL. An explicit nil transport is
+// rejected by the constructor. If repeated, the last transport is used.
+func WithGitHubSecretsHTTPTransport(transport http.RoundTripper) GitHubSecretsOption {
+	return GitHubSecretsOption{transport: transport}
+}
+
+func githubDeliveryClientWithOptions(options []GitHubSecretsOption) (*http.Client, error) {
+	client := githubDeliveryClient(nil)
+	for _, option := range options {
+		if option.transport == nil {
+			return nil, errors.New("secrets: github HTTP transport must not be nil")
+		}
+		client.Transport = option.transport
+	}
+	return client, nil
+}
+
 // base returns the API base URL, using baseURL when set (for tests).
 func (p *GitHubSecretsProvider) base() string {
 	if p.baseURL != "" {
@@ -129,7 +153,7 @@ func NewGitHubOrgSecretsProvider(org string, tokenEnvVar string, visibility GitH
 // in-memory credential. It does not read environment variables. Requests are
 // bounded and redirects are refused. Stat, Identity, SetWithReceipt, List, and
 // StatAll omit upstream bodies and causes. Legacy Set retains upsert semantics.
-func NewGitHubSecretsProviderWithToken(repo, token string) (*GitHubSecretsProvider, error) {
+func NewGitHubSecretsProviderWithToken(repo, token string, options ...GitHubSecretsOption) (*GitHubSecretsProvider, error) {
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 || !validGitHubTargetName(parts[0]) || !validGitHubTargetName(parts[1]) {
 		return nil, errors.New("secrets: github repo must be owner/repo")
@@ -137,16 +161,20 @@ func NewGitHubSecretsProviderWithToken(repo, token string) (*GitHubSecretsProvid
 	if !validGitHubToken(token) {
 		return nil, errors.New("secrets: github token is empty or invalid")
 	}
+	client, err := githubDeliveryClientWithOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	return &GitHubSecretsProvider{
 		scope: GitHubScopeRepo, owner: parts[0], repo: parts[1], token: token,
-		client: githubDeliveryClient(nil), safeErrors: true,
+		client: client, safeErrors: true,
 	}, nil
 }
 
 // NewGitHubOrgSecretsProviderWithToken creates an organization provider from an
 // in-memory credential. Repository IDs are copied and must be unique positive
 // IDs used only with selected visibility. Empty visibility defaults to private.
-func NewGitHubOrgSecretsProviderWithToken(org, token string, visibility GitHubOrgVisibility, selectedRepoIDs []int64) (*GitHubSecretsProvider, error) {
+func NewGitHubOrgSecretsProviderWithToken(org, token string, visibility GitHubOrgVisibility, selectedRepoIDs []int64, options ...GitHubSecretsOption) (*GitHubSecretsProvider, error) {
 	if !validGitHubTargetName(org) {
 		return nil, errors.New("secrets: github organization name is invalid")
 	}
@@ -159,10 +187,14 @@ func NewGitHubOrgSecretsProviderWithToken(org, token string, visibility GitHubOr
 	if err := validateGitHubSelection(visibility, selectedRepoIDs); err != nil {
 		return nil, err
 	}
+	client, err := githubDeliveryClientWithOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	return &GitHubSecretsProvider{
 		scope: GitHubScopeOrg, org: org, token: token, orgVisibility: visibility,
 		selectedRepoIDs: append([]int64(nil), selectedRepoIDs...),
-		client:          githubDeliveryClient(nil), safeErrors: true,
+		client:          client, safeErrors: true,
 	}, nil
 }
 

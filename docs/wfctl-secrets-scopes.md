@@ -177,6 +177,11 @@ without placing the GitHub credential in an environment variable:
 - `NewGitHubOrgSecretsProviderWithToken(org, token, visibility, selectedRepoIDs)`
   copies and validates positive, unique repository IDs. IDs are accepted only
   with `selected` visibility; empty visibility defaults to `private`.
+- Both direct-token constructors accept optional `GitHubSecretsOption` arguments.
+  `WithGitHubSecretsHTTPTransport(transport)` substitutes only the HTTP service
+  boundary, retaining the production API URL and request safety policy. This
+  lets plugin integration tests exercise the real provider without changing
+  global clients. An explicit nil transport is rejected.
 - `Identity(ctx)` resolves immutable repository and owner IDs, an organization
   ID, or repository, owner, and environment IDs. Organization visibility and
   selected repository IDs describe the intended write policy.
