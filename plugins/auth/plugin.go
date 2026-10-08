@@ -97,6 +97,10 @@ func (p *Plugin) ModuleFactories() map[string]plugin.ModuleFactory {
 				issuer = iss
 			}
 			authMod := module.NewJWTAuthModule(name, secret, tokenExpiry, issuer)
+			if value, configured := cfg["audience"]; configured {
+				audience, _ := value.(string)
+				authMod.SetAudience(audience)
+			}
 			if sf, ok := cfg["seedFile"].(string); ok && sf != "" {
 				sf = config.ResolvePathInConfig(cfg, sf)
 				authMod.SetSeedFile(sf)
@@ -392,6 +396,7 @@ func (p *Plugin) ModuleSchemas() []*schema.ModuleSchema {
 				{Key: "secret", Label: "JWT Secret", Type: schema.FieldTypeString, Required: true, Description: "Secret key for signing JWT tokens (supports $ENV_VAR expansion)", Placeholder: "$JWT_SECRET", Sensitive: true},
 				{Key: "tokenExpiry", Label: "Token Expiry", Type: schema.FieldTypeDuration, DefaultValue: "24h", Description: "Token expiration duration (e.g. 1h, 24h, 7d)", Placeholder: "24h"},
 				{Key: "issuer", Label: "Issuer", Type: schema.FieldTypeString, DefaultValue: "workflow", Description: "Token issuer claim", Placeholder: "workflow"},
+				{Key: "audience", Label: "Audience", Type: schema.FieldTypeString, Description: "Token audience. When configured, must be a nonempty string; every JWT entry point requires this audience and the configured issuer."},
 				{Key: "seedFile", Label: "Seed Users File", Type: schema.FieldTypeString, Description: "Path to JSON file with initial user accounts", Placeholder: "data/users.json"},
 				{Key: "responseFormat", Label: "Response Format", Type: schema.FieldTypeSelect, Options: []string{"standard", "oauth2"}, Description: "Format of authentication response payloads"},
 				{Key: "allowRegistration", Label: "Allow Open Registration", Type: schema.FieldTypeBool, DefaultValue: false, Description: "When true, any visitor may register without admin intervention"},
