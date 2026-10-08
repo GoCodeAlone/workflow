@@ -122,5 +122,11 @@
     "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
     "state": "staged",
     "presence": "present"
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "presence": "present"
   }
 ]
