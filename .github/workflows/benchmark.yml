@@ -55,7 +55,9 @@ jobs:
       run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d
 
     - name: Run benchmarks
-      run: go test -bench=. -benchmem -count=6 -run=^$ -timeout=30m ./... | tee benchmark-results.txt
+      run: |
+        go test -list='^Benchmark' ./... > benchmark-list.txt
+        go test -bench=. -benchmem -count=6 -run=^$ -timeout=30m ./... | tee benchmark-results.txt
 
     - name: Restore baseline
       if: github.event_name == 'pull_request'
@@ -67,32 +69,300 @@ jobs:
         restore-keys: |
           go-benchmark-${{ github.event.pull_request.base.ref }}-
 
-    - name: Compare with baseline
-      if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != ''
+    - name: Validate and compare benchmarks
       id: compare
+      env:
+        BASELINE_AVAILABLE: ${{ github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != '' }}
       run: |
-        echo "## benchstat: baseline → PR" > benchstat-output.txt
-        benchstat baseline-bench.txt benchmark-results.txt >> benchstat-output.txt 2>&1 || true
-
-        # Detect regressions: benchstat v2 output lines look like:
-        #   BenchmarkName  1.00ns ± 1%  1.25ns ± 2%  +25.00% (p=0.002 n=6)
-        # We look for lines containing a benchmark name (starts with Benchmark)
-        # followed by a percentage increase >= 20%.
-        regression=false
-        while read -r line; do
-          if echo "$line" | grep -qP '^\s*(│\s+)?Benchmark.*\+\d+\.\d+%'; then
-            pct=$(echo "$line" | grep -oP '\+\K\d+\.\d+(?=%)' | tail -1)
-            if [ -n "$pct" ] && echo "$pct" | awk '{ exit ($1 < 20.0) }'; then
-              regression=true
-              break
-            fi
-          fi
-        done < benchstat-output.txt
-
-        echo "regression=$regression" >> "$GITHUB_OUTPUT"
-        if [ "$regression" = "true" ]; then
-          echo "::warning::Potential performance regression detected (>= 20% slower)"
+        validator=$(cat <<'AWK'
+        # This program validates data only. It never starts a subprocess or evaluates code.
+        function trim(text) {
+            sub(/^[[:space:]]+/, "", text)
+            sub(/[[:space:]]+$/, "", text)
+            return text
+        }
+        function quote(text, result, i, character) {
+            result = "\""
+            for (i = 1; i <= length(text); i++) {
+                character = substr(text, i, 1)
+                if (character == "\\" || character == "\"") result = result "\\"
+                if (character == "\n") result = result "\\n"
+                else if (character == "\r") result = result "\\r"
+                else if (character == "\t") result = result "\\t"
+                else result = result character
+            }
+            return result "\""
+        }
+        function verdict(comparison, error, regression) {
+            print "{" > "benchmark-validation.json"
+            print "  \"comparison\": " quote(comparison) "," >> "benchmark-validation.json"
+            print "  \"roots\": " root_count + 0 "," >> "benchmark-validation.json"
+            print "  \"series\": " series_count + 0 "," >> "benchmark-validation.json"
+            printf "  \"samples_per_series\": 6" >> "benchmark-validation.json"
+            if (error != "") printf ",\n  \"error\": %s", quote(error) >> "benchmark-validation.json"
+            if (regression != "") printf ",\n  \"regression\": %s", regression >> "benchmark-validation.json"
+            print "\n}" >> "benchmark-validation.json"
+            close("benchmark-validation.json")
+        }
+        function reject(message) {
+            failed = 1
+            verdict("not-run", message, "")
+            print FILENAME ":" FNR ": " message > "/dev/stderr"
+            exit 1
+        }
+        function go_ok(line) {
+            return line ~ /^ok[[:space:]]+[^[:space:]]+[[:space:]]+([0-9]+([.][0-9]+)?s|\(cached\))([[:space:]]+\[no tests to run\])?$/
+        }
+        function go_status(line) {
+            return line == "" || line == "PASS" || go_ok(line) || line ~ /^\?[[:space:]]+[^[:space:]]+[[:space:]]+\[no test files\]$/
+        }
+        function number(text, value) {
+            if (text !~ /^[0-9]+([.][0-9]+)?([eE][+-]?[0-9]+)?$/) return 0
+            value = text + 0
+            return value == value && (value == 0 || value / 2 != value)
+        }
+        function scaled(text) {
+            sub(/(Ki|Mi|Gi|Ti|Pi|Ei|n|u|µ|m|k|M|G|T|P|E)$/, "", text)
+            return number(text)
+        }
+        function footnotes(text, original) {
+            original = text
+            gsub(/¹|²|³|⁴|⁵|⁶|⁷|⁸|⁹|⁰/, "", text)
+            return original != "" && text == ""
+        }
+        function delta(text) {
+            return text == "~" || text ~ /^[+-][0-9]+([.][0-9]+)?%$/
+        }
+        function at_least_twenty(text, sign, integer) {
+            if (substr(text, 1, 1) != sign) return 0
+            integer = substr(text, 2)
+            sub(/%$/, "", integer)
+            sub(/[.].*$/, "", integer)
+            sub(/^0+/, "", integer)
+            # Compare the decimal integer lexically; do not round 19.999... to 20.
+            return length(integer) > 2 || (length(integer) == 2 && ("x" integer) >= "x20")
+        }
+        function is_regression(text, unit) {
+            # Throughput falls when performance gets worse; per-operation costs rise.
+            return at_least_twenty(text, unit ~ /\/s$/ ? "-" : "+")
+        }
+        function probability(text, integer, fraction, parts) {
+            split(text, parts, /[.]/)
+            integer = parts[1]
+            sub(/^0+/, "", integer)
+            if (integer == "") return 1
+            fraction = parts[2]
+            gsub(/0/, "", fraction)
+            return integer == "1" && fraction == ""
+        }
+        function complete_config(dataset) {
+            # Go omits cpu when CPUName is unavailable. Only the reviewed Linux/ARM64
+            # three-field shape is admitted; a present CPU remains part of exact identity.
+            return config_count[dataset] == 4 || (config_count[dataset] == 3 &&
+                metadata[dataset, "goos"] == "linux" && metadata[dataset, "goarch"] == "arm64")
+        }
+        function raw_context(dataset) {
+            return metadata[dataset, "goos"] SUBSEP metadata[dataset, "goarch"] SUBSEP metadata[dataset, "pkg"] SUBSEP metadata[dataset, "cpu"]
+        }
+        function report_context() {
+            return report_metadata["goos"] SUBSEP report_metadata["goarch"] SUBSEP report_metadata["pkg"] SUBSEP report_metadata["cpu"]
+        }
+        function report_unit(unit) {
+            if (substr(unit, 1, 2) == "ns") unit = "sec" substr(unit, 3)
+            if (substr(unit, 1, 2) == "MB") unit = "B" substr(unit, 3)
+            return unit
+        }
+        function listing(line, fields, count, i, key) {
+            if (line ~ /^Benchmark/) {
+                if (line !~ /^Benchmark[[:alnum:]_]+$/) reject("invalid benchmark listing")
+                pending[++pending_count] = line
+            } else if (go_ok(line)) {
+                split(line, fields, /[[:space:]]+/)
+                if (fields[2] ~ /[[:cntrl:]]/) reject("invalid package listing")
+                for (i = 1; i <= pending_count; i++) {
+                    key = fields[2] SUBSEP pending[i]
+                    if (key in roots) reject("duplicate benchmark listing")
+                    roots[key] = 1
+                    root_count++
+                    delete pending[i]
+                }
+                pending_count = 0
+            } else if (!go_status(line)) reject("diagnostic or unsupported Go listing output")
+        }
+        function measurements(line, dataset, name, value, fields, count, i, unit, root, key, normalized) {
+            if (line ~ /^(goos|goarch|pkg|cpu): /) {
+                name = line
+                sub(/:.*/, "", name)
+                value = substr(line, length(name) + 3)
+                if (value == "" || value ~ /[[:cntrl:]]/) reject("invalid benchmark configuration")
+                if (name == "goos") {
+                    if (config_count[dataset] != 0 && !complete_config(dataset)) reject("incomplete benchmark configuration")
+                    config_count[dataset] = 0
+                    delete metadata[dataset, "cpu"]
+                }
+                if (config_count[dataset] >= 4 || name != config_keys[config_count[dataset] + 1]) reject("missing or out-of-order benchmark configuration")
+                metadata[dataset, name] = value
+                config_count[dataset]++
+            } else if (line ~ /^Benchmark/) {
+                count = split(line, fields, /[[:space:]]+/)
+                if (count < 8 || count % 2 != 0) reject("malformed benchmark measurement")
+                if (fields[2] !~ /^[0-9]+$/ || !number(fields[2]) || fields[2] + 0 <= 0) reject("invalid iteration count")
+                if (!complete_config(dataset)) reject("missing benchmark configuration")
+                if (cpu_shape[dataset] && cpu_shape[dataset] != config_count[dataset]) reject("mixed CPU metadata availability")
+                cpu_shape[dataset] = config_count[dataset]
+                root = fields[1]
+                sub(/-[0-9]+$/, "", root)
+                sub(/\/.*$/, "", root)
+                key = metadata[dataset, "pkg"] SUBSEP root
+                if (!(key in roots)) reject("unexpected benchmark root")
+                observed[dataset, key] = 1
+                for (unit in units) delete units[unit]
+                for (i = 3; i <= count; i += 2) {
+                    unit = fields[i + 1]
+                    if (!number(fields[i]) || unit in units) reject("invalid or duplicate measurement")
+                    units[unit] = 1
+                    key = raw_context(dataset) SUBSEP fields[1] SUBSEP unit
+                    samples[dataset, key]++
+                    if (dataset == 1 && !(key in series)) {
+                        series[key] = 1
+                        series_count++
+                        normalized = raw_context(dataset) SUBSEP substr(fields[1], 10) SUBSEP report_unit(unit)
+                        if (normalized in expected) reject("ambiguous normalized benchmark series")
+                        expected[normalized] = 1
+                        expected_units[report_unit(unit)] = 1
+                        expected_contexts[raw_context(dataset)] = 1
+                        expected_table_rows[raw_context(dataset), report_unit(unit)]++
+                    }
+                    if (dataset == 2) baseline_series[key] = 1
+                }
+                if (!("ns/op" in units) || !("B/op" in units) || !("allocs/op" in units)) reject("missing benchmark memory/time measurements")
+            } else if (line ~ /^[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+ns\/op([[:space:]]|$)/) {
+                reject("measurement without a benchmark name")
+            } else if (!go_status(line)) reject("diagnostic or unsupported Go output")
+        }
+        function finish_table() {
+            if (header_pending) reject("incomplete table header")
+            if (table_open && table_rows != expected_table_rows[table_context, report_metric]) reject("incomplete or empty comparison table")
+            table_open = 0
+        }
+        function report(line, fields, cells, count, name, value, key, p) {
+            if (line == "" || line == "## benchstat: baseline → PR") return
+            if (line ~ /^(goos|goarch|pkg|cpu): /) {
+                finish_table()
+                metadata_pending = 1
+                name = line
+                sub(/:.*/, "", name)
+                value = substr(line, length(name) + 3)
+                if (value == "" || value ~ /[[:cntrl:]]/) reject("invalid report configuration")
+                report_metadata[name] = value
+                return
+            }
+            if (index(line, "│")) {
+                count = split(line, cells, "│")
+                if (count != 4 || trim(cells[1]) != "" || trim(cells[4]) != "") reject("diagnostic or malformed table header")
+                cells[2] = trim(cells[2])
+                cells[3] = trim(cells[3])
+                if (cells[2] == "baseline-bench.txt" && cells[3] == "benchmark-results.txt") {
+                    finish_table()
+                    if (!(report_context() in expected_contexts)) reject("unknown report context")
+                    metadata_pending = 0
+                    report_metric = ""
+                    header_pending = 1
+                    return
+                }
+                count = split(cells[3], fields, /[[:space:]]+/)
+                if (!header_pending || !(cells[2] in expected_units) || count != 3 || fields[1] != cells[2] || fields[2] != "vs" || fields[3] != "base") reject("unsupported table header")
+                report_metric = cells[2]
+                header_pending = 0
+                table_context = report_context()
+                if (!expected_table_rows[table_context, report_metric] || tables_seen[table_context, report_metric]) reject("unexpected or duplicate comparison table")
+                tables_seen[table_context, report_metric] = 1
+                table_open = 1
+                table_rows = 0
+                summary_seen = 0
+                return
+            }
+            count = split(line, fields, /[[:space:]]+/)
+            if (fields[1] == "geomean") {
+                if (!table_open || table_rows < 2 || table_rows != expected_table_rows[table_context, report_metric] || summary_seen || count != 4 || !((scaled(fields[2]) && scaled(fields[3]) && delta(fields[4]) && fields[4] != "~") || (footnotes(fields[2]) && delta(fields[3]) && fields[3] != "~" && footnotes(fields[4])))) reject("diagnostic or malformed geomean")
+                summary_seen = 1
+                return
+            }
+            if (footnotes(fields[1]) && (substr(line, length(fields[1]) + 2) == "all samples are equal" || substr(line, length(fields[1]) + 2) == "summaries must be >0 to compute geomean")) {
+                if (!table_open || !table_rows || table_rows != expected_table_rows[table_context, report_metric]) reject("footnote outside complete comparison table")
+                return
+            }
+            if (!table_open || summary_seen) reject("comparison outside table measurements")
+            if ((count != 10 && count != 11) || !scaled(fields[2]) || fields[3] != "±" || fields[4] !~ /^[0-9]+%$/ || !scaled(fields[5]) || fields[6] != "±" || fields[7] !~ /^[0-9]+%$/ || !delta(fields[8]) || fields[9] !~ /^\(p=[0-9]+([.][0-9]+)?$/ || fields[10] != "n=6)" || (count == 11 && !footnotes(fields[11]))) reject("diagnostic or malformed comparison")
+            p = substr(fields[9], 4)
+            if (!probability(p)) reject("invalid comparison probability")
+            key = report_context() SUBSEP fields[1] SUBSEP report_metric
+            if (!(key in expected) || key in compared) reject("missing, duplicate or unexpected comparison")
+            compared[key] = 1
+            table_rows++
+            if (is_regression(fields[8], report_metric)) regression = 1
+        }
+        BEGIN {
+            config_keys[1] = "goos"; config_keys[2] = "goarch"; config_keys[3] = "pkg"; config_keys[4] = "cpu"
+            if (baseline != "true" && baseline != "false") reject("invalid baseline availability")
+            if (mode != "raw" && mode != "report" && mode != "tool-error") reject("invalid validation mode")
+        }
+        {
+            line = trim($0)
+            if (FILENAME == "benchmark-list.txt") listing(line)
+            else if (FILENAME == "benchmark-results.txt") measurements(line, 1)
+            else if (FILENAME == "baseline-bench.txt" && baseline == "true") measurements(line, 2)
+            else if (FILENAME == "benchstat-output.txt" && mode == "report") report(line)
+            else reject("unexpected validation input")
+        }
+        END {
+            if (failed) exit 1
+            if (pending_count || root_count == 0) reject("incomplete or empty benchmark listing")
+            if (!complete_config(1) || (baseline == "true" && !complete_config(2))) reject("incomplete benchmark configuration")
+            for (key in roots) {
+                if (!observed[1, key] || (baseline == "true" && !observed[2, key])) reject("missing benchmark root")
+            }
+            if (baseline == "true" && cpu_shape[1] != cpu_shape[2]) reject("baseline/candidate CPU metadata availability differs")
+            if (series_count == 0) reject("empty benchmark samples")
+            for (key in series) {
+                if (samples[1, key] != 6 || (baseline == "true" && samples[2, key] != 6)) reject("each benchmark series must retain all six samples")
+            }
+            if (baseline == "true") {
+                for (key in baseline_series) if (!(key in series)) reject("baseline/candidate benchmark series differ")
+            }
+            if (mode == "tool-error") reject(reason)
+            if (mode == "raw") { verdict("not-run", "", ""); exit 0 }
+            finish_table()
+            if (metadata_pending) reject("report configuration without a table")
+            for (key in expected) if (!(key in compared)) reject("missing benchmark comparison series")
+            result = regression ? "true" : "false"
+            verdict("complete", "", result)
+            print "regression=" result >> output
+            close(output)
+            if (regression) print "::warning::Potential performance regression detected (>= 20%)"
+        }
+        AWK
+        )
+        echo '{"comparison":"not-run","error":"benchmark validation did not complete"}' > benchmark-validation.json
+        inputs=(benchmark-list.txt benchmark-results.txt)
+        if [ "${BASELINE_AVAILABLE:-}" = true ]; then
+          inputs+=(baseline-bench.txt)
         fi
+        awk -v mode=raw -v baseline="${BASELINE_AVAILABLE:-}" "$validator" "${inputs[@]}"
+        if [ "$BASELINE_AVAILABLE" = false ]; then
+          echo "Benchmark samples valid; baseline comparison was not run"
+          exit 0
+        fi
+        echo '## benchstat: baseline → PR' > benchstat-output.txt
+        if ! benchstat baseline-bench.txt benchmark-results.txt >> benchstat-output.txt 2> benchstat-errors.txt; then
+          awk -v mode=tool-error -v baseline=true -v reason='benchstat failed; raw output preserved' "$validator" "${inputs[@]}"
+          exit 1
+        fi
+        if [ -s benchstat-errors.txt ]; then
+          awk -v mode=tool-error -v baseline=true -v reason='benchstat emitted diagnostics; raw output preserved' "$validator" "${inputs[@]}"
+          exit 1
+        fi
+        awk -v mode=report -v baseline=true -v output="$GITHUB_OUTPUT" "$validator" "${inputs[@]}" benchstat-output.txt
 
     - name: Comment PR with results
       if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != ''
@@ -173,7 +443,11 @@ jobs:
         name: benchmark-results
         path: |
           benchmark-results.txt
+          benchmark-list.txt
+          baseline-bench.txt
           benchstat-output.txt
+          benchstat-errors.txt
+          benchmark-validation.json
         retention-days: 30
         if-no-files-found: ignore
 
