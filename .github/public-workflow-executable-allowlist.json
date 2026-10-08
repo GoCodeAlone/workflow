@@ -16,14 +16,6 @@
     "rationale": "Enforces the credential-free public workflow boundary in CI."
   },
   {
-    "path": "scripts/check-public-workflow-policy.sh",
-    "workflowPath": ".github/workflows/public-workflow-policy.yml",
-    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
-    "state": "active",
-    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
-    "rationale": "Runs the trusted policy wrapper against inert candidate workflow data."
-  },
-  {
     "path": "scripts/test-check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
@@ -92,7 +84,7 @@
     "path": "scripts/check-public-workflow-policy.sh",
     "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact repository executable scripts/check-public-workflow-policy.sh to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
     "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
-    "state": "staged",
+    "state": "active",
     "workflowPath": ".github/workflows/public-workflow-policy.yml"
   },
   {
@@ -100,7 +92,7 @@
     "path": ".github/workflows/policytool/adoptionguard/run.sh",
     "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact repository executable .github/workflows/policytool/adoptionguard/run.sh to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
     "sha256": "b5597c106885bdc9b1f7161f7c6a1635d92f5f9273c41ec799233d68d6dbf3e4",
-    "state": "staged",
+    "state": "active",
     "workflowPath": ".github/workflows/public-workflow-policy.yml"
   }
 ]
