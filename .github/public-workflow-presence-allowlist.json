@@ -1,11 +1,5 @@
 [
   {
-    "path": ".github/workflows/benchmark.yml",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "presence": "present"
-  },
-  {
     "path": ".github/workflows/ci.yml",
     "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
     "state": "active",
@@ -120,7 +114,7 @@
   {
     "path": ".github/workflows/benchmark.yml",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   }
 ]
