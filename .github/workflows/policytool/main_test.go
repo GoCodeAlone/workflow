@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/syntax"
@@ -1445,5 +1448,72 @@ func TestAuthorityInventoryRejectsSymlinkedFixedAncestor(t *testing.T) {
 	}
 	if _, err := authorityInventory(root); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("symlinked fixed-file ancestor error = %v", err)
+	}
+}
+
+// Run only the real dependency-fixture function. Calling the full harness from
+// its own policy-tool test would recurse into go test.
+func TestPolicyFetchFixtureOwnsEventBoundary(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	harness, err := os.ReadFile(filepath.Join(root, "scripts", "test-check-public-workflow-policy.sh"))
+	if err != nil {
+		t.Fatalf("read policy mutation harness: %v", err)
+	}
+	const signature = "\nrun_candidate_fetch() {\n"
+	if strings.Count(string(harness), signature) != 1 {
+		t.Fatal("policy mutation harness must define one fetch fixture")
+	}
+	start := strings.Index(string(harness), signature) + 1
+	end := strings.Index(string(harness)[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("fetch fixture closing boundary missing")
+	}
+	fixture := string(harness)[start : start+end+3]
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatalf("find bash: %v", err)
+	}
+	const probe = `set -euo pipefail
+[[ "${EVENT_NAME}:${BASE_REF}:${EVENT_REF}" == pull_request_target:main:refs/heads/main ]]
+[[ "$CANDIDATE_REPOSITORY" == example/repo ]]
+[[ "$CANDIDATE_SHA" == 0123456789012345678901234567890123456789 ]]
+[[ "$GIT_ASKPASS" == /bin/false ]]
+[[ "$GIT_CONFIG_GLOBAL" == /dev/null ]]
+[[ "$GIT_CONFIG_NOSYSTEM" == 1 ]]
+[[ "$GIT_TERMINAL_PROMPT" == 0 ]]
+printf 'fixture-event-boundary-ok\n'
+`
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "unset event variables"},
+		{name: "hostile inherited event", env: []string{
+			"EVENT_NAME=workflow_run", "BASE_REF=develop", "EVENT_REF=refs/tags/v0.0.0",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaf := t.TempDir()
+			probePath := filepath.Join(leaf, "fetch-boundary.sh")
+			if err := os.WriteFile(probePath, []byte(probe), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(leaf, "fake-bin"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			body := "set -euo pipefail\n" + fixture + `
+fake_bin="$1/fake-bin"
+candidate_fetch_script="$2"
+run_candidate_fetch "$1/work" example/repo 0123456789012345678901234567890123456789 "$1/archive"
+`
+			cmd := exec.CommandContext(ctx, bash, "-c", body, "fetch-fixture-test", leaf, probePath)
+			cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, tc.env...)
+			out, err := cmd.CombinedOutput()
+			if err != nil || string(out) != "fixture-event-boundary-ok\n" {
+				t.Fatalf("fetch fixture must own its event tuple: err=%v output=%q", err, out)
+			}
+		})
 	}
 }

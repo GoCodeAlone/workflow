@@ -1,197 +1,5 @@
 [
   {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "$assignment",
-    "statementSHA256": "c0c433693a307a0c5c423fa126f7690084d93243b539c72221d5148dcaa24f09",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed literal assignment for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "$assignment",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed literal assignment for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "[",
-    "statementSHA256": "21430cc4ac1193bbb95ec1575f04ae6b65d6ada2b4bca8c4195d288c9bc449bf",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed [ statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "[",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed [ statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "awk",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed awk statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "benchstat",
-    "statementSHA256": "961fec081cdb44d1e3ef10393cce0840c1f3ec48cc068f492701cf03de6ffed7",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed benchstat statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "break",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed break statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "cd",
-    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed cd statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "cp",
-    "statementSHA256": "ecf28d9064234b3ad9daccf68db49f1f91c65c21c2ac8f1dae3c06b65132d9d8",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed cp statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "echo",
-    "statementSHA256": "175ed3056dc0639f05e3a0de9d2616f294cfadefd6089f69cbac1dffbd6490dd",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "echo",
-    "statementSHA256": "21430cc4ac1193bbb95ec1575f04ae6b65d6ada2b4bca8c4195d288c9bc449bf",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "echo",
-    "statementSHA256": "6ea234c2788bcc4ba388da39084e63ae28c829e83006b91554859019723f2c07",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "echo",
-    "statementSHA256": "7041a39bf0738820394b5fc1f03e6d760956bb63942be0a85157550c6987511c",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "echo",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "echo",
-    "statementSHA256": "eedcefe944dfb5c1a4d393497272271bfa8ea66bfb96435c7881d477a4df550d",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed echo statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "exit",
-    "statementSHA256": "1a21be8bb1dc4721d30cc1850ead617faa55ae9aebf416da4369668bdeaf0824",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed exit statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "go",
-    "statementSHA256": "3c1b589932f67a655ff6bfb1741a31b1c9ab4668b3e6b408e4fcf96472c20edb",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed go statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "go",
-    "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed go statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "grep",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed grep statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "npm",
-    "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed npm statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "read",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed read statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "tail",
-    "statementSHA256": "d9a0185bb46ae5c1ec79645d990431495cf18d3f75cf24ab9d9e15790d1be188",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed tail statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "tee",
-    "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed tee statement for benchmark.yml automation."
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "command": "true",
-    "statementSHA256": "961fec081cdb44d1e3ef10393cce0840c1f3ec48cc068f492701cf03de6ffed7",
-    "contextSHA256": "24ff378f17200e8c02f20803633bc56a61c472c86d176bd9d9ca3a001f1fc300",
-    "state": "active",
-    "rationale": "Exact reviewed true statement for benchmark.yml automation."
-  },
-  {
     "path": ".github/workflows/ci.yml",
     "command": "$assignment",
     "statementSHA256": "07316a6dee4fa421f202dd55c47def6146f4bfdac654bb879860cdfc1a35a9ea",
@@ -2836,7 +2644,7 @@
     "command": "cd",
     "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2844,7 +2652,7 @@
     "command": "npm",
     "statementSHA256": "1da8bf23d2c0684c704bbca52edd911233fb4bb267f1118d5b94915af4ce2757",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2852,7 +2660,7 @@
     "command": "go",
     "statementSHA256": "3c1b589932f67a655ff6bfb1741a31b1c9ab4668b3e6b408e4fcf96472c20edb",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2860,7 +2668,7 @@
     "command": "go",
     "statementSHA256": "0b169221a14ced8d9e2626373a08ecd6cc5d98b45fb962b73b7c5e8fa649b676",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2868,7 +2676,7 @@
     "command": "go",
     "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2876,7 +2684,7 @@
     "command": "tee",
     "statementSHA256": "cfd6b00644f2b1a427bf34c2864d1ea1607bc8df4873876e092c2a015f2700bb",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2884,7 +2692,7 @@
     "command": "$assignment",
     "statementSHA256": "6911dc69ba1aa10a01cd1b0563efbb02d008c9e0ffd5c72471177bf8db8f0eec",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2892,7 +2700,7 @@
     "command": "cat",
     "statementSHA256": "6911dc69ba1aa10a01cd1b0563efbb02d008c9e0ffd5c72471177bf8db8f0eec",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2900,7 +2708,7 @@
     "command": "echo",
     "statementSHA256": "e5b7e17a95219aa32ca80405727547a9c29b9780744e115583f6c1a68a224750",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2908,7 +2716,7 @@
     "command": "$assignment",
     "statementSHA256": "ffd4c2588e960687e8be3db328048a0dcb944a9c1426e6afaafafef832109740",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2916,7 +2724,7 @@
     "command": "[",
     "statementSHA256": "50b89f8af205b68cf50a606470fdea48d51311de3bf807c03fe8aca0b92ef7c1",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2924,7 +2732,7 @@
     "command": "$assignment",
     "statementSHA256": "50b89f8af205b68cf50a606470fdea48d51311de3bf807c03fe8aca0b92ef7c1",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2932,7 +2740,7 @@
     "command": "awk",
     "statementSHA256": "dabc56d53c8b4b869174d2673fb6759252ac3f41af4529dd558943edda60a0b7",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2940,7 +2748,7 @@
     "command": "[",
     "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2948,7 +2756,7 @@
     "command": "echo",
     "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2956,7 +2764,7 @@
     "command": "exit",
     "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2964,7 +2772,7 @@
     "command": "echo",
     "statementSHA256": "aa9a819f2f2977ec77ec813b0fa8b8ab2b753db0eb369df762eb7bb9010892a8",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2972,7 +2780,7 @@
     "command": "benchstat",
     "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2980,7 +2788,7 @@
     "command": "awk",
     "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2988,7 +2796,7 @@
     "command": "exit",
     "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -2996,7 +2804,7 @@
     "command": "[",
     "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3004,7 +2812,7 @@
     "command": "awk",
     "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3012,7 +2820,7 @@
     "command": "exit",
     "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3020,7 +2828,7 @@
     "command": "awk",
     "statementSHA256": "8c1c7655a9bddd70fe48d0aef7fd3bcb7cd34152622e7355e07f7e042a5d9197",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3028,7 +2836,7 @@
     "command": "echo",
     "statementSHA256": "6ea234c2788bcc4ba388da39084e63ae28c829e83006b91554859019723f2c07",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3036,7 +2844,7 @@
     "command": "cp",
     "statementSHA256": "ecf28d9064234b3ad9daccf68db49f1f91c65c21c2ac8f1dae3c06b65132d9d8",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3044,7 +2852,7 @@
     "command": "echo",
     "statementSHA256": "175ed3056dc0639f05e3a0de9d2616f294cfadefd6089f69cbac1dffbd6490dd",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   },
   {
@@ -3052,7 +2860,7 @@
     "command": "exit",
     "statementSHA256": "1a21be8bb1dc4721d30cc1850ead617faa55ae9aebf416da4369668bdeaf0824",
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "staged",
+    "state": "active",
     "rationale": "Focused frozen benchmark repair command."
   }
 ]
