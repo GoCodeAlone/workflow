@@ -72,7 +72,7 @@ func TestM2MManagedProtectedClaimsAndSignature(t *testing.T) {
 			t.Fatalf("protected claim mismatch: %s", name)
 		}
 	}
-	if c["role"] != nil || len(c) != 11 || c["jti"] == "" || token.Header["kid"] != m.name+"-key" {
+	if c["role"] != nil || len(c) != 11 || c["jti"] == "" || token.Header["kid"] != jwkThumbprint(m.publicKey) {
 		t.Fatal("unexpected claim inheritance or missing token identity")
 	}
 	second, err := m.IssueManagedToken(context.Background(), r)
@@ -246,8 +246,14 @@ func TestM2MManagedHTTPHandlersDenied(t *testing.T) {
 		var keys struct {
 			Keys []map[string]any `json:"keys"`
 		}
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &keys) != nil || len(keys.Keys) != 1 || keys.Keys[0]["kid"] != m.name+"-key" {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &keys) != nil || len(keys.Keys) != 1 || keys.Keys[0]["kid"] != jwkThumbprint(m.publicKey) {
 			t.Fatal("managed JWKS unavailable or key ID mismatched")
+		}
+		m.SetManagedOnly(false)
+		w = httptest.NewRecorder()
+		m.Handle(w, httptest.NewRequest(http.MethodGet, "/api/v1"+ep.JWKS, nil))
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &keys) != nil || len(keys.Keys) != 1 || keys.Keys[0]["kid"] != m.name+"-key" {
+			t.Fatal("legacy JWKS key ID changed")
 		}
 	}
 }

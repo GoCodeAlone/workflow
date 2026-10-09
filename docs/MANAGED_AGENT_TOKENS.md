@@ -38,8 +38,9 @@ audiences must be separately approved and compared exactly.
 The signer fixes `iss`, `sub`, `aud`, `iat`, `exp`, an internally generated random
 `jti`, `token_use=agent_access`, `grant_id`, `grant_version`, `tenant_id` and the
 space-separated `scope`. There is no arbitrary extra-claim map or inheritance
-from legacy registered clients. ES256 uses the same public key ID as this module's
-JWKS. Errors do not echo caller claims or key material.
+from legacy registered clients. Managed ES256 tokens and their JWKS both use the
+public key's RFC 7638 JWK thumbprint as `kid`; legacy JWKS IDs are unchanged.
+Errors do not echo caller claims or key material.
 
 Managed-only mode denies the generic token, revoke and introspection HTTP
 handlers with 403 before parsing their inputs, for default or custom endpoint

@@ -574,7 +574,14 @@ func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	jwk, err := ecPublicKeyToJWK(m.publicKey, m.name+"-key")
+	m.mu.RLock()
+	managedOnly := m.managedOnly
+	m.mu.RUnlock()
+	keyID := m.name + "-key"
+	if managedOnly {
+		keyID = jwkThumbprint(m.publicKey)
+	}
+	jwk, err := ecPublicKeyToJWK(m.publicKey, keyID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(oauthError("server_error", "failed to generate JWK for ES256 public key"))

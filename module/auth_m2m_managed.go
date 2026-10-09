@@ -70,10 +70,14 @@ func (m *M2MAuthModule) IssueManagedToken(ctx context.Context, request ManagedTo
 	}
 	m.mu.RLock()
 	key, publicKey := m.privateKey, m.publicKey
-	issuer, keyID := m.issuer, m.name+"-key"
+	issuer := m.issuer
 	configured := m.managedOnly && m.ecdsaKeyConfigured && m.algorithm == SigningAlgES256 && m.initErr == nil
 	m.mu.RUnlock()
 	if !configured || key == nil || publicKey == nil || key.Curve != elliptic.P256() || publicKey.Curve != elliptic.P256() || !key.PublicKey.Equal(publicKey) || !managedHTTPSURL(issuer) {
+		return "", ErrManagedTokenConfiguration
+	}
+	keyID := jwkThumbprint(publicKey)
+	if keyID == "" {
 		return "", ErrManagedTokenConfiguration
 	}
 	now := time.Now().UTC()
