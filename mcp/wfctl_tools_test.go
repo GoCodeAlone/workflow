@@ -870,8 +870,8 @@ func assertMCPWorkflowGoVersion(t *testing.T, content string) {
 		for _, step := range job.Steps {
 			if strings.HasPrefix(step.Uses, "actions/setup-go@") {
 				found = true
-				if step.With.GoVersion != "1.27.1" {
-					t.Errorf("MCP job %s Go version = %q, want 1.27.1", jobName, step.With.GoVersion)
+				if step.With.GoVersion != "1.27.2" {
+					t.Errorf("MCP job %s Go version = %q, want 1.27.2", jobName, step.With.GoVersion)
 				}
 			}
 		}

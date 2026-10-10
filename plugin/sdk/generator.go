@@ -16,8 +16,8 @@ type TemplateGenerator struct{}
 const (
 	workflowReleasedVersion        = "v0.18.15"
 	workflowStrictContractsVersion = "v0.19.0-alpha.5"
-	workflowMinimumGoVersion       = "1.27.1"
-	defaultPluginGoVersion         = "1.27.1"
+	workflowMinimumGoVersion       = "1.27.2"
+	defaultPluginGoVersion         = "1.27.2"
 	pluginManifestVersionSentinel  = "0.0.0"
 )
 

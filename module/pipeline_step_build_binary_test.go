@@ -59,8 +59,8 @@ func TestBuildBinaryStep_Defaults(t *testing.T) {
 	if s.modulePath != "app" {
 		t.Errorf("expected default module_path %q, got %q", "app", s.modulePath)
 	}
-	if s.goVersion != "1.27.1" {
-		t.Errorf("expected default go_version %q, got %q", "1.27.1", s.goVersion)
+	if s.goVersion != "1.27.2" {
+		t.Errorf("expected default go_version %q, got %q", "1.27.2", s.goVersion)
 	}
 	if !s.embedConfig {
 		t.Error("expected embed_config to default to true")
@@ -73,8 +73,8 @@ func TestBuildBinaryStep_DryRun_GoVersions(t *testing.T) {
 		goVersion *string
 		want      string
 	}{
-		{name: "omitted", want: "1.27.1"},
-		{name: "empty", goVersion: new(""), want: "1.27.1"},
+		{name: "omitted", want: "1.27.2"},
+		{name: "empty", goVersion: new(""), want: "1.27.2"},
 		{name: "explicit-older", goVersion: new("1.22"), want: "1.22"},
 		{name: "explicit-patch", goVersion: new("1.26.5"), want: "1.26.5"},
 	} {

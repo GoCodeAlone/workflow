@@ -535,8 +535,8 @@ func TestInitTemplatesIncludeGithubWorkflows(t *testing.T) {
 			if mod.Go == nil {
 				t.Fatal("generated go.mod has no Go directive")
 			}
-			if mod.Go.Version != "1.27.1" {
-				t.Errorf("generated go.mod Go version = %q, want 1.27.1", mod.Go.Version)
+			if mod.Go.Version != "1.27.2" {
+				t.Errorf("generated go.mod Go version = %q, want 1.27.2", mod.Go.Version)
 			}
 
 			if tc.goBuilder != "" {
@@ -606,7 +606,7 @@ func TestInitTemplatesIncludeGithubWorkflows(t *testing.T) {
 				if err != nil {
 					t.Fatalf("read generated Dockerfile: %v", err)
 				}
-				want := "FROM golang:1.27.1-alpine AS " + tc.goBuilder
+				want := "FROM golang:1.27.2-alpine AS " + tc.goBuilder
 				if !strings.Contains(dockerfile, want) {
 					t.Errorf("generated Dockerfile missing %q", want)
 				}
@@ -614,8 +614,8 @@ func TestInitTemplatesIncludeGithubWorkflows(t *testing.T) {
 				if err != nil {
 					t.Fatalf("read generated README.md: %v", err)
 				}
-				if !strings.Contains(readme, "- Go 1.27.1+") {
-					t.Error("generated README.md missing Go 1.27.1+ prerequisite")
+				if !strings.Contains(readme, "- Go 1.27.2+") {
+					t.Error("generated README.md missing Go 1.27.2+ prerequisite")
 				}
 			}
 		})
@@ -698,8 +698,8 @@ func assertGeneratedWorkflowGoVersion(t *testing.T, data []byte) {
 		for _, step := range job.Steps {
 			if strings.HasPrefix(step.Uses, "actions/setup-go@") {
 				found = true
-				if got := step.With["go-version"]; got != "1.27.1" {
-					t.Errorf("job %s setup-go version = %q, want 1.27.1", name, got)
+				if got := step.With["go-version"]; got != "1.27.2" {
+					t.Errorf("job %s setup-go version = %q, want 1.27.2", name, got)
 				}
 			}
 		}

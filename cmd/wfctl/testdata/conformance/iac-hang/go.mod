@@ -1,3 +1,3 @@
 module example.com/iac-hang
 
-go 1.27.1
+go 1.27.2

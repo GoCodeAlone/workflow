@@ -30,7 +30,7 @@ The workflow engine is a Go binary with an embedded React UI. Building requires 
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.27.1+ | Server binary |
+| Go | 1.27.2+ | Server binary |
 | Node.js | 18+ | UI build |
 | Docker | 24+ | Container builds (optional) |
 | golangci-lint | latest | Go linting (development) |
@@ -70,7 +70,7 @@ docker build -t workflow .
 
 The three stages are:
 1. **node:22-alpine** -- `npm ci` and `npx vite build` for the UI
-2. **golang:1.27.1-alpine** -- `go mod download`, copy UI assets, `go build`
+2. **golang:1.27.2-alpine** -- `go mod download`, copy UI assets, `go build`
 3. **alpine:3.21** -- copies only the binary, adds CA certs and tzdata, runs as non-root (UID 65532)
 
 Final image size is approximately 30MB.

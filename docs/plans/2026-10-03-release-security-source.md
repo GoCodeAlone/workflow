@@ -284,3 +284,16 @@ Three tasks/one existing PR retained; verify the unchanged manifest hash.
 Rate-fixture inline alignment PASS: observed real cold failure -> Task2/S4
 full-suite acceptance; test-only owning file and RED/GREEN/reversal -> same
 runtime proof, no new API, task, PR, timeout or protected-file ownership.
+
+### Observed Overlay-Control Backport
+
+Task2/S4 already owns `cmd/wfctl/fixture_build_artifacts_contract_test.go`.
+The native Go1.27.2 race run failed only its real-overlay mutation case:
+Darwin logical /var source paths did not match Go's physical /private/var
+working directory. Matched raw-Go controls exclude the fixture cache and
+prove both requested asset values with a canonical source key. Resolve only
+that overlay source key with `filepath.EvalSymlinks`; preserve the raw command,
+both output assertions and exact2-build/0-hit/2-bypass counts. Retain the actual
+RED and causal receipt, then rerun the real-overlay and all fixture controls
+with the same compiler/race/deadlines. Final Linux/runtime/CI gates remain due.
+Three tasks/one PR, owning files, protected exclusions and scope lock unchanged.

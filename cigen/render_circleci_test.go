@@ -90,7 +90,7 @@ func TestRenderCircleCI_GoVersionImages(t *testing.T) {
 			if len(job.Docker) != 1 {
 				t.Fatalf("job %s has %d Docker images, want 1", name, len(job.Docker))
 			}
-			want := "cimg/go:1.27.1"
+			want := "cimg/go:1.27.2"
 			if name == "smoke" {
 				want = "cimg/base:current"
 			}

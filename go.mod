@@ -1,6 +1,6 @@
 module github.com/GoCodeAlone/workflow
 
-go 1.27.1
+go 1.27.2
 
 require (
 	charm.land/bubbles/v2 v2.1.1
@@ -253,7 +253,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
 	golang.org/x/arch v0.28.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect

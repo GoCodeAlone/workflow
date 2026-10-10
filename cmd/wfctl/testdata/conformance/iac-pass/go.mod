@@ -1,6 +1,6 @@
 module example.com/iac-pass
 
-go 1.27.1
+go 1.27.2
 
 require github.com/GoCodeAlone/workflow v0.0.0
 
@@ -29,7 +29,7 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect

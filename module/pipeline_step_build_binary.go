@@ -68,7 +68,7 @@ func NewBuildBinaryStepFactory() StepFactory {
 
 		goVersion, _ := config["go_version"].(string)
 		if goVersion == "" {
-			goVersion = "1.27.1"
+			goVersion = "1.27.2"
 		}
 
 		dryRun, _ := config["dry_run"].(bool)

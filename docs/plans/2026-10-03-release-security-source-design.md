@@ -423,3 +423,20 @@ Task2's inherited compiler-host inventory names
 moves1.27.1→1.27.2, preserving deliberate older-version controls. The inherited
 public-policy document describes separately protected bridge pins and remains
 outside the source/generated-default patch. No1.27.2 proof is claimed here.
+
+### Backport 2026-10-10: Match Physical Overlay Source Paths
+
+The real native Go1.27.2 fixture/cache/host run passed wfctl/SDK/composite/
+cleanup and every other control, but its inherited overlay case returned the
+original embedded asset. A matched raw-Go control changed only the overlay
+source key: logical /var kept the original value; physical /private/var
+returned both requested mutations. This proves a Darwin path-alias fixture
+defect, not cached-byte reuse or an accepted Go overlay bypass.
+
+Task2/S4 corrects only the source key in already-owned
+`cmd/wfctl/fixture_build_artifacts_contract_test.go` with `filepath.EvalSymlinks`.
+Keep command/environment, two actual output assertions and2-build/0-hit/
+2-bypass counts unchanged. Retain native RED/causal evidence and require
+focused race GREEN plus all fixture controls; final frozen Linux/full runtime/
+scanner/UI/CI gates remain mandatory. No cache/production behavior, task/PR
+count, protected ownership or deadline change.
