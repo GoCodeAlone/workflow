@@ -20,6 +20,7 @@ import (
 var pipelineRecordHostSourceCache pipelineRecordHostCache
 
 type pipelineRecordHostCacheKey struct {
+	fingerprint  string
 	directory    string
 	compiler     string
 	compilerInfo os.FileInfo
@@ -73,7 +74,7 @@ func pipelineRecordHostCacheKeyForCommand(cmd *exec.Cmd) (pipelineRecordHostCach
 }
 
 func (key pipelineRecordHostCacheKey) matches(other pipelineRecordHostCacheKey) bool {
-	return key.directory == other.directory && key.compiler == other.compiler && key.digest == other.digest &&
+	return key.fingerprint == other.fingerprint && key.directory == other.directory && key.compiler == other.compiler && key.digest == other.digest &&
 		os.SameFile(key.compilerInfo, other.compilerInfo) && key.compilerInfo.Mode() == other.compilerInfo.Mode() &&
 		key.compilerInfo.ModTime().Equal(other.compilerInfo.ModTime()) && slices.Equal(key.environment, other.environment)
 }
@@ -84,6 +85,40 @@ type pipelineRecordHostCache struct {
 	directory string
 	load      func() (string, error)
 	closed    bool
+}
+
+// Actual source requests retain the accepted fixture input guard. Unclosed
+// inputs use the original command directly, without entering either cache.
+func (cache *pipelineRecordHostCache) buildCommand(ctx context.Context, cmd *exec.Cmd, sourceRoot, output string, run func(*exec.Cmd) ([]byte, error)) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	fingerprint, outputIndex, err := fixtureBuildKey(ctx, cmd, sourceRoot)
+	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return run(cmd)
+	}
+	key, err := pipelineRecordHostCacheKeyForCommand(cmd)
+	if err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return run(cmd)
+	}
+	key.fingerprint = fingerprint
+	var data []byte
+	err = cache.build(ctx, key, output, func(destination string) error {
+		args := cmd.Args
+		cmd.Args = slices.Clone(args)
+		cmd.Args[outputIndex] = destination
+		defer func() { cmd.Args = args }()
+		var err error
+		data, err = run(cmd)
+		return err
+	})
+	return data, err
 }
 
 func (cache *pipelineRecordHostCache) build(ctx context.Context, key pipelineRecordHostCacheKey, output string, build func(string) error) error {
@@ -127,7 +162,7 @@ func (cache *pipelineRecordHostCache) build(ctx context.Context, key pipelineRec
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return copyPipelineRecordHostFile(binary, output)
+	return copyFixtureBuildBinary(ctx, binary, output)
 }
 
 func (cache *pipelineRecordHostCache) close() error {
@@ -138,20 +173,6 @@ func (cache *pipelineRecordHostCache) close() error {
 		return nil
 	}
 	return os.RemoveAll(cache.directory)
-}
-
-func copyPipelineRecordHostFile(source, destination string) error {
-	input, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0700)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(output, input)
-	return errors.Join(copyErr, output.Chmod(0700), output.Close())
 }
 
 func pipelineRecordHostCacheFixture(t *testing.T) (*exec.Cmd, string) {

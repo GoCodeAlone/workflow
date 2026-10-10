@@ -1,9 +1,19 @@
 {
-  "version": 1,
   "bundles": [
     {
-      "state": "active",
       "files": [
+        {
+          "path": ".github/workflows/policytool/adoptionguard/main.go",
+          "sha256": "7854ccaa9593bc5d64eb93db78ec1bdd6b36d61b545bada95df34ce542f2002a"
+        },
+        {
+          "path": ".github/workflows/policytool/adoptionguard/main_test.go",
+          "sha256": "f4220c8924a6feb96d124c06032cdced62342fe39165f8a0e96f6b2b397e7f17"
+        },
+        {
+          "path": ".github/workflows/policytool/adoptionguard/run.sh",
+          "sha256": "b5597c106885bdc9b1f7161f7c6a1635d92f5f9273c41ec799233d68d6dbf3e4"
+        },
         {
           "path": ".github/workflows/policytool/go.mod",
           "sha256": "0a2d135980310757f36e733161b94498b4e0a1b6ac8c6de8a799f542d6c9ddb8"
@@ -144,7 +154,9 @@
           "path": "scripts/test-check-public-workflow-policy.sh",
           "sha256": "7d209bb35ff3a7a46b22f9a10a920eb30218c3403726d1dac72e0bffd1d914a4"
         }
-      ]
+      ],
+      "state": "active"
     }
-  ]
+  ],
+  "version": 1
 }

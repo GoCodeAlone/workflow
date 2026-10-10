@@ -54,12 +54,6 @@
     "presence": "present"
   },
   {
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
-    "state": "active",
-    "presence": "present"
-  },
-  {
     "path": ".github/workflows/release.yml",
     "contextSHA256": "7e6b8738cb89f1af132d306880423405b06b7eb3e71bb0cb65b627c88fbf95f3",
     "state": "active",
@@ -114,6 +108,18 @@
   {
     "path": ".github/workflows/cross-plugin-build-test.yml",
     "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
+    "state": "staged",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
+    "state": "active",
+    "presence": "present"
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
     "state": "staged",
     "presence": "present"
   }

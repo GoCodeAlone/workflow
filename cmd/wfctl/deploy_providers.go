@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -82,16 +81,8 @@ var resolveIaCProvider = discoverAndLoadIaCProvider
 // same seam pattern used by currentApplyIncludeFlag and applyAllowReplaceSet.
 var currentInfraPluginDir string
 
-// iacPluginManifest is the minimal shape needed to read both:
-//   - capabilities.iacProvider.name — used by findIaCPluginDir to
-//     match a plugin to a desired provider name; AND
-//   - iacProvider.computePlanVersion — used by W-3b T3.7 to decide
-//     between v1 (legacy provider.Apply) and v2
-//     (wfctlhelpers.ApplyPlan) dispatch at apply time.
-//
-// Both fields are unmarshaled from the same plugin.json bytes — no
-// double parse — and either may be empty without affecting the
-// other.
+// iacPluginManifest remains the legacy metadata shape consumed by the
+// generator. Provider selection uses checked, normalized manifests below.
 type iacPluginManifest struct {
 	Name         string `json:"name"`
 	Version      string `json:"version"`
@@ -106,7 +97,8 @@ type iacPluginManifest struct {
 }
 
 // findIaCPluginDir scans pluginDir subdirectories for a plugin.json that
-// declares capabilities.iacProvider.name == providerName.
+// declares the selected IaC provider, using the same checked/normalized
+// metadata as resource discovery.
 // Returns ("", "", false, nil) when not found; ("name", "computePlanVersion",
 // true/false, nil) when the manifest matches (hasBinary indicates whether
 // the executable is present).
@@ -129,29 +121,16 @@ type iacPluginManifest struct {
 // MUST NOT assume. Per workflow#699, the authoritative gate is the
 // typed CapabilitiesResponse check in discoverAndLoadIaCProvider.
 func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion string, hasBinary bool, err error) {
-	entries, err := os.ReadDir(pluginDir)
+	catalog, err := scanInstalledIaCProviders(pluginDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", "", false, nil
-		}
-		return "", "", false, fmt.Errorf("scan plugin directory %q: %w", pluginDir, err)
+		return "", "", false, err
 	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pluginName := entry.Name()
-		data, readErr := os.ReadFile(filepath.Join(pluginDir, pluginName, "plugin.json"))
-		if readErr != nil {
-			continue
-		}
-		var m iacPluginManifest
-		if jsonErr := json.Unmarshal(data, &m); jsonErr != nil {
-			continue
-		}
-		if m.Capabilities.IaCProvider.Name != providerName {
-			continue
-		}
+	selected, found, err := catalog.selectOwner(providerName)
+	if err != nil {
+		return "", "", false, err
+	}
+	if found {
+		pluginName := selected.directory
 		// Per workflow#693 (Phase 2.1 follow-up to #640): validate
 		// iacProvider.computePlanVersion ∈ {"", "v1", "v2"} on the
 		// matching plugin manifest. A typo (e.g. "V2", "v2.0", "two")
@@ -161,18 +140,18 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 		// is the typed CapabilitiesResponse gate in
 		// discoverAndLoadIaCProvider; this parse-time check is the
 		// pre-load schema sanity (defense-in-depth).
-		switch m.IaCProvider.ComputePlanVersion {
+		switch selected.capability.ComputePlanVersion {
 		case "", "v1", "v2":
 			// valid
 		default:
 			return "", "", false, fmt.Errorf(
 				"plugin %q manifest has invalid iacProvider.computePlanVersion %q (must be \"\", \"v1\", or \"v2\")",
-				pluginName, m.IaCProvider.ComputePlanVersion,
+				pluginName, selected.capability.ComputePlanVersion,
 			)
 		}
 		binaryPath := filepath.Join(pluginDir, pluginName, pluginName)
 		_, statErr := os.Stat(binaryPath)
-		return pluginName, m.IaCProvider.ComputePlanVersion, statErr == nil, nil
+		return pluginName, selected.capability.ComputePlanVersion, statErr == nil, nil
 	}
 	return "", "", false, nil
 }
@@ -200,13 +179,7 @@ func findIaCPluginDir(pluginDir, providerName string) (name, computePlanVersion 
 // CapabilitiesWithContext) so a transient handshake failure does not
 // poison the adapter for the rest of the wfctl invocation.
 func discoverAndLoadIaCProvider(ctx context.Context, providerName string, cfg map[string]any) (interfaces.IaCProvider, io.Closer, error) {
-	pluginDir := currentInfraPluginDir
-	if pluginDir == "" {
-		pluginDir = os.Getenv("WFCTL_PLUGIN_DIR")
-	}
-	if pluginDir == "" {
-		pluginDir = "./data/plugins"
-	}
+	pluginDir := infraPluginDirectory()
 
 	pName, manifestCPV, hasBinary, findErr := findIaCPluginDir(pluginDir, providerName)
 	if findErr != nil {

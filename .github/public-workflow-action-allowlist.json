@@ -432,22 +432,6 @@
     "rationale": "Pinned ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d for reviewed pre-release.yml automation."
   },
   {
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-    "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
-    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
-    "state": "active",
-    "rationale": "Pinned actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 for reviewed public-workflow-policy.yml automation."
-  },
-  {
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",
-    "nodeSHA256": "3c2f0c49ba03bc87e0aeebcd40257f3285d9b3e4a0b79982f795d6bfd5117bf9",
-    "contextSHA256": "b0ff9f7b4bc11ccbc2dd40df7973867b7a1ee237cf2d5bae95b0e6c3251ea233",
-    "state": "active",
-    "rationale": "Pinned actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff for reviewed public-workflow-policy.yml automation."
-  },
-  {
     "path": ".github/workflows/release.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "3349aa71987f307abdb6a6e8d8de5e2bfb551aafaf23c183d6bf045e2d91c7b4",
@@ -670,5 +654,85 @@
     "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
     "state": "staged",
     "rationale": "Pinned action for reviewed credential-free contract wire validation."
+  },
+  {
+    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
+    "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
+    "state": "active",
+    "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+  },
+  {
+    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
+    "nodeSHA256": "65d08e860e0e0ba32c867339a375a514ee8887326bb4cff3543aec359932ac1a",
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
+    "state": "active",
+    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
+  },
+  {
+    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
+    "nodeSHA256": "a280f2ecccaed15b220dc27221b587c4285d6fad210ce7683db38a5eaa555cb4",
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
+    "state": "active",
+    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "c0d85fe8f94bd2187fb4d2a57310b75cf4561a018bc15a11b5fbea0baa13f07a",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+    "nodeSHA256": "d6511486d7f0d7044978b8c71828add2508e72a9897718b7a91fdf151ffb3c49",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae",
+    "nodeSHA256": "75285419b94ac7c3e82c6bcdff625ac1aab862ff09465c03b7f67b5f68a187f2",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+    "nodeSHA256": "b1570fa9a4d99988920c8c534c481885469c1dfaca2327d7c088e35dadb1a568",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae",
+    "nodeSHA256": "89a251c63db3bcac9145c65adeb9dddd48afdd5c8cb13a9ad5ae16a3cd3f526f",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "1405962dcbf154f33a16a10fef5272ba0a865f20dfe11358a522e310e29dab1c",
+    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
+    "state": "staged",
+    "rationale": "Focused frozen benchmark repair action."
   }
 ]

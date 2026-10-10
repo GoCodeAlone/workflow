@@ -47,6 +47,16 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 
 Requirements: S3, S4. Files: modify `cmd/wfctl/pipeline_record_host_test.go`, `cmd/wfctl/main_test.go`; create portable `cmd/wfctl/pipeline_record_host_cache_test.go`.
 
+**Accepted-main integration backport (ADR0063):** retain the source race-host
+cache and every existing case. Actual requests use accepted `fixtureBuildKey`
+to include effective Go config, selected compiler/tools and source contents in
+identity; external/unclosed inputs execute the original command unchanged.
+Use accepted context-aware exclusive copy for cache delivery. Add integrated
+source-dispatch controls in the existing host-test owner. Both process caches
+close after `m.Run()`, even if one fails. Accepted SDK/Docker cache callers and
+the relocated linked-version test remain inherited baseline, not new scope.
+All runtime, timeout and final exact-head proof gates below remain mandatory.
+
 1. Add local-cache tests for one build across repeated identical requests, distinct copied mode-0700 destinations, changed cwd/compiler/environment fallback, failure propagation, lazy initialization and owned-directory removal. Inject build operation only in helper unit tests; sentinel bytes are not runtime proof. Run `GOWORK=off GOTOOLCHAIN=go1.26.8 go test ./cmd/wfctl -run '^TestPipelineRecordHostCache' -count=1`; expected new tests fail before helper exists.
 2. Implement a synchronized lazy process-owned cache only for source target `.` with `race=true`. Key exact cwd, resolved compiler identity and complete effective build environment. Error/cancellation never supplies a binary. For any differing key, retain original independent build. Never cache explicit downloaded-host selection, including invalid selections; existing denial branch remains first. Do not build eagerly in TestMain.
 3. Copy cached bytes to each caller's existing isolated destination with 0700 mode. Remove only the owned cache after `m.Run()` and before `os.Exit`; preserve private-child dispatch. Cache helper must compile on Windows. No test parallelism/global environment mutations added.
@@ -76,6 +86,11 @@ version overrides and unrelated dependency/checksum versions stay unchanged.
 3. Update root/example/eleven fixture Go floors and every already-owned
    generated/source-host/default/container pin1.27.1→1.27.2. Update x/net0.58→
    0.60 in root/example and ten linked fixture graphs; iac-hang has no x/net.
+   The inherited `cmd/wfctl/fixture_build_artifacts_contract_test.go` compiler
+   control also moves its normal GOTOOLCHAIN1.27.1 pin to1.27.2; retain its
+   deliberate older source-floor/compiler-variant controls. The inherited
+   public-policy documentation describes its separate protected bridge and
+   is not a generated/source default owner.
    Retain OTel1.45 and existing crypto/sys/text/term versions unless native
    targeted tidy requires a documented compatible companion correction.
 4. With GOWORK=off/GOTOOLCHAIN=go1.27.2, authenticated native targeted module

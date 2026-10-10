@@ -32,6 +32,12 @@ tags; catalog existence is not actual image/compiler/runtime acceptance.
 Integrate accepted main without a force-push; preserve its source-map-js1.2.2
 fix. Source-only protected-byte comparison uses the recorded integration base;
 historical49e18034 proof is retained rather than misapplied to newer main.
+Retain Task1's source race-host cache and all cases, composing its actual
+requests with accepted main's effective compiler/config/source fingerprint
+and context-aware exclusive copy. Unclosed inputs bypass directly to the
+unchanged command. Accepted SDK/Docker cache callers are inherited baseline,
+not new source-PR reuse. Preserve both process-cache cleanups and the relocated
+linked-version regression; no nested cache or weakened deadline.
 
 Protected CI/scripts/policytool remain outside this source PR. Their separate
 governed rollout must supply compatible accepted CI/release wiring. Existing

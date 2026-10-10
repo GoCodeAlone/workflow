@@ -166,15 +166,16 @@ func applyInfraModules(ctx context.Context, cfgFile, envName string) (map[string
 		return nil, fmt.Errorf("parse infra resource specs: %w", err)
 	}
 
-	// Keep only infra.* specs for the direct path.
+	// The parser already classified custom specs against their selected
+	// provider. Only legacy platform.* specs belong to the pipeline path.
 	var infraSpecs []interfaces.ResourceSpec
 	for _, s := range specs {
-		if strings.HasPrefix(s.Type, "infra.") {
+		if !strings.HasPrefix(s.Type, "platform.") {
 			infraSpecs = append(infraSpecs, s)
 		}
 	}
 	if len(infraSpecs) == 0 {
-		fmt.Println("No infra.* modules to apply.")
+		fmt.Println("No direct IaC resources to apply.")
 		return nil, nil
 	}
 	if err := validateUniqueInfraResourceNames(infraSpecs); err != nil {

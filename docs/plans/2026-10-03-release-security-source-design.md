@@ -398,3 +398,28 @@ inside this source manifest. Source3tasks/1PR grouping retained; re-lock after
 independent amendment review and structural alignment PASS.
 
 See `decisions/0063-source-go1272-http2-security.md`.
+
+### Backport 2026-10-10: Preserve Accepted Fixture Input Guards
+
+Accepted main2fcb9baf already owns reusable SDK/Docker fixture callers, a full
+effective Go/config/compiler/tool/source fingerprint, cancellation-aware
+exclusive copy, process teardown and the relocated linked-version regression.
+Retaining the older source cache alone would bypass those accepted guards.
+
+Task1 keeps its source `.`+race cache, sticky failure/lazy/private-copy cases
+and independent changed-input build semantics. Its actual request path first
+uses accepted `fixtureBuildKey`; the full fingerprint joins cache identity.
+Unclosed or failed input-key resolution uses the unchanged raw command, never
+another cache. Cached delivery uses accepted context-aware exclusive copy.
+Integrated source-dispatch controls cover fingerprint changes and native/
+GOENV bypass; helper sentinels remain distinct from real runtime acceptance.
+Attempt both process-cache cleanups after `m.Run()` and fail on either error.
+The accepted integration version test retains empty stdout, preceding stderr
+diagnostics and final v9.9.9; remove only its duplicate package-main copy.
+No new cache kind, SDK/Docker opt-in, task/PR count change, deadline increase or
+protected-file source change. Final frozen runtime/CI gates remain mandatory.
+Task2's inherited compiler-host inventory names
+`cmd/wfctl/fixture_build_artifacts_contract_test.go`: its normal GOTOOLCHAIN pin
+moves1.27.1→1.27.2, preserving deliberate older-version controls. The inherited
+public-policy document describes separately protected bridge pins and remains
+outside the source/generated-default patch. No1.27.2 proof is claimed here.

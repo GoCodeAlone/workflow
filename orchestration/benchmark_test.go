@@ -3,6 +3,8 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +13,7 @@ import (
 // BenchmarkSagaConcurrent measures saga throughput under concurrent load.
 // Target: 100 concurrent sagas (from PLATFORM_ROADMAP.md Phase 4).
 func BenchmarkSagaConcurrent(b *testing.B) {
-	coord := NewCoordinator(nil)
+	coord := NewCoordinator(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	b.ReportAllocs()
 	b.ResetTimer()

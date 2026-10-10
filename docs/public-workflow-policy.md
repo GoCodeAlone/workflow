@@ -1,15 +1,35 @@
 # Public workflow policy
 
 Public workflow changes are checked by `.github/workflows/public-workflow-policy.yml`.
-The `pull_request_target` job executes only SHA-pinned actions and the analyzer,
-wrapper, module, and trust manifests from the trusted base checkout. Candidate
-data is fetched without credentials from a validated `https://github.com`
-repository and exact 40-hex commit, exported with
-`git archive --worktree-attributes` so candidate attributes cannot hide files,
-and rejected if it contains symlinks. No candidate Git worktree is checked out,
-credentials are not persisted, and candidate actions, scripts, Go files,
-modules, and trust
-manifests are never executed.
+On the normal trusted-scan path, the `pull_request_target` job executes only
+SHA-pinned actions and the analyzer, wrapper, module, and trust manifests from
+the trusted base checkout. Candidate data is fetched without credentials from
+a validated `https://github.com` repository and exact 40-hex commit, exported
+with `git archive --worktree-attributes` so candidate attributes cannot hide
+files, and rejected if it contains symlinks. No candidate Git worktree is
+checked out, credentials are not persisted, and candidate actions or code
+outside the exact exception below are never executed.
+The `pull_request_target` and `push` triggers are filtered to `main`, and
+candidate fetch rechecks the runtime event name, base ref, and full event ref
+before any policy toolchain or scanner runs. Pull requests targeting other
+branches do not trigger this workflow; a mismatched runtime context exits
+before policy setup.
+
+Outside the one-time historical bootstrap described below, the sole exact
+pre-staged adoption exception is fail-closed: candidate wrapper, analyzer, and
+module code may execute only after the already-active trusted adoption guard
+authorizes the exact active-to-staged authority delta and complete wrapper
+digest replacement, plus complete mutation-harness digest replacement when
+that fixed harness changes in the staged bundle. If that guard fails, candidate
+policy code remains inert.
+The workflow reaches that guard only through the executable, hash-inventoried
+trusted launcher at
+`.github/workflows/policytool/adoptionguard/run.sh`; the launcher locates its
+own trusted policytool directory and forces `GOWORK=off` and
+`GOFLAGS=-mod=readonly`. Candidate code never authorizes itself.
+Both trusted and authorized-candidate setup steps pin Go 1.27.1 with caching
+disabled. The isolated policy module retains its Go 1.26.5 minimum; that module
+floor is not the compiler selected by the workflow.
 The job has only `contents: read`, uses GitHub-hosted runners, and receives no
 cloud credentials or OIDC authority.
 Every public workflow, regardless of trigger or call graph, rejects every named
@@ -62,12 +82,63 @@ as transition data.
 3. After adoption merges, promote the realized staged bundle to the sole
    active bundle.
 
+The public workflow has a fail-closed adoption bridge for the second step. It
+always runs the trusted default-branch scanner first. A successful trusted scan
+ends policy evaluation without touching candidate policy code. Only when that
+scan fails may the already-active, hash-inventoried adoption guard inspect the
+two inert repository trees. The guard requires byte-identical authority
+manifests, a realized active base inventory, a realized staged candidate
+inventory, an unchanged active public workflow and guard, unchanged trust
+inputs, and an exact tree delta limited to active-to-staged authority files plus
+the executable allowlist. Every existing policy-wrapper row must retain its
+key, order, cardinality, state, context, and rationale while changing exactly from the
+active wrapper digest to the staged wrapper digest.
+Only `scripts/test-check-public-workflow-policy.sh` may also change executable
+pins, and only when its active and staged bundle digests differ. That change
+requires at least one existing harness row and updates every existing active
+and unused staged harness row exactly from the active digest to the staged
+digest, preserving order, membership, cardinality, and metadata. An unchanged
+harness forbids harness pin updates; every other executable digest remains
+unchanged. This does not authorize harness execution during candidate scanning.
+Every shared base/candidate path must also retain its executable-mode identity,
+even when its content digest is staged to change. The directly invoked policy
+wrapper must be executable in both trees; content-plus-mode drift, mode-only
+drift, and a non-executable wrapper all fail closed.
+
+The guard emits its candidate-policy authorization output only after all checks
+pass. The pinned candidate `actions/setup-go` step and candidate wrapper are
+conditional on that output. A malformed manifest, partial or mixed realization,
+symlink, unrelated file, workflow/trust-input edit, executable metadata change,
+secret, OIDC, actor, self-hosted runner, provider credential, or live-provider
+command fails without emitting candidate invocation authority. The original
+pre-policy-base bootstrap remains the sole exception because no trusted guard
+exists at that historical base.
+
+This bridge does not abandon or replace an already-staged authority bundle.
+Once staged, those exact bytes must be adopted and promoted. A later governed
+policy correction will define the narrower case for correcting an unused
+staged executable digest: that transition is inert until its own
+stage/adopt/promote sequence completes, may not change membership or metadata,
+and cannot execute candidate policy while only staged. Until then, a bad staged
+digest remains a failure that must complete the reviewed correction sequence;
+it is not an implicit permission to rewrite staged authority.
+
 The analyzer rejects a bundle that is staged and adopted in one pull request,
 old implementation files after adoption or promotion, missing or extra files,
 hash mismatches, symlinks, and non-regular authority paths. The manifest uses
 strict JSON, exactly one active bundle, at most one staged bundle, and sorted,
 unique, repository-confined file rows. The one-time exact bootstrap permits
 only one fully realized active bundle.
+
+The initial bridge preserves the original mutation-harness bytes and executable
+mode. Harness lifecycle isolation and explicit fixture event-context repairs
+belong to a later separately staged, adopted, and promoted policy correction;
+the bridge does not install those repairs. Its actual-chain tests retain the
+immutable historical 35-file bootstrap inventory, then exercise the installed
+38-file guard with a benign harness byte change and complete real executable
+row replacements. They run the real original wrapper, trusted guard, and
+authorized candidate self-scan for both pull-request and push contexts, without
+executing the mutation harness or requiring Git history.
 
 The same sequence covers all changes:
 
@@ -88,9 +159,15 @@ made in the same pull request as their trust changes. Candidate trust manifests
 are parsed only as data and must match the stage/adopt/promote transition table;
 candidate-new staged rows never authorize that candidate workflow. Candidate
 checker, analyzer, test, fixture, or verifier files are likewise inventoried as
-data and must match an already-authorized bundle transition. They are never
-executed by the trusted-base job. A candidate checker replaced with a no-op and
-a same-pull-request live workflow both remain rejected by the base analyzer.
+data and must match an already-authorized bundle transition. The sole
+pre-staged adoption exception permits the candidate wrapper, analyzer, and
+module to execute only after the active trusted guard authorizes the exact
+active-to-staged authority delta and complete wrapper digest replacement, plus
+complete fixed-harness digest replacement only when its staged digest changes.
+Candidate tests, fixtures, the branch-protection verifier, and all unauthorized
+candidate code remain unconditionally inert. Candidate code never authorizes
+itself. A candidate checker replaced with a no-op and a same-pull-request live
+workflow both remain rejected by the base analyzer.
 
 The one-time bootstrap recognizes only pre-policy base commit
 `9c364dd4e6dad83808f8a87c1ba990d0132f0372`. If and only if a push reports that
