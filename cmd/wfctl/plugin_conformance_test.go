@@ -425,7 +425,11 @@ func writeTarGzFromDir(t *testing.T, srcDir, dest string) {
 		t.Fatalf("create archive: %v", err)
 	}
 	defer f.Close()
-	gw := gzip.NewWriter(f)
+	// Fixture compression need not spend the full race-test budget on release binaries.
+	gw, err := gzip.NewWriterLevel(f, gzip.BestSpeed)
+	if err != nil {
+		t.Fatalf("create fixture gzip writer: %v", err)
+	}
 	defer gw.Close()
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
@@ -474,7 +478,11 @@ func writeTarGzFiles(t *testing.T, dest string, files map[string]string) {
 		t.Fatalf("create archive: %v", err)
 	}
 	defer f.Close()
-	gw := gzip.NewWriter(f)
+	// Preserve real gzip archives while avoiding expensive default-level fixture compression.
+	gw, err := gzip.NewWriterLevel(f, gzip.BestSpeed)
+	if err != nil {
+		t.Fatalf("create fixture gzip writer: %v", err)
+	}
 	defer gw.Close()
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
