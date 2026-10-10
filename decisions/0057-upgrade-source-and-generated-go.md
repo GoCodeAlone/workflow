@@ -1,6 +1,6 @@
 # 0057. Upgrade source and generated Go together
 
-**Status:** Accepted
+**Status:** Superseded by 0063 (patch floor; generated/default scope retained)
 **Date:** 2026-10-04
 **Decision-makers:** Jon Langevin
 **Related:** ADR0056; source PR1022.

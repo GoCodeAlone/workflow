@@ -371,3 +371,30 @@ sources with affected dependency groups. Classification covers all14 discovered
 modules, distinguishing the12 without reported affected groups from the2 with
 native results; no invented analysis receipt. Exact native compiler proofs
 remain separate, including protected policytool stdlib module-only findings.
+
+### Backport 2026-10-10: HTTP/2 Patch Floor And Compute Ownership
+
+Authority: parent verified paused managed Signal successor and explicitly
+assigned this repair to Compute; ADR0063. No Signal feature/acceptance re-entry.
+Evidence: source3e62f5fa is Go1.27.1/x/net0.58.0/OTel1.45; actual consumed
+wfctl0.86.1 is Go1.26.5/x/net0.58.0. GO-2026-6611 requires Go1.27.2 and
+x/net0.60.0. Official stable Go, proxy/sumdb and Docker/CircleCI/DHI tag metadata
+verified; their existence does not substitute for native/runtime artifact proof.
+
+S1/S6→Task2: upgrade the existing source/example/eleven fixtures, compiler-host
+expectations and generated/default/container pins1.27.1→1.27.2; x/net0.58→0.60
+in owning graphs; retain OTel1.45 and all deliberate version overrides.
+S4→Task2 plus existing Tasks1/3 acceptance: native authenticated targeted tidy,
+focused literal RED/GREEN, real generated app/plugin and runtime/SDK/registry/
+Docker proof, exact-head four-command metadata, full cold Linux race/coverage,
+native scanner/called control and UI gates. Prior Go1.27.1 receipts are history.
+Task2 integration preserves accepted main's source-map-js1.2.2 repair, verified
+at2fcb9baf; source-only protected diff compares to that recorded accepted main,
+not the historical49e18034 base. Use the existing branch and a non-force merge.
+S5: protected CI/scripts/policytool remain separate; current accepted CI/release
+Go1.26.5 pins must be reconciled through the existing governed rollout before
+source merge. No failed-check bypass, settings change, release or deployment
+inside this source manifest. Source3tasks/1PR grouping retained; re-lock after
+independent amendment review and structural alignment PASS.
+
+See `decisions/0063-source-go1272-http2-security.md`.

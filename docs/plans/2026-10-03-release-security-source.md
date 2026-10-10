@@ -4,7 +4,7 @@
 
 **Goal:** Patch shipped Go/UI vulnerabilities and remove redundant record-host builds without weakening runtime evidence.
 **Architecture:** Preserve the public Workflow engine/SDK contracts and existing test cases. Patch owning module/lock resolutions; lazily reuse only identical source race-host builds in process-owned temporary custody. CI authority, scanner rollout and release promotion remain separate.
-**Tech Stack:** Go 1.27.1, golangci-lint 2.14.0, OTel 1.45.0, Node 24/npm, Vitest, real Workflow binaries, Docker, digest-pinned OSV 2.6.0.
+**Tech Stack:** Go 1.27.2, golangci-lint 2.14.0, OTel 1.45.0, Node 24/npm, Vitest, real Workflow binaries, Docker, digest-pinned OSV 2.6.0.
 **Base branch:** main (`49e1803424f303f6f98cef51cc9ea2dee96c7d38`).
 **Design:** `docs/plans/2026-10-03-release-security-source-design.md`.
 **Decisions:** `decisions/0056-isolate-source-security-remediation.md`; approved amendment `decisions/0057-upgrade-source-and-generated-go.md`.
@@ -13,6 +13,7 @@ Default-config owning-file amendment: `decisions/0059-use-self-contained-app-sca
 Health-config owning-file amendment: `decisions/0060-use-existing-scaffold-health-wiring.md`.
 Remaining-default owning-file amendment: `decisions/0061-align-remaining-go-defaults.md`.
 Existing-test owning-file backport: `decisions/0062-align-scaffold-and-version-test-boundaries.md`.
+Approved patch-security amendment: `decisions/0063-source-go1272-http2-security.md`.
 
 ## Guidance And Evidence
 
@@ -28,7 +29,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 
 **Out of scope:**
 - All `.github/`, `scripts/`, policytool, authority manifests and staged workflow contexts; embedded scaffold CI templates are Task2 source, not executable repository workflows.
-- Release tags/publication, deployment, Signal manifest changes and other-repository fleet migration. Workflow Go1.27.1/generated defaults and maintained Docker builders are explicitly included by ADR0057.
+- Release tags/publication, deployment, Signal manifest changes and other-repository fleet migration. Workflow Go1.27.2/generated defaults and maintained Docker builders are explicitly included by ADR0057/0063.
 - Cache reuse for SDK, Docker, registry, mutant or capability executables; test removal, timeout extension, GORACE changes, scanner ignores/suppression.
 - Generated strict StringValue/app bootstrap defects are Task2 per ADR0058; broader codec types, new scaffold ABI and new generator APIs remain excluded.
 - Default optional external observability config repair is Task2 per ADR0059; new external-plugin loader and replacement telemetry semantics remain excluded.
@@ -40,7 +41,7 @@ Baseline: exact base/main OSV rows identical (159 findings, 157 fixable); old sc
 |------|-------|-------|--------|
 | 1 | Patch Workflow source security and reuse immutable test hosts | Task 1, Task 2, Task 3 | fix/workflow-release-security-20261003 |
 
-**Status:** Locked 2026-10-04T06:44:30Z
+**Status:** Locked 2026-10-10T15:40:45Z
 
 ### Task 1: Reuse Identical Source Record Hosts
 
@@ -54,6 +55,44 @@ Requirements: S3, S4. Files: modify `cmd/wfctl/pipeline_record_host_test.go`, `c
 6. Commit only helper/test files after focused proof. Rollback: revert this test-helper change and rerun focused/full tests; no production behavior changes.
 
 ### Task 2: Patch Go Runtime Dependencies And Prove Real Hosts
+
+**Operative patch-security amendment (ADR0063):** existing Task2/sole PR1022,
+assigned to Compute by the parent; Signal stays paused. Every final1.27.1
+compiler/floor/default/assertion/command in the earlier Task2A-E amendment below
+now targets1.27.2. Earlier dated receipts remain historical; explicit older
+version overrides and unrelated dependency/checksum versions stay unchanged.
+
+1. Integrate the accepted main into the existing source branch with a normal
+   merge before collecting source acceptance, preserving its source-map-js1.2.2
+   repair and all accepted authority bytes. Record that exact integration base;
+   source-only protected-file diff against it must be empty. This supersedes
+   the historical49e18034 protected comparison, not its evidence. No new clone,
+   worktree or private Go cache. Every following gate binds the integrated head.
+2. Update the existing independent default-version assertions first; retain
+   their literal1.27.2 expectations and all existing override/runtime cases.
+   Run the unchanged focused Task2A command with GOTOOLCHAIN=go1.27.2: RED must
+   come from old defaults, not compiler setup. Parent serial allocation governs
+   heavy local/native work; existing authorized CI supplies public evidence.
+3. Update root/example/eleven fixture Go floors and every already-owned
+   generated/source-host/default/container pin1.27.1→1.27.2. Update x/net0.58→
+   0.60 in root/example and ten linked fixture graphs; iac-hang has no x/net.
+   Retain OTel1.45 and existing crypto/sys/text/term versions unless native
+   targeted tidy requires a documented compatible companion correction.
+4. With GOWORK=off/GOTOOLCHAIN=go1.27.2, authenticated native targeted module
+   resolution/tidy must preserve unrelated resolutions. Never replace text in
+   go.sum checksum rows. Verify all owning module files are tidy and focused
+   literal assertions GREEN; existing explicit overrides still pass.
+5. Rerun Task2C/D actual generated/host/SDK/registry/Docker/four-command proofs
+   with1.27.2, full cold Linux race/coverage under the same600s wfctl deadline,
+   and Tasks1/3 native scanner/called-control/UI gates. Inspect exact frozen
+   revision, vcs.modified=false, compiler1.27.2/x/net0.60/OTel1.45 where linked.
+   Official image catalog metadata alone cannot pass maintained-image gates.
+6. Independently review exact source, commit/push the existing PR1022 only,
+   and require all real current-head checks. Compatible CI/release drivers
+   remain the separately locked rollout; no protected source-PR writes,
+   skipped acceptance, timeout extension, settings exception or failing merge.
+   Subsequent official release/artifact verification uses its separately
+   authorized governing path; this source manifest does not publish a tag.
 
 Requirements: S1, S4, S5. Files: `go.mod`, `go.sum`, `example/go.mod`, `example/go.sum`; all eleven module pairs under `cmd/wfctl/testdata/conformance/{iac-hang,iac-pass,no-iac}/` and `cmd/wfctl/testdata/verify_capabilities/{iac-extra-service,good,name-drift,release-good,version-drift,iac-good,missing-ldflag,iac-missing-service}/`; `cmd/wfctl/plugin_registry_sync_host_test.go`, `README.md`, `cmd/wfctl/testdata/pipeline-record/README.md`, `cmd/wfctl/testdata/registry-sync/README.md`.
 
