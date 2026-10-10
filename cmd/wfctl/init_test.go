@@ -54,11 +54,11 @@ func TestRunInitAPIServiceTemplate(t *testing.T) {
 	if !strings.Contains(string(yml), "my-service-server") {
 		t.Errorf("workflow.yaml missing expected module name, got: %s", string(yml))
 	}
-	if !strings.Contains(string(yml), "type: observability.telemetry") {
-		t.Errorf("workflow.yaml missing observability.telemetry, got: %s", string(yml))
+	if strings.Contains(string(yml), "type: observability.telemetry") {
+		t.Errorf("default workflow.yaml requires optional observability.telemetry plugin, got: %s", string(yml))
 	}
-	if !strings.Contains(string(yml), "type: observability.collector") {
-		t.Errorf("workflow.yaml missing observability.collector, got: %s", string(yml))
+	if strings.Contains(string(yml), "type: observability.collector") {
+		t.Errorf("default workflow.yaml requires optional observability.collector plugin, got: %s", string(yml))
 	}
 	if strings.Contains(string(yml), "type: metrics.collector") {
 		t.Errorf("workflow.yaml should not create metrics.collector, got: %s", string(yml))
@@ -109,8 +109,11 @@ func TestRunInitFullStackTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read workflow.yaml: %v", err)
 	}
-	if !strings.Contains(string(yml), "type: observability.telemetry") {
-		t.Errorf("workflow.yaml missing observability.telemetry, got: %s", string(yml))
+	if strings.Contains(string(yml), "type: observability.telemetry") {
+		t.Errorf("default workflow.yaml requires optional observability.telemetry plugin, got: %s", string(yml))
+	}
+	if strings.Contains(string(yml), "type: observability.collector") {
+		t.Errorf("default workflow.yaml requires optional observability.collector plugin, got: %s", string(yml))
 	}
 	if strings.Contains(string(yml), "type: metrics.collector") {
 		t.Errorf("workflow.yaml should not create metrics.collector, got: %s", string(yml))

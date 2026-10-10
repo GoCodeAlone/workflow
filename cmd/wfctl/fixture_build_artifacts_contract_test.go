@@ -49,7 +49,7 @@ func fixtureControlCommand(ctx context.Context, root, output string, extra ...st
 			cmd.Env = append(cmd.Env, item)
 		}
 	}
-	cmd.Env = append(cmd.Env, "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOTOOLCHAIN=go1.27.1")
+	cmd.Env = append(cmd.Env, "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOTOOLCHAIN=go1.27.2")
 	return cmd
 }
 
@@ -408,7 +408,11 @@ func TestFixtureBuildArtifactsRealOverlayMutation(t *testing.T) {
 	root := fixtureControlSource(t)
 	external := t.TempDir()
 	asset, overlay := filepath.Join(external, "asset.txt"), filepath.Join(external, "overlay.json")
-	fixtureControlWrite(t, overlay, fmt.Sprintf(`{"Replace":{%q:%q}}`, filepath.Join(root, "asset.txt"), asset))
+	sourceAsset, err := filepath.EvalSymlinks(filepath.Join(root, "asset.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureControlWrite(t, overlay, fmt.Sprintf(`{"Replace":{%q:%q}}`, sourceAsset, asset))
 	for _, want := range []string{"first-overlay", "second-overlay"} {
 		fixtureControlWrite(t, asset, want)
 		output := filepath.Join(t.TempDir(), "executable")

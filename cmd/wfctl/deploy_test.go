@@ -146,7 +146,7 @@ func TestWriteDockerfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Dockerfile: %v", err)
 	}
-	for _, want := range []string{"FROM golang", "go build", "FROM alpine", "EXPOSE 8080"} {
+	for _, want := range []string{"FROM golang:1.27.2-alpine AS builder", "go build", "FROM alpine", "EXPOSE 8080"} {
 		if !strings.Contains(data, want) {
 			t.Errorf("Dockerfile missing %q", want)
 		}

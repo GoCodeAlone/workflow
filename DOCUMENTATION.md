@@ -322,7 +322,7 @@ YAML from the pipeline context, such as an HTTP route's `request_body`.
 | `config_from` | string | exactly one of `config_file`/`config_from` | Pipeline context path resolving to workflow config YAML. |
 | `output` | string | no | Output binary path; defaults to `bin/app`. |
 | `module_path` | string | no | Generated Go module path; defaults to `app`. |
-| `go_version` | string | no | Generated `go.mod` Go version; defaults to `1.22`. |
+| `go_version` | string | no | Generated `go.mod` Go version; defaults to `1.27.2`. |
 | `embed_config` | boolean | no | Embed `app.yaml` in the generated binary; defaults to `true`. |
 | `dry_run` | boolean | no | Return generated files without compiling. |
 | `os` | string | no | Target OS (`GOOS`); defaults to the current OS. |
