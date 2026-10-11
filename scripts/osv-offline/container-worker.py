@@ -77,14 +77,20 @@ def witness(request):
     for raw in request['readonly_targets']:
         readonly_flags[raw]=os.statvfs(raw).f_flag
         require(readonly_flags[raw]&os.ST_RDONLY,'actual read-only mount flag absent')
-        p=Path(raw)/'.osv-readonly-witness'
-        try:p.open('x').close()
+        p=Path(raw)
+        directory=p.is_dir()
+        if directory:p=p/'.osv-readonly-witness'
+        try:
+            fd=os.open(p,os.O_WRONLY | (os.O_CREAT|os.O_EXCL if directory else 0) | os.O_NOFOLLOW,0o600)
+            os.close(fd)
         except OSError as e:
             require(e.errno in (errno.EROFS,errno.EACCES),'unexpected read-only witness failure')
             require(raw!='/fixture' or e.errno==errno.EROFS,'owned fixture did not prove kernel write denial')
             readonly_errors[raw]=e.errno
-        else:p.unlink();raise RuntimeError('read-only mount writable')
-    for p in ('/var/run/docker.sock','/run/docker.sock','/github/home','/home/runner'):
+        else:
+            if directory:p.unlink()
+            raise RuntimeError('read-only mount writable')
+    for p in request.get('forbidden_paths',('/var/run/docker.sock','/run/docker.sock','/github/home','/home/runner')):
         require(not Path(p).exists(),'host socket/home was mounted')
     # Exercise an actual owned child in the same kernel group. Go version starts
     # ordinary Go runtime threads without compiling or executing project code.
@@ -94,8 +100,8 @@ def witness(request):
     child=json.loads(child.stdout)
     require(child['group']==Path('/proc/self/cgroup').read_text() and child['memory']==LIMITS['memory.max'],'child escaped aggregate quota')
     abi=abi_denials()
-    go=Path('/go/bin/go');require(hashlib.sha256(go.read_bytes()).hexdigest()==request['compiler_sha256'],'compiler digest differs')
-    version=subprocess.run([str(go),'version'],env={'PATH':'/go/bin:/usr/bin:/bin','GOTOOLCHAIN':'local','GOENV':'off','GOWORK':'off','GOPROXY':'off','GOSUMDB':'off','GOVCS':'*:off','GOMAXPROCS':'2'},
+    go=Path(request.get('compiler_path','/go/bin/go'));require(hashlib.sha256(go.read_bytes()).hexdigest()==request['compiler_sha256'],'compiler digest differs')
+    version=subprocess.run([str(go),'version'],env={'PATH':str(go.parent)+':/usr/bin:/bin','GOTOOLCHAIN':'local','GOENV':'off','GOWORK':'off','GOPROXY':'off','GOSUMDB':'off','GOVCS':'*:off','GOMAXPROCS':'2'},
         stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=15,check=True,start_new_session=True)
     require(version.stdout.strip()=='go version go1.27.2 linux/amd64' and not version.stderr,'actual compiler/thread witness failed')
     return {'uid':os.getuid(),'gid':os.getgid(),'manager_pid':os.getpid(),'namespaces':namespaces,

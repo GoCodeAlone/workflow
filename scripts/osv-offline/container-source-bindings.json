@@ -1,8 +1,8 @@
 {
   "files": {
     "container-seccomp.json": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9",
-    "container-worker.py": "820c4644281add003be470bba326e257b78d073f691a8898ca212e22240ea0f3",
-    "osv_container.py": "7519827a1f095955ec02f98afb507e363381dbf57156780821a2f878b942acd8",
+    "container-worker.py": "3a2cc039af7485f5f18fd0465d6e6b443cdf21a0a922ea1ae34f94c2eb4178db",
+    "osv_container.py": "97cbc201703c217d942bc5a0b9de76b1bb3b5e7e0cbb56d278508d77360f742e",
     "run-container-proof.py": "c4db39f78f0555396dde81a444d88f73ea7d95dca0090d61e4bbe6545b7ec4a5"
   },
   "image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",

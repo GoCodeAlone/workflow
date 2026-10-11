@@ -94,11 +94,21 @@ def command(argv, seconds=15, *, stdout_limit=1024*1024):
         proc.stdout.close();proc.stderr.close()
 
 class Container:
-    def __init__(self, output, helper_root, *, mounts=(), seconds=150, runner=command):
+    def __init__(self, output, helper_root, *, mounts=(), seconds=150, runner=command,
+                 production=False, carveouts=(), carveout_parent=None, deadline=None, ledger=None):
         eligible()
         self.output, self.helper_root = Path(output), Path(helper_root)
-        self.run = runner
+        self.runner = runner
+        self.deadline = deadline
+        self.cleanup_mode = False
+        self.run = self.bounded_command
         self.seconds = seconds
+        if type(seconds) is not int or not 1 <= seconds <= 1800:
+            raise BoundaryError('unbound container phase budget')
+        self.production = production
+        self.carveouts = {Path(p) for p in carveouts}
+        self.carveout_parent = Path(carveout_parent) if carveout_parent is not None else None
+        self.ledger = Path(ledger) if ledger is not None else None
         self.identifier = None
         self.creation_attempted = False
         self.creation_response = None
@@ -111,6 +121,44 @@ class Container:
         self.tmpfs = '/tmp:rw,nosuid,nodev,noexec,size=1073741824,mode=700,uid='+str(os.getuid())+',gid='+str(os.getgid())
         self.spec = None
         self.retired = False
+
+    def bounded_command(self, argv, seconds=15):
+        if self.deadline is not None:
+            remaining = self.deadline-time.monotonic()-(0 if self.cleanup_mode else 90)
+            if remaining <= 0:raise BoundaryError('shared phase deadline leaves no owned cleanup reserve')
+            seconds = min(seconds, remaining)
+        return self.runner(argv, seconds)
+
+    def record_ownership(self, suffix, value):
+        if self.ledger is None:return
+        path = self.ledger.with_name(self.ledger.name+suffix)
+        with path.open('x') as f:
+            os.fchmod(f.fileno(),0o600);json.dump(value,f,sort_keys=True)
+            f.write('\n');f.flush();os.fsync(f.fileno())
+
+    def validate_mounts(self):
+        """A read-only target must have no second writable source alias."""
+        targets = set()
+        sources = []
+        for raw, target, readonly in self.mounts:
+            source = Path(raw); destination = Path(target)
+            if (not source.is_absolute() or not source.exists() or source.resolve() != source or
+                ',' in str(source) or not destination.is_absolute() or
+                '..' in destination.parts or str(destination) != target or ',' in target or
+                destination in targets or destination == Path('/') or
+                any(destination == Path(p) or Path(p) in destination.parents for p in ('/proc','/sys','/dev','/tmp','/run'))):
+                raise BoundaryError('unbound or aliased container mount')
+            targets.add(destination);sources.append((source, readonly))
+        writable = {p for p, ro in sources if not ro}
+        if not self.carveouts <= writable:
+            raise BoundaryError('writable carveout has no exact mount')
+        for ro_source, ro in sources:
+            if not ro:continue
+            for rw_source in writable:
+                if ro_source == rw_source or rw_source in ro_source.parents:
+                    raise BoundaryError('read-only input has a writable source alias')
+                if ro_source in rw_source.parents and (rw_source not in self.carveouts or ro_source != self.carveout_parent):
+                    raise BoundaryError('unadmitted writable descendant of read-only mount')
 
     def inspect(self, identifier):
         if len(self.inspection_receipts)>=16:raise BoundaryError('inspection evidence bound exceeded')
@@ -147,6 +195,9 @@ class Container:
         return row
 
     def create(self, worker_args=()):
+        self.validate_mounts()
+        if self.production and tuple(worker_args) != ():
+            raise BoundaryError('production worker takes only its fixed request')
         if self.inspect(self.name) is not None:
             raise BoundaryError('fresh container name already exists')
         uid, gid = os.getuid(), os.getgid()
@@ -155,6 +206,11 @@ class Container:
             '/usr/bin/timeout', '--signal=TERM', '--kill-after=5s', str(self.seconds)+'s',
             '/usr/local/bin/python3', '-I', '-S', '-B', '-X',
             'pycache_prefix=/tmp/absent-python-cache', '/wf/container-worker.py', *worker_args]
+        if self.production:
+            if (self.helper_root, str(self.helper_root), True) not in self.mounts:
+                raise BoundaryError('production helpers require their exact absolute mount')
+            self.payload[-1] = str(self.helper_root/'run.py')
+            self.payload += ['--worker', '/out/request.json']
         argv = ['create', '--name', self.name, '--cidfile', str(self.cidfile),
             '--platform', 'linux/amd64', '--network', 'none', '--ipc', 'private',
             '--cgroupns', 'private', '--user', str(uid)+':'+str(gid),
@@ -173,6 +229,13 @@ class Container:
                 raise BoundaryError('unbound container mount')
             argv += ['--mount', 'type=bind,src='+str(source)+',dst='+target+(',readonly,bind-propagation=rprivate,bind-recursive=readonly' if readonly else '')]
         argv += [IMAGE, *self.payload[1:]]
+        self.record_ownership('', {'schema':'workflow.offline-scanner.container-ownership.v1',
+            'name':self.name,'nonce':self.nonce,'labels':self.labels,'image':IMAGE,'image_config':IMAGE_CONFIG,
+            'output':str(self.output),'helper_root':str(self.helper_root),'seconds':self.seconds,
+            'mounts':[(str(source),target,ro) for source,target,ro in self.mounts],
+            'carveouts':sorted(str(path) for path in self.carveouts),
+            'carveout_parent':str(self.carveout_parent) if self.carveout_parent is not None else None,
+            'production':self.production,'creation_attempted':True})
         self.creation_attempted = True
         self.creation_response={'response_observed':False,'target':self.name,'image':IMAGE,
             'argv_sha256':hashlib.sha256(json.dumps(argv,separators=(',',':')).encode()).hexdigest()}
@@ -190,6 +253,7 @@ class Container:
         row = self.inspect(self.name)
         if row is not None:
             self.identifier = self.owned(row)['Id']
+            self.record_ownership('.created', {'container_id':self.identifier,'name':self.name,'labels':self.labels})
         if r.returncode or self.identifier is None or not self.cidfile.is_file() or self.cidfile.is_symlink():
             raise BoundaryError('container creation did not complete')
         cid = self.cidfile.read_text().strip()
@@ -248,6 +312,7 @@ class Container:
         return row['State']['ExitCode'], row
 
     def cleanup(self):
+        self.cleanup_mode = True
         if self.identifier is None:
             row = self.inspect(self.name)
             if row is None:

@@ -1,4 +1,7 @@
 {
+  "container_image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
+  "container_image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
+  "core_contract_sha256": "ccac18e85df28b3941e1f5fe3c2522dde5ae90395121845c63675972830f79fe",
   "first_install_execution_receipt_sha256": null,
   "hosted_job_timing_acceptance_sha256": null,
   "linux_pins": {
@@ -7,31 +10,31 @@
     "osv-scanner": "c810df66004c75f734eb4502ea5ff44115e4e3444e18d8b38bd87ff33094d69d"
   },
   "linux_runtime_acceptance_sha256": null,
-  "linux_tools": {
-    "bubblewrap_path": "/usr/bin/bwrap",
-    "bubblewrap_sha256": null,
-    "cgroup_parent": "One separately authorized ephemeral systemd unit with empty delegated root and supervisor leaf; exact admission pending",
-    "python_path": "/usr/bin/python3",
-    "python_sha256": null
-  },
-  "permanent_install_authorized": false,
+  "permanent_install_authorized": true,
   "prepared_source_refs": {
     "baseline": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
     "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
   },
   "public_preload_inventory_sha256": "dd5ee66e70ae1699c21d4f4a976fbf78208caf58d5e547fe72f4d491ce9ecbb9",
-  "resource_contract": "Exact M profile inherits reviewed standalone L total1800/native720/source240/manifest30 envelope. Actual hosted job timing/OS/supplier admission remains separate and unbound; no production timeout approval transfers.",
+  "resource_contract": "Exact aggregate container memory2147483648/swap0/pids256/CPU2; scan total1800/native720/source240/manifest30; reporter240. Immutable core and independent actual admission index; fresh same-job supplier paths. Finite manual proof is provisional and never supplies missing normal-event evidence.",
   "reviewed_protocol_binding_sha256": "4197aa92770c04bbf8e349cc3672b02fae157ebbf28da816773414861dbb888f",
   "source_object_delivery_acceptance_sha256": null,
-  "status": "LOCAL SYSTEMD PREREQUISITE SOURCE PREPARATION; HOSTED/OBJECT DELIVERY/INSTALL ACCEPTANCE HOLD",
+  "status": "PRODUCTION CONTAINER SOURCE PREPARATION; FIVE ACTUAL ADMISSION DECISIONS UNBOUND",
   "supplier_delivery_receipt_sha256": null,
   "trusted_files": {
-    "osv_cgroup.py": "cadedf04046ddeda7b190994d625f303fe97bfec8866ff364b73b5f648f865ba",
+    "container-seccomp.json": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9",
+    "container-worker.py": "3a2cc039af7485f5f18fd0465d6e6b443cdf21a0a922ea1ae34f94c2eb4178db",
+    "manual-proof-plan.json": "ccf12a8e056444c39a356f1d121a3334c8f5557c7b892ec43135bc70f3ee6289",
     "osv_completion.py": "ed53e247af358c187058c73f4052f181bb41864ec3b4a6fb2643cc5ec60aa937",
-    "osv_io.py": "10fe83ba3608e73d198509ec7002c2db330a3b091964d6f1a752e835ec07b96b",
-    "osv_producer.py": "055df30c58d14d780fe4b5e5869480bea2cfea6728985e81d70f22fed273f7f1",
+    "osv_container.py": "97cbc201703c217d942bc5a0b9de76b1bb3b5e7e0cbb56d278508d77360f742e",
+    "osv_io.py": "c86e54e9abd38ef97b6b0e184b542ffab38a12f22154eee18c905a99f4a2ce92",
+    "osv_producer.py": "67afbe141d419179e7c60b0da6e45c3a302726cac2a365aa365f9957630fd088",
+    "osv_supplier.py": "17234fb464f6091700cc9c2cba1d42117736e4ef3f3776294877010ecea98e8b",
     "osv_trusted.py": "2148339ccbaefdcb81396affa481ce3643a491b95228ddd61507eccdcca11bcc",
+    "prepare-supplier.py": "a7d5cee541fa33fd0a643e2e52878c7b80b6ef968c50f7c95d48560db43cc09c",
+    "run-production-proof.py": "fa1fb9cd2d27b257c4cc8293e9f091dd12866721c4f412ae3844a9cfef125d3c",
+    "run.py": "1bf192a8283396234c9514e0fd66939b72fe95d38e806c070f3fd4a5299eb996",
     "scanner-profile.json": "2deb233b43cf4fdc5babfe481c88bafe1bc8413062ea1e93041039e01b4c9997"
   },
-  "version": 1
+  "version": 2
 }

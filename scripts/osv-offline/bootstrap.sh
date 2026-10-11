@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LOCAL CANDIDATE ONLY: current source hashes are bound; installation/Linux acceptance remain HOLD.
+# Exact container candidate: permanent replacement authorized; actual admission decisions remain unbound.
 set -euo pipefail
 umask 077
 case "${1-}" in
@@ -18,10 +18,10 @@ for helper in run.py bootstrap-manifest.json; do
     exit 2
   fi
 done
-runner_sha256='d6092005254efe9dd7c7bbace1a3e9718eff5f8dea4c8f850ccac1a48af1196d'
-manifest_sha256='afe0c122f518ec12c2b713e001765ec8d9c7535b8b394c0186675dab57be6390'
+runner_sha256='1bf192a8283396234c9514e0fd66939b72fe95d38e806c070f3fd4a5299eb996'
+manifest_sha256='337c8de6189d3ad41ff932461211325df0c0c309c560f1a566a1b5616d5f7e94'
 if [[ ! "$runner_sha256" =~ ^[0-9a-f]{64}$ || ! "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]]; then
-  echo "offline scanner installation is unapproved and preparation hashes are unresolved" >&2
+  echo "offline scanner exact source hashes are unresolved" >&2
   exit 2
 fi
 actual_runner="$(/usr/bin/sha256sum "$bootstrap_dir/run.py")"

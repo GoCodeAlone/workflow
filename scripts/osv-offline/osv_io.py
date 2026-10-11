@@ -32,7 +32,7 @@ def bounded_run(argv, cwd, env, timeout, budget=None, stdout_limit=STDOUT_LIMIT,
     proc=None;reaped=False;selector=selectors.DefaultSelector();buffers=[bytearray(),bytearray()]
     try:
         proc=subprocess.Popen(argv,cwd=cwd,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-                              start_new_session=True)
+                              stdin=subprocess.DEVNULL,close_fds=True,start_new_session=True)
         for index,pipe in enumerate([proc.stdout,proc.stderr]):
             os.set_blocking(pipe.fileno(),False);selector.register(pipe,selectors.EVENT_READ,index)
         while selector.get_map():

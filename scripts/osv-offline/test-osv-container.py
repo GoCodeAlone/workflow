@@ -67,7 +67,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_success_joins_creation_exit_and_exact_id_nonforcing_removal(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));c.create();code,row=c.start_wait()
+            c,s=self.fixture(Path(temp).resolve());c.create();code,row=c.start_wait()
             self.assertEqual(code,0);result=c.cleanup()
             self.assertTrue(result['absent']);self.assertFalse(result['forced_removal']);self.assertTrue(c.retired)
             self.assertIn(['rm','a'*64],s['calls'])
@@ -75,7 +75,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_client_timeout_requires_daemon_container_kill_and_retirement(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));c.create();s['fail_wait']=True
+            c,s=self.fixture(Path(temp).resolve());c.create();s['fail_wait']=True
             with self.assertRaises(m.BoundaryError):c.start_wait()
             self.assertTrue(s['row']['State']['Running'])
             c.cleanup()
@@ -84,7 +84,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_failed_create_with_resource_is_still_owned_and_removed_without_start(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));s['fail_create']=True
+            c,s=self.fixture(Path(temp).resolve());s['fail_create']=True
             with self.assertRaises(m.BoundaryError):c.create()
             self.assertEqual(c.identifier,'a'*64);c.cleanup()
             self.assertFalse(any(a[0]=='start' for a in s['calls']))
@@ -108,7 +108,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_lifecycle_receipt_binds_real_attempt_id_retirement_and_inspection_hashes(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));c.create();c.start_wait();c.cleanup();r=c.lifecycle_evidence()
+            c,s=self.fixture(Path(temp).resolve());c.create();c.start_wait();c.cleanup();r=c.lifecycle_evidence()
             self.assertTrue(r['creation_attempted']);self.assertTrue(r['retired']);self.assertEqual(r['container_id'],'a'*64)
             self.assertEqual(r['inspections'][0]['classification'],'confirmed-absence')
             self.assertEqual(r['inspections'][-1]['target'],'a'*64)
@@ -119,7 +119,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_seventeenth_inspection_is_refused_before_call_or_collection(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp))
+            c,s=self.fixture(Path(temp).resolve())
             for _ in range(16):self.assertIsNone(c.inspect(c.name))
             with self.assertRaises(m.BoundaryError):c.inspect(c.name)
             self.assertEqual(len(s['calls']),16)
@@ -127,7 +127,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_create_response_precedes_failing_inspect_and_publishes_no_raw_diagnostic(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));original=c.run
+            c,s=self.fixture(Path(temp).resolve());original=c.run
             stderr="option 'bind-recursive=readonly' requires 'bind-propagation=rprivate' to be specified in conjunction\n"+'\x1b[31mprivate daemon text'*10000
             def run(argv,seconds=15):
                 if argv[0]=='create':return subprocess.CompletedProcess(argv,125,'',stderr)
@@ -144,7 +144,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_create_timeout_is_unobserved_and_diagnostics_never_credit_retirement(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));s['create_exception']=True
+            c,s=self.fixture(Path(temp).resolve());s['create_exception']=True
             with self.assertRaises(m.BoundaryError):c.create()
             r=c.lifecycle_evidence()['creation_response']
             self.assertFalse(r['response_observed']);self.assertEqual(r['exception_type'],'BoundaryError')
@@ -156,7 +156,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_recursive_readonly_requires_explicit_private_argument_and_actual_propagation(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));c.create()
+            c,s=self.fixture(Path(temp).resolve());c.create()
             args=next(a for a in s['calls'] if a[0]=='create')
             ro_args=[args[i+1] for i,v in enumerate(args[:-1]) if v=='--mount' and ',readonly' in args[i+1]]
             self.assertTrue(ro_args);self.assertTrue(all(',bind-propagation=rprivate,bind-recursive=readonly' in v for v in ro_args))
@@ -166,15 +166,78 @@ class LifecycleTests(unittest.TestCase):
 
     def test_cid_mismatch_does_not_start_and_closes_only_authenticated_created_id(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));s['wrong_id']=True
+            c,s=self.fixture(Path(temp).resolve());s['wrong_id']=True
             with self.assertRaises(m.BoundaryError):c.create()
             c.cleanup();self.assertIn(['rm','a'*64],s['calls'])
             self.assertFalse(any('b'*64 in a for a in s['calls']))
 
+    def test_production_payload_is_fixed_and_preserves_exact_absolute_helpers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());c.production=True
+            c.mounts.append((c.helper_root,str(c.helper_root),True))
+            c.create()
+            self.assertEqual(c.payload[-3:],[str(c.helper_root/'run.py'),'--worker','/out/request.json'])
+            self.assertNotIn('/wf/container-worker.py',c.payload)
+            self.assertFalse(any('GITHUB_TOKEN' in arg for arg in c.payload))
+            c.cleanup()
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());c.production=True
+            with self.assertRaises(m.BoundaryError):c.create(['arbitrary-entry'])
+            self.assertFalse(s['calls'])
+
+    def test_readonly_input_cannot_be_exposed_through_writable_ancestor_alias(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());secret=c.output/'input';secret.mkdir()
+            c.mounts.append((secret,'/input',True))
+            with self.assertRaisesRegex(m.BoundaryError,'writable source alias'):c.create()
+            self.assertFalse(s['calls'])
+
+    def test_state_carveouts_are_exact_and_cannot_cover_readonly_child_input(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());root=Path(temp).resolve()/'state';root.mkdir()
+            private=root/'private';private.mkdir()
+            c.mounts += [(root,'/state',True),(private,'/private',False)]
+            with self.assertRaisesRegex(m.BoundaryError,'unadmitted writable descendant'):c.create()
+            self.assertFalse(s['calls']);c.carveouts={private};c.carveout_parent=root
+            c.create();c.cleanup()
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());root=Path(temp).resolve()/'state';root.mkdir()
+            private=root/'private';private.mkdir();data=private/'data';data.mkdir()
+            c.mounts += [(root,'/state',True),(private,'/private',False),(data,'/data',True)]
+            c.carveouts={private};c.carveout_parent=root
+            with self.assertRaisesRegex(m.BoundaryError,'writable source alias'):c.create()
+            self.assertFalse(s['calls'])
+
+    def test_canonical_source_and_reserved_mount_targets_are_required_before_docker(self):
+        for target in ('/proc/escape','/sys','/dev/socket','/tmp/cache','/run/socket','/','/a/../b'):
+            with self.subTest(target=target),tempfile.TemporaryDirectory() as temp:
+                c,s=self.fixture(Path(temp).resolve());c.mounts.append((c.helper_root,target,True))
+                with self.assertRaises(m.BoundaryError):c.create()
+                self.assertFalse(s['calls'])
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());alias=Path(temp).resolve()/'alias';alias.symlink_to(c.helper_root)
+            c.mounts.append((alias,'/alias',True))
+            with self.assertRaises(m.BoundaryError):c.create()
+            self.assertFalse(s['calls'])
+
+    def test_shared_deadline_preserves_cleanup_reserve_without_retrying_creation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp).resolve());c.deadline=200
+            original=c.runner;observed=[]
+            def timed(argv,seconds=15):observed.append(seconds);return original(argv,seconds)
+            c.runner=timed
+            with patch.object(m.time,'monotonic',return_value=0):c.create()
+            with patch.object(m.time,'monotonic',return_value=150):
+                with self.assertRaisesRegex(m.BoundaryError,'cleanup reserve'):c.start_wait()
+                c.cleanup()
+            self.assertTrue(c.retired)
+            self.assertEqual(sum(argv[0]=='create' for argv in s['calls']),1)
+            self.assertTrue(all(seconds<=50 for seconds in observed[-4:]))
+
     def test_foreign_or_rebound_identity_never_signalled_or_removed(self):
         for field,value in (('Id','b'*64),('Image','sha256:'+'b'*64),('Name','/foreign')):
             with self.subTest(field=field),tempfile.TemporaryDirectory() as temp:
-                c,s=self.fixture(Path(temp));c.create();s['row'][field]=value
+                c,s=self.fixture(Path(temp).resolve());c.create();s['row'][field]=value
                 with self.assertRaises(m.BoundaryError):c.cleanup()
                 self.assertFalse(c.retired)
                 self.assertFalse(any(a[0] in ('kill','rm') for a in s['calls']))
@@ -184,20 +247,20 @@ class LifecycleTests(unittest.TestCase):
                    ('ShmSize',2147483648),('Tmpfs',{'/tmp':'rw,size=8589934592'})]
         for key,value in mutations:
             with self.subTest(key=key),tempfile.TemporaryDirectory() as temp:
-                c,s=self.fixture(Path(temp));c.create();s['row']['HostConfig'][key]=value
+                c,s=self.fixture(Path(temp).resolve());c.create();s['row']['HostConfig'][key]=value
                 with self.assertRaises(m.BoundaryError):c.start_wait()
                 self.assertFalse(any(a[0]=='start' for a in s['calls']))
                 c.cleanup()
 
     def test_missing_inspection_is_not_treated_as_successful_cleanup(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));c.create();s['row']=None
+            c,s=self.fixture(Path(temp).resolve());c.create();s['row']=None
             with self.assertRaises(m.BoundaryError):c.cleanup()
             self.assertFalse(c.retired)
 
     def test_effective_seccomp_contents_not_client_path_are_bound(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));c.create()
+            c,s=self.fixture(Path(temp).resolve());c.create()
             s['row']['HostConfig']['SecurityOpt']=['no-new-privileges=true','seccomp='+json.dumps({'defaultAction':'SCMP_ACT_ALLOW'})]
             with self.assertRaises(m.BoundaryError):c.start_wait()
             self.assertFalse(any(a[0]=='start' for a in s['calls']))
@@ -205,7 +268,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_uncertain_create_first_absence_cannot_credit_retirement(self):
         with tempfile.TemporaryDirectory() as temp:
-            c,s=self.fixture(Path(temp));s['create_exception']=True
+            c,s=self.fixture(Path(temp).resolve());s['create_exception']=True
             with self.assertRaises(m.BoundaryError):c.create()
             with self.assertRaisesRegex(m.BoundaryError,'creation completion is uncertain'):c.cleanup()
             self.assertFalse(c.retired);self.assertIsNone(c.identifier)

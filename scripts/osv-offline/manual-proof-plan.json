@@ -1,0 +1,21 @@
+{
+  "schema": "workflow.offline-scanner.finite-production-proof-plan.v1",
+  "repository": "GoCodeAlone/workflow",
+  "ref": "refs/heads/prep/osv-prerequisites-20261011-r1",
+  "job": "osv-production-proof",
+  "workflow_ref": "GoCodeAlone/workflow/.github/workflows/copilot-setup-steps.yml@refs/heads/prep/osv-prerequisites-20261011-r1",
+  "source_refs": {
+    "baseline": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
+    "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
+  },
+  "phases": ["prepare-differential", "scan-baseline", "scan-candidate", "report-differential", "gate-differential"],
+  "prepare_seconds": 900,
+  "report_seconds": 240,
+  "scan_seconds": 1800,
+  "total_seconds": 5400,
+  "installation_admitted": false,
+  "normal_event_delivery_proved": false,
+  "candidate_execution": false,
+  "finding_policy_changed": false,
+  "status": "Collect raw actual execution and cleanup evidence only; independent admission decisions remain separate."
+}

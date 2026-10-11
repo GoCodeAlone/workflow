@@ -37,6 +37,14 @@ PHASES = {
 SHA = re.compile(r'^[0-9a-f]{64}$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
 MAX_JSON = 16 * 1024 * 1024
+TRUSTED_FILES = {'run.py', 'osv_producer.py', 'osv_trusted.py', 'osv_completion.py',
+    'osv_io.py', 'scanner-profile.json', 'osv_container.py', 'container-worker.py',
+    'container-seccomp.json', 'manual-proof-plan.json', 'run-production-proof.py', 'prepare-supplier.py'}
+TRUSTED_FILES.add('osv_supplier.py')
+MANUAL_PHASES = {'prepare-differential', 'scan-baseline', 'scan-candidate', 'report-differential', 'gate-differential'}
+CORE_FIELDS = {'trusted_files', 'linux_pins', 'public_preload_inventory_sha256',
+    'prepared_source_refs', 'resource_contract', 'reviewed_protocol_binding_sha256',
+    'container_image', 'container_image_config'}
 
 class Refusal(RuntimeError):
     pass
@@ -93,16 +101,18 @@ def write(path, value):
 
 def trusted():
     manifest = load(HERE / 'bootstrap-manifest.json')
-    if manifest.get('version') != 1:
+    if manifest.get('version') != 2:
         raise Refusal('unsupported bootstrap manifest')
     for name, expected in manifest['trusted_files'].items():
-        if name not in {'osv_producer.py', 'osv_trusted.py', 'osv_completion.py', 'osv_io.py', 'osv_cgroup.py', 'scanner-profile.json'}:
+        if name not in TRUSTED_FILES:
             raise Refusal('unknown trusted source path')
         regular(HERE / name)
         if not SHA.fullmatch(expected) or digest(HERE / name) != expected:
             raise Refusal('reviewed source/profile hash mismatch')
-    if set(manifest['trusted_files']) != {'osv_producer.py', 'osv_trusted.py', 'osv_completion.py', 'osv_io.py', 'osv_cgroup.py', 'scanner-profile.json'}:
+    if set(manifest['trusted_files']) != TRUSTED_FILES:
         raise Refusal('incomplete trusted source inventory')
+    if core_contract(manifest) != manifest.get('core_contract_sha256'):
+        raise Refusal('immutable scanner core contract differs')
     inventory = HERE / 'public-module-preload-inventory.json'
     if digest(inventory) != manifest['public_preload_inventory_sha256']:
         raise Refusal('preload inventory hash mismatch')
@@ -116,6 +126,44 @@ def trusted():
     sys.path.insert(0, str(HERE))
     from osv_io import bounded_run, Budget
     return manifest, load(HERE / 'scanner-profile.json'), bounded_run, Budget
+
+def core_contract(manifest):
+    # Receipt hashes and their index are intentionally outside this immutable
+    # code/runtime/profile contract, avoiding a self-referential receipt cycle.
+    core = {key: manifest[key] for key in sorted(CORE_FIELDS)}
+    return hashlib.sha256(json.dumps(core, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+def validate_runtime(manifest, runtime):
+    from osv_container import IMAGE, IMAGE_CONFIG, eligible
+    eligible()
+    if (manifest['container_image'] != IMAGE or manifest['container_image_config'] != IMAGE_CONFIG or
+        runtime.get('core_contract_sha256') != manifest['core_contract_sha256']):
+        raise Refusal('runtime belongs to another immutable container contract')
+    paths = ['compiler_root', 'supplier_root', 'existing_gopath', 'existing_module_cache', 'existing_build_cache']
+    for key in paths:
+        path = Path(runtime[key])
+        if not path.is_absolute() or not path.is_dir() or path.resolve() != path:
+            raise Refusal('runtime requires exact existing canonical allocated paths')
+    if set(runtime['supplier_pins']) != {'govulncheck', 'osv-scanner', 'osv-reporter'}:
+        raise Refusal('runtime supplier inventory differs')
+    if not all(SHA.fullmatch(str(value)) for value in runtime['supplier_pins'].values()):
+        raise Refusal('runtime supplier digests are unbound')
+    cache=Path(runtime['existing_build_cache'])
+    for immutable in (HERE, Path(runtime['compiler_root']), Path(runtime['supplier_root']), Path(runtime['existing_module_cache'])):
+        if cache==immutable or cache in immutable.parents or immutable in cache.parents:
+            raise Refusal('existing build cache overlaps an immutable input tree')
+    from osv_supplier import verify_delivery
+    verify_delivery(supplier_contract(manifest, runtime))
+    supplier(None, manifest, runtime)
+    return runtime
+
+def supplier_contract(manifest, runtime):
+    return {'delivery_receipt_path': runtime['supplier_delivery_proof_path'],
+        'delivery_receipt_sha256': runtime['supplier_delivery_proof_sha256'],
+        'script_sha256': manifest['trusted_files']['prepare-supplier.py'],
+        'identity': runtime['identity'], 'pins': runtime['supplier_pins'],
+        'compiler_sha256': runtime['compiler_sha256'], 'supplier_root': runtime['supplier_root'],
+        **{key:runtime[key] for key in ('compiler_root','existing_gopath','existing_module_cache','existing_build_cache')}}
 
 def admission(manifest):
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or sys.version_info < (3, 11):
@@ -140,11 +188,8 @@ def admission(manifest):
             raise Refusal('admission receipt does not accept this exact runtime')
         if receipt.get('profile_sha256') != manifest['trusted_files']['scanner-profile.json']:
             raise Refusal('admission receipt belongs to another exact resource/profile')
-    for key in ['bubblewrap', 'python']:
-        path = Path(manifest['linux_tools'][key + '_path'])
-        expected = manifest['linux_tools'][key + '_sha256']
-        if not isinstance(expected, str) or not SHA.fullmatch(expected) or digest(path) != expected:
-            raise Refusal('unbound Linux launcher/interpreter supplier')
+        if receipt.get('core_contract_sha256') != manifest['core_contract_sha256']:
+            raise Refusal('admission receipt belongs to another immutable code/runtime contract')
     delivery = load(HERE / 'source-object-delivery-acceptance.json')
     if (delivery.get('repository') != 'GoCodeAlone/workflow' or
         delivery.get('trusted_checkout_action') != 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' or
@@ -166,21 +211,60 @@ def admission(manifest):
             raise Refusal('actual hosted job timing admission is incomplete')
         if row['report_total_seconds'] != 240 or sum(numbers[1:]) + scans * scan_seconds >= row['job_timeout_seconds']:
             raise Refusal('exact offline phases exceed witnessed hosted job budget')
-    return load(HERE / 'linux-hosted-acceptance.json')
+    # Decisions bind constraints, while each fresh job supplies its own observed
+    # paths and exact build receipt. Historical ephemeral paths never execute.
+    path = Path(os.environ.get('OSV_RUNTIME_RECEIPT', '/nonexistent'))
+    if path.parent.parent != Path(os.environ['RUNNER_TEMP']) or not path.parent.name.startswith('osv-runtime-'):
+        raise Refusal('fresh same-job actual runtime receipt is missing')
+    owned(path.parent)
+    runtime = validate_runtime(manifest, load(path))
+    if runtime.get('accepted') is not False or runtime.get('identity') != {
+        key: os.environ[key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')}:
+        raise Refusal('actual runtime does not belong to this fresh job')
+    if runtime['supplier_pins'] != manifest['linux_pins']:
+        raise Refusal('accepted runtime differs from permanent supplier pins')
+    return runtime
+
+def manual_admission(manifest, runtime_path):
+    # Explicit finite evidence collection only. No accepted normal-event receipt
+    # or automatic installation is minted by this path.
+    plan = load(HERE / 'manual-proof-plan.json')
+    expected = {'GITHUB_REPOSITORY': plan['repository'], 'GITHUB_REF': plan['ref'],
+        'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_JOB': plan['job'],
+        'GITHUB_WORKFLOW_REF': plan['workflow_ref']}
+    if any(os.environ.get(key) != value for key, value in expected.items()):
+        raise Refusal('finite manual proof identity differs from reviewed plan')
+    if (not COMMIT.fullmatch(os.environ.get('GITHUB_SHA', '')) or
+        not os.environ.get('GITHUB_RUN_ID', '').isdecimal() or
+        not os.environ.get('GITHUB_RUN_ATTEMPT', '').isdecimal() or
+        plan['source_refs'] != manifest['prepared_source_refs'] or
+        set(plan['phases']) != MANUAL_PHASES):
+        raise Refusal('finite manual proof inputs or run identity are unbound')
+    path = Path(runtime_path)
+    parent = Path(os.environ['RUNNER_TEMP'])
+    if path.parent.parent != parent or not path.parent.name.startswith('osv-production-'):
+        raise Refusal('finite proof runtime is outside its owned runner state')
+    owned(path.parent)
+    runtime = load(path)
+    if runtime.get('accepted') is not False or runtime.get('identity') != {
+        key: os.environ[key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')}:
+        raise Refusal('finite proof runtime must remain provisional and exact-run bound')
+    return validate_runtime(manifest, runtime)
 
 def state_path():
     parent = Path(os.environ['RUNNER_TEMP'])
     if not parent.is_absolute() or parent.is_symlink() or not parent.is_dir():
         raise Refusal('invalid runner state parent')
     run, attempt, job = [os.environ[name] for name in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB')]
-    if not run.isdecimal() or not attempt.isdecimal() or job not in {'scan-pr', 'scan-scheduled'}:
+    if not run.isdecimal() or not attempt.isdecimal() or job not in {'scan-pr', 'scan-scheduled', 'osv-production-proof'}:
         raise Refusal('unbound GitHub execution identity')
     return parent / ('wf-osv-offline-' + run + '-' + attempt + '-' + job)
 
-def env(go, state, *, online=False):
+def env(go, state, runtime, *, online=False):
     result = {
         'PATH': str(go.parent) + ':/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C',
         'HOME': str(state / 'home'), 'TMPDIR': str(state / 'tmp'),
+        'XDG_CONFIG_HOME': str(state / 'home/.config'),
         'GOTOOLCHAIN': 'local', 'GOENV': 'off', 'GOWORK': 'off',
         'GOPROXY': 'https://proxy.golang.org' if online else 'off',
         'GOSUMDB': 'sum.golang.org' if online else 'off',
@@ -191,7 +275,6 @@ def env(go, state, *, online=False):
         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0', 'GIT_ASKPASS': '/bin/false',
     }
     # Caches are existing allocated runner caches, never a new host private Go cache.
-    runtime = load(HERE / 'linux-hosted-acceptance.json')
     result.update(GOPATH=runtime['existing_gopath'], GOMODCACHE=runtime['existing_module_cache'],
                   GOCACHE=runtime['existing_build_cache'])
     return result
@@ -301,7 +384,7 @@ def databases(state, profile, prepare_budget):
 
 def supplier(state, manifest, runtime):
     tools, go = Path(runtime['supplier_root']), Path(runtime['compiler_root']) / 'bin/go'
-    for name, expected in manifest['linux_pins'].items():
+    for name, expected in runtime['supplier_pins'].items():
         regular(tools / name, 256 * 1024 * 1024)
         if digest(tools / name) != expected:
             raise Refusal('native supplier binary differs')
@@ -309,27 +392,35 @@ def supplier(state, manifest, runtime):
         raise Refusal('actual compiler supplier differs')
     return tools, go
 
-def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget):
+def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, manual=False):
     job = 'scan-pr' if phase == 'prepare-differential' else 'scan-scheduled'
-    prepare_budget = Budget(load(HERE / 'hosted-job-timing-acceptance.json')['jobs'][job]['prepare_total_seconds'])
+    prepare_budget = Budget(load(HERE / 'manual-proof-plan.json')['prepare_seconds'] if manual else
+        load(HERE / 'hosted-job-timing-acceptance.json')['jobs'][job]['prepare_total_seconds'])
     state.mkdir(mode=0o700)
     for name in ['home', 'tmp', 'evidence', 'runs']:
         (state / name).mkdir(mode=0o700)
-    event, candidate, trusted_sha = [os.environ[name] for name in ('EVENT_NAME', 'CANDIDATE_SHA', 'TRUSTED_SHA')]
+    telemetry=state/'home/.config/go/telemetry';telemetry.mkdir(mode=0o700,parents=True)
+    (telemetry/'mode').write_text('off\n');(telemetry/'mode').chmod(0o600)
+    if manual:
+        event = 'workflow_dispatch'
+        candidate = manifest['prepared_source_refs']['candidate']
+        trusted_sha = os.environ['GITHUB_SHA']
+    else:
+        event, candidate, trusted_sha = [os.environ[name] for name in ('EVENT_NAME', 'CANDIDATE_SHA', 'TRUSTED_SHA')]
     differential = phase == 'prepare-differential'
-    if event not in ({'pull_request', 'merge_group'} if differential else {'push', 'schedule'}):
+    if not manual and event not in ({'pull_request', 'merge_group'} if differential else {'push', 'schedule'}):
         raise Refusal('event does not match exact job')
     if not all(COMMIT.fullmatch(value) for value in [candidate, trusted_sha]):
         raise Refusal('invalid candidate/trusted SHA')
     tools, go = supplier(state, manifest, runtime)
-    child_env = env(go, state)
+    child_env = env(go, state, runtime)
     current = bounded_run(['/usr/bin/git', '-C', str(REPOSITORY), 'rev-parse', 'HEAD'], REPOSITORY, child_env, 30)
     if current.returncode or current.stderr or current.stdout.strip() != trusted_sha:
         raise Refusal('bootstrap checkout is not exact trusted event base')
     refs = {'candidate': candidate}
     if differential:
-        base = os.environ['BASE_SHA']
-        if base != trusted_sha:
+        base = manifest['prepared_source_refs']['baseline'] if manual else os.environ['BASE_SHA']
+        if not manual and base != trusted_sha:
             raise Refusal('baseline must equal exact trusted event base')
         refs['baseline'] = base
     sources = {}
@@ -361,7 +452,7 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget):
         raise Refusal('public module identity admission remains incomplete')
     # Preload only explicit reviewed path/version arguments; no candidate command,
     # npm install, direct VCS, private proxy fallback or implicit module graph call.
-    online = env(go, state, online=True)
+    online = env(go, state, runtime, online=True)
     for item in inventory['items']:
         target = item['module'] + '@' + item['version']
         downloaded = bounded_run([str(go), 'mod', 'download', '-json', target], state, online, 90, prepare_budget)
@@ -373,7 +464,8 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget):
     db = databases(state, profile, prepare_budget)
     write_completion(state / 'prepared.json', {'complete': True, 'sources': sources, 'databases': db,
         'profile_sha256': manifest['trusted_files']['scanner-profile.json'],
-        'supplier_pins': manifest['linux_pins'], 'compiler_sha256': runtime['compiler_sha256'],
+        'supplier_pins': runtime['supplier_pins'], 'compiler_sha256': runtime['compiler_sha256'],
+        'event': event, 'automatic_admission': not manual,
         'bootstrap_manifest_sha256': digest(HERE / 'bootstrap-manifest.json'),
         'created_at': datetime.now(timezone.utc).isoformat()}, prepare_budget)
 
@@ -390,49 +482,6 @@ def socket_filter():
                  (0x45, 0, 1, 0x7e020000), (0x06, 0, 0, 0x00050000 | errno.EPERM),
                  (0x06, 0, 0, 0x7fff0000)])
     return b''.join(struct.pack('<HBBI', *row) for row in rows)
-
-def capture_worker(args, cwd, child_env, filter_fd, budget, timeout):
-    """Only one explicit filter FD inherited; capture/reap ownership is conserved."""
-    proc = None; reaped = False; selector = selectors.DefaultSelector()
-    streams = [bytearray(), bytearray()]
-    deadline = time.monotonic() + min(timeout, budget.left())
-    try:
-        proc = subprocess.Popen(args, cwd=cwd, env=child_env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
-            pass_fds=(filter_fd,), start_new_session=True)
-        for index, pipe in enumerate([proc.stdout, proc.stderr]):
-            os.set_blocking(pipe.fileno(), False)
-            selector.register(pipe, selectors.EVENT_READ, index)
-        while selector.get_map():
-            remaining = min(deadline - time.monotonic(), budget.left())
-            if remaining <= 0:
-                raise Refusal('Linux worker capture deadline exceeded')
-            for key, _ in selector.select(min(remaining, 0.25)):
-                block = os.read(key.fileobj.fileno(), 65536)
-                if not block:
-                    selector.unregister(key.fileobj); continue
-                index = key.data
-                if len(streams[index]) + len(block) > [16 * 1024 * 1024, 4 * 1024 * 1024][index]:
-                    raise Refusal('Linux worker stream bound exceeded')
-                budget.charge(len(block)); streams[index].extend(block)
-        remaining = min(deadline - time.monotonic(), budget.left())
-        if remaining <= 0:
-            raise Refusal('Linux worker completion deadline exceeded')
-        code = proc.wait(timeout=remaining)
-        reaped = True  # Never signal or wait again after this successful reap.
-        return code, bytes(streams[0]), bytes(streams[1])
-    finally:
-        selector.close()
-        if proc is not None:
-            if not reaped:
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                proc.wait(timeout=5)
-            for pipe in [proc.stdout, proc.stderr]:
-                if pipe is not None:
-                    pipe.close()
 
 def write_completion(path, value, budget):
     # Completion cannot survive a post-write deadline refusal.
@@ -514,198 +563,219 @@ def step_scan_identity(label):
         raise Refusal('actual current scan step did not finish successfully')
     return token
 
-def cgroup_helpers():
-    trusted()  # The new topology helper is pinned before any import/query.
-    import osv_cgroup
-    return osv_cgroup
+def worker_mounts(state, private, runtime):
+    # Preserve every absolute path used by the trusted producer. State is RO;
+    # only these explicit private output/cache carveouts are admitted writable.
+    mounts = [(HERE, str(HERE), True), (state, str(state), True),
+        (Path(runtime['compiler_root']), runtime['compiler_root'], True),
+        (Path(runtime['supplier_root']), runtime['supplier_root'], True),
+        (Path(runtime['existing_module_cache']), runtime['existing_module_cache'], True)]
+    mounts.append((Path(runtime['supplier_delivery_proof_path']), runtime['supplier_delivery_proof_path'], True))
+    writable = [private, state / 'runs', state / 'home', state / 'tmp']
+    mounts += [(path, str(path), False) for path in writable]
+    cache=Path(runtime['existing_build_cache']);mounts.append((cache,str(cache),False))
+    return mounts, writable
 
-def close_input():
-    # Bind fd0 before any child spawn. This also closes the input forwarded by
-    # systemd-run --pipe and the stdin inherited by the namespace worker.
-    before = os.lstat('/dev/null')
-    fd = os.open('/dev/null', os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        opened = os.fstat(fd)
-        identity = lambda info: (info.st_dev, info.st_ino, info.st_rdev, info.st_uid)
-        if (not stat.S_ISCHR(before.st_mode) or not stat.S_ISCHR(opened.st_mode) or
-                before.st_uid != 0 or identity(before) != identity(opened) or
-                (platform.system() == 'Linux' and opened.st_rdev != os.makedev(1, 3))):
-            raise Refusal('canonical null input device identity changed')
-        os.dup2(fd, 0, inheritable=True)
-        if identity(os.fstat(0)) != identity(opened):
-            raise Refusal('null input descriptor binding failed')
-    finally:
-        if fd != 0:
-            os.close(fd)
+def require_retired_containers(state):
+    # The ledger is under the RO state bind, outside every worker RW carveout.
+    # Public diagnostics, like positive results, require actual owned retirement.
+    ledgers=state/'container-ledgers'
+    for private in sorted(state.glob('worker-*')):
+        owned(private)
+        ledger=ledgers/private.name
+        if not ledger.exists():
+            if any((private/name).exists() for name in ('runtime-witness.json','worker-result.json','container.id')):
+                raise Refusal('worker observations have no owned creation ledger')
+            continue
+        owned(ledgers)
+        record=load(ledger)
+        nonce=record.get('nonce','')
+        expected_labels={'workflow.osv.owner':nonce,'workflow.osv.commit':os.environ['GITHUB_SHA']}
+        expected_name='wf-osv-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']+'-'+nonce
+        if (not re.fullmatch('[0-9a-f]{32}',nonce) or record.get('name')!=expected_name or
+            record.get('labels')!=expected_labels or record.get('output')!=str(private) or
+            record.get('helper_root')!=str(HERE) or record.get('production') is not True):
+            raise Refusal('actual container ownership ledger is unbound')
+        created=load(ledger.with_name(ledger.name+'.created'))
+        retired=load(ledger.with_name(ledger.name+'.retired'))
+        if (not SHA.fullmatch(str(created.get('container_id',''))) or
+            created.get('labels')!=expected_labels or created.get('name')!=expected_name or
+            retired.get('labels')!=expected_labels or retired.get('name')!=expected_name or
+            retired.get('container_id')!=created['container_id'] or retired.get('retired') is not True or
+            retired.get('cleanup',{}).get('absent') is not True):
+            raise Refusal('actual authenticated full-ID retirement is unproved')
+    return True
 
-def release_group(group, supervisor):
-    # This group was exclusively created by this manager; workers cannot mount
-    # its writable controls or move themselves elsewhere. Do not signal a reaped
-    # PID/process group. The owned cgroup covers every remaining descendant.
-    if (supervisor.name != 'supervisor' or group.parent != supervisor.parent or
-            group.name != 'wf-osv-' + str(os.getpid()) or
-            group.is_symlink() or supervisor.is_symlink()):
-        raise Refusal('unbound owned cgroup cleanup')
-    # The controller-distributing root must stay empty. Restore the trusted
-    # manager to its recorded supervisor leaf, never to that root.
-    (supervisor / 'cgroup.procs').write_text(str(os.getpid()))
-    if str(os.getpid()) not in (supervisor / 'cgroup.procs').read_text().splitlines():
-        raise Refusal('manager cgroup restoration failed')
-    if (group.parent / 'cgroup.procs').read_text().splitlines():
-        raise Refusal('delegated cgroup root became populated')
-    descendants = bool((group / 'cgroup.procs').read_text().splitlines())
-    if descendants:
-        (group / 'cgroup.kill').write_text('1')
-        deadline = time.monotonic() + 5
-        while (group / 'cgroup.procs').read_text().splitlines():
-            if time.monotonic() >= deadline:
-                raise Refusal('owned descendant cgroup did not empty after bounded kill')
-            time.sleep(0.01)
-    group.rmdir()
-    if descendants:
-        raise Refusal('unexpected live descendants after launcher reap; owned group killed')
+def close_all_containers(state, runtime, deadline):
+    from osv_container import Container, IMAGE, IMAGE_CONFIG
+    ledgers=state/'container-ledgers'
+    if not ledgers.exists():return require_retired_containers(state)
+    owned(ledgers)
+    for private in sorted(state.glob('worker-*')):
+        ledger=ledgers/private.name
+        if not ledger.exists():continue
+        row=load(ledger);nonce=row.get('nonce','')
+        labels={'workflow.osv.owner':nonce,'workflow.osv.commit':os.environ['GITHUB_SHA']}
+        name='wf-osv-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']+'-'+nonce
+        mounts,writable=worker_mounts(state,private,runtime)
+        expected_mounts=[(str(HERE),'/wf',True),(str(private),'/out',False),
+            *[(str(source),target,ro) for source,target,ro in mounts]]
+        if (not re.fullmatch('[0-9a-f]{32}',nonce) or row.get('name')!=name or row.get('labels')!=labels or
+            row.get('image')!=IMAGE or row.get('image_config')!=IMAGE_CONFIG or
+            row.get('output')!=str(private) or row.get('helper_root')!=str(HERE) or
+            row.get('mounts')!=[list(item) for item in expected_mounts] or
+            row.get('carveouts')!=sorted(str(path) for path in writable) or row.get('carveout_parent')!=str(state) or
+            row.get('production') is not True or row.get('creation_attempted') is not True):
+            raise Refusal('recovery refuses a foreign or altered container ledger')
+        container=Container(private,HERE,mounts=mounts,seconds=row['seconds'],production=True,
+            carveouts=writable,carveout_parent=state,deadline=deadline)
+        container.name=name;container.nonce=nonce;container.labels=labels;container.creation_attempted=True
+        created_path=ledger.with_name(ledger.name+'.created')
+        if created_path.exists():
+            created=load(created_path)
+            if created.get('labels')!=labels or created.get('name')!=name or not SHA.fullmatch(str(created.get('container_id',''))):
+                raise Refusal('recovery refuses an unauthenticated previous full container ID')
+            container.identifier=created['container_id'];container.cleanup_mode=True
+            observed=container.inspect(container.identifier)
+            if observed is None:
+                cleanup={'container_id':container.identifier,'absent':True,'forced_removal':False,'recovery':True}
+                container.retired=True
+            else:
+                container.owned(observed);cleanup=container.cleanup()
+        else:
+            container.cleanup_mode=True
+            observed=container.inspect(name)
+            if observed is None:raise Refusal('uncertain create cannot prove full-ID retirement')
+            container.identifier=container.owned(observed)['Id']
+            write(created_path,{'container_id':container.identifier,'name':name,'labels':labels})
+            cleanup=container.cleanup()
+        retired_path=ledger.with_name(ledger.name+'.retired')
+        if not retired_path.exists():write(retired_path,{'name':name,'container_id':container.identifier,'labels':labels,'retired':True,'cleanup':cleanup})
+        write(private/'container-recovery.json',container.lifecycle_evidence())
+    return require_retired_containers(state)
 
-def enter_group(runtime):
-    # Acceptance is hash-pinned by the reviewed trusted manifest, then each actual
-    # worker must additionally witness kernel limits/namespace/socket denial.
-    binding = cgroup_helpers().attest_unit()
-    cgroup_parent, supervisor = Path(binding['root']), Path(binding['supervisor'])
-    if (runtime.get('delegated_cgroup_parent') != str(cgroup_parent) or
-            runtime.get('delegated_supervisor') != str(supervisor)):
-        raise Refusal('runtime differs from the actual systemd root/supervisor binding')
-    if (cgroup_parent / 'cgroup.procs').read_text().splitlines():
-        raise Refusal('delegated cgroup root must remain empty')
-    if str(os.getpid()) not in (supervisor / 'cgroup.procs').read_text().splitlines():
-        raise Refusal('manager is outside the witnessed supervisor leaf')
-    if not {'memory', 'pids'} <= set((cgroup_parent / 'cgroup.controllers').read_text().split()):
-        raise Refusal('delegated root lacks approved controllers')
-    # This is the sole explicit controller activation, inside the attested NEW
-    # owned empty unit root. No ancestor or existing service is modified.
-    (cgroup_parent / 'cgroup.subtree_control').write_text('+memory +pids')
-    if set((cgroup_parent / 'cgroup.subtree_control').read_text().split()) != {'memory', 'pids'}:
-        raise Refusal('delegated controller activation readback differs')
-    group = cgroup_parent / ('wf-osv-' + str(os.getpid()))
-    group.mkdir()
-    return group, supervisor
-
-def worker_mounts(state, private, group, runtime):
-    mounts = [(Path('/usr'), False), (Path('/lib'), False), (Path('/lib64'), False),
-              (HERE, False), (Path(runtime['compiler_root']), False), (Path(runtime['supplier_root']), False),
-              (Path(runtime['existing_module_cache']), False), (Path(runtime['existing_build_cache']), True)]
-    mounts += [(state / (label + '-source'), False) for label in load(state / 'prepared.json')['sources']]
-    mounts.insert(0, (state, False))
-    mounts += [(group, False), (state / 'public-db', False), (state / 'public-database-receipts.json', False),
-               (state / 'prepared.json', False), (private, True), (state / 'runs', True),
-               (state / 'home', True), (state / 'tmp', True)]
-    return mounts
+def verify_prepared_inputs(state, manifest, runtime):
+    prepared = load(state / 'prepared.json')
+    if (prepared['bootstrap_manifest_sha256'] != digest(HERE / 'bootstrap-manifest.json') or
+        prepared['profile_sha256'] != manifest['trusted_files']['scanner-profile.json'] or
+        prepared['supplier_pins'] != runtime['supplier_pins']):
+        raise Refusal('prepared immutable inputs changed')
+    supplier(state, manifest, runtime)
+    if load(state / 'public-database-receipts.json') != prepared['databases']:
+        raise Refusal('prepared database identity changed')
+    for ecosystem, row in prepared['databases'].items():
+        archive = state / 'public-db/osv-scalibr' / ecosystem / 'all.zip'
+        regular(archive, load(HERE / 'scanner-profile.json')['resource_envelope']['database_archive_bytes'][ecosystem])
+        if archive.stat().st_size != row['bytes'] or digest(archive) != row['sha256']:
+            raise Refusal('prepared database archive changed')
+    for label, source in prepared['sources'].items():
+        root = state / (label + '-source')
+        paths = {str(path.relative_to(root)): path for path in root.rglob('*') if not path.is_dir()}
+        if set(paths) != set(source['files']):
+            raise Refusal('exact source file set changed')
+        for name, row in source['files'].items():
+            path = paths[name];info = regular(path, 32 * 1024 * 1024)
+            if digest(path) != row['sha256'] or stat.S_IMODE(info.st_mode) != (0o755 if row['git_mode']=='100755' else 0o644):
+                raise Refusal('exact source mode or bytes changed')
+    return digest(state / 'prepared.json')
 
 def boundary(phase, state, manifest, runtime, bounded_run, Budget):
-    profile = load(HERE / 'scanner-profile.json')
-    total_limit = profile['resource_envelope']['total_seconds']
-    budget = Budget(240 if phase.startswith('report-') else total_limit)
-    group, cgroup_parent = enter_group(runtime)
+    from osv_container import Container
+    total = 240 if phase.startswith('report-') else load(HERE / 'scanner-profile.json')['resource_envelope']['total_seconds']
+    budget = Budget(total)
+    prepared_sha = verify_prepared_inputs(state, manifest, runtime)
+    private = Path(tempfile.mkdtemp(prefix='worker-', dir=state));private.chmod(0o700)
+    mounts, writable = worker_mounts(state, private, runtime)
+    request = {'phase': phase, 'state': str(state), 'private': str(private), 'runtime': runtime,
+        'core_contract_sha256': manifest['core_contract_sha256'], 'prepared_sha256': prepared_sha,
+        'identity': {key: os.environ[key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')},
+        'uid': os.getuid(), 'gid': os.getgid(),
+        'host_namespaces': {name: os.readlink('/proc/self/ns/'+name) for name in ('net','mnt','pid','ipc','cgroup','user')},
+        'readonly_targets': ['/wf', *[target for _, target, ro in mounts if ro]],
+        'forbidden_paths': ['/var/run/docker.sock','/run/docker.sock','/github/home',
+            '/home/runner/.aws','/home/runner/.ssh','/home/runner/.docker','/home/runner/.codex'],
+        'compiler_path': str(Path(runtime['compiler_root'])/'bin/go'), 'compiler_sha256': runtime['compiler_sha256']}
+    if phase.startswith('report-'):
+        labels = ['candidate','baseline'] if phase=='report-differential' else ['candidate']
+        request['scan_tokens'] = {label: step_scan_identity(label) for label in labels}
+    write(private / 'request.json', request)
+    ledgers=state/'container-ledgers'
+    if not ledgers.exists():ledgers.mkdir(mode=0o700)
+    owned(ledgers)
+    container = Container(private, HERE, mounts=mounts, seconds=max(1,int(budget.left())-180),
+                          production=True, carveouts=writable, carveout_parent=state,
+                          deadline=budget.deadline, ledger=ledgers/private.name)
     try:
-        for name, value in [('memory.max', '2147483648'), ('memory.swap.max', '0'), ('pids.max', '256')]:
-            (group / name).write_text(value)
-            if (group / name).read_text().strip() != value:
-                raise Refusal('kernel resource limit not applied')
-        (group / 'cgroup.procs').write_text(str(os.getpid()))
-        private = Path(tempfile.mkdtemp(prefix='worker-', dir=state)); private.chmod(0o700)
-        root_cache = private / 'pycache'
-        if root_cache.exists():
-            raise Refusal('worker cache prefix already exists')
-        request = {'phase': phase, 'state': str(state), 'host_net_ns': os.readlink('/proc/self/ns/net'),
-                   'host_mount_ns': os.readlink('/proc/self/ns/mnt'), 'limits': {
-                       name: (group / name).read_text().strip() for name in ['memory.max','memory.swap.max','pids.max']},
-                   'cgroup': str(group)}
-        if phase.startswith('report-'):
-            labels = ['candidate', 'baseline'] if phase == 'report-differential' else ['candidate']
-            request['scan_tokens'] = {label: step_scan_identity(label) for label in labels}
-        write(private / 'request.json', request)
-        filter_path = private / 'filter.bpf'; filter_path.write_bytes(socket_filter()); filter_path.chmod(0o600)
-        bwrap = manifest['linux_tools']['bubblewrap_path']
-        python = manifest['linux_tools']['python_path']
-        args = [bwrap, '--unshare-all', '--die-with-parent', '--new-session', '--cap-drop', 'ALL', '--clearenv']
-        for path, writable in worker_mounts(state, private, group, runtime):
-            if not path.exists():
-                raise Refusal('required trusted Linux mount missing')
-            args += ['--bind' if writable else '--ro-bind', str(path), str(path)]
-        args += ['--proc', '/proc', '--dev', '/dev', '--chdir', str(HERE)]
-        with filter_path.open('rb') as filter_file:
-            args += ['--seccomp', str(filter_file.fileno()), '--', python, '-I', '-S', '-B', '-X',
-                     'pycache_prefix=' + str(root_cache), str(HERE / 'run.py'), '--worker', str(private / 'request.json')]
-            code, stdout, stderr = capture_worker(args, HERE,
-                {'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C'},
-                filter_file.fileno(), budget, 240 if phase.startswith('report-') else total_limit)
-        for suffix, raw in [('stdout', stdout), ('stderr', stderr)]:
-            path = private / ('launcher.' + suffix)
-            with path.open('xb') as f:
-                os.fchmod(f.fileno(), 0o600); f.write(raw)
-        if code not in [0, 1] or not (private / 'worker-result.json').exists():
-            raise Refusal('actual Linux worker did not complete')
-        result = load(private / 'worker-result.json')
-        if result.get('complete') is not True or result.get('exit') != code:
-            raise Refusal('Linux worker completion/exit contradiction')
-        if phase.startswith('scan-'):
-            label = 'baseline' if phase == 'scan-baseline' else 'candidate'
-            proof = Path(result['proof'])
-            if proof.parent != state / 'runs' or proof.is_symlink():
-                raise Refusal('worker proof outside managed output')
-            result.update(report_sha256=digest(proof / 'results.json'),
-                          receipt_sha256=digest(proof / 'receipt.json'))
-        else:
-            sarif = Path(result['sarif'])
-            if sarif != private / 'reporter.sarif' or digest(sarif) != result['sarif_sha256']:
-                raise Refusal('reporter output binding changed')
-            annotations = private / 'reporter.stderr'
-            regular(annotations, 4 * 1024 * 1024)
-            result['annotations_sha256'] = digest(annotations)
-        trusted()  # Recheck all trusted helper/profile bytes before completion.
-        budget.left()
+        container.create()
+        code, row = container.start_wait()
     finally:
-        release_group(group, cgroup_parent)
-    trusted()
-    budget.left()
-    # This real owned empty-directory cleanup must precede any positive scan
-    # outcome, public SARIF/JSON or reporter annotation publication.
+        try:
+            cleanup = container.cleanup()
+            write(ledgers/(private.name+'.retired'), {'name':container.name,'container_id':container.identifier,
+                'labels':container.labels,'retired':True,'cleanup':cleanup})
+        finally:
+            write(private / 'container-lifecycle.json', container.lifecycle_evidence())
+    if not container.retired or cleanup.get('absent') is not True:
+        raise Refusal('production container retirement is unproved')
+    trusted();budget.left()
+    result = load(private / 'worker-result.json')
+    witness = load(private / 'runtime-witness.json')
+    if (code not in [0,1] or result.get('complete') is not True or result.get('exit') != code or
+        witness.get('identity') != request['identity'] or witness.get('core_contract_sha256') != manifest['core_contract_sha256'] or
+        witness.get('complete') is not True):
+        raise Refusal('actual production container did not complete its witnessed scan')
+    if phase.startswith('scan-'):
+        proof = Path(result['proof'])
+        if proof.parent != state / 'runs' or proof.is_symlink():
+            raise Refusal('worker proof outside managed output')
+        result.update(report_sha256=digest(proof / 'results.json'), receipt_sha256=digest(proof / 'receipt.json'))
+    else:
+        sarif = Path(result['sarif'])
+        if sarif != private / 'reporter.sarif' or digest(sarif) != result['sarif_sha256']:
+            raise Refusal('reporter output binding changed')
+        regular(private / 'reporter.stderr', 4 * 1024 * 1024)
+        result['annotations_sha256'] = digest(private / 'reporter.stderr')
+    if verify_prepared_inputs(state, manifest, runtime) != prepared_sha:
+        raise Refusal('prepared input changed after container retirement')
+    result.update(container_id=container.identifier, container_retired=True,
+        runtime_witness_sha256=digest(private / 'runtime-witness.json'),
+        lifecycle_sha256=digest(private / 'container-lifecycle.json'))
+    trusted();budget.left()
     cleanup_startup_directory()
-    trusted()
-    budget.left()
+    trusted();budget.left()
     return code, result, budget
 
 def worker(request_path, manifest, profile):
     request = load(request_path); state = owned(Path(request['state']))
-    if os.readlink('/proc/self/ns/net') == request['host_net_ns'] or os.readlink('/proc/self/ns/mnt') == request['host_mount_ns']:
-        raise Refusal('Linux namespaces were not isolated')
-    try:
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    except OSError as error:
-        if error.errno != errno.EPERM:
-            raise Refusal('socket denial is not enforced EPERM')
-    else:
-        raise Refusal('network socket creation unexpectedly available')
-    for name, value in request['limits'].items():
-        if (Path(request['cgroup']) / name).read_text().strip() != value:
-            raise Refusal('actual worker kernel limit differs')
-    if str(os.getpid()) not in (Path(request['cgroup']) / 'cgroup.procs').read_text().splitlines():
-        raise Refusal('actual worker is outside accepted cgroup')
+    private = owned(Path(request['private']))
+    if (request_path != Path('/out/request.json') or private.parent != state or not private.name.startswith('worker-') or
+        request['core_contract_sha256'] != manifest['core_contract_sha256'] or
+        request['prepared_sha256'] != digest(state / 'prepared.json')):
+        raise Refusal('production worker request binding differs')
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('container_worker', HERE / 'container-worker.py')
+    witness_module = importlib.util.module_from_spec(spec);spec.loader.exec_module(witness_module)
+    observed = witness_module.witness(request)
+    write(private / 'runtime-witness.json', {'complete': True, 'identity': request['identity'],
+        'core_contract_sha256': manifest['core_contract_sha256'], 'witness': observed})
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_JSON, MAX_JSON))
     from osv_producer import run_one
     from osv_io import bounded_run, Budget
-    runtime = load(HERE / 'linux-hosted-acceptance.json')
+    runtime = request['runtime']
     tools, go = supplier(state, manifest, runtime)
-    child_env = env(go, state)
+    child_env = env(go, state, runtime)
     phase = request['phase']; label = 'baseline' if phase == 'scan-baseline' else 'candidate'
     if phase.startswith('scan-'):
         out, blocking = run_one(state / (label + '-source'), profile['inputs'], tools, go,
-            state / 'public-db', load(state / 'public-database-receipts.json'), datetime.now(timezone.utc), state / 'runs', child_env)
-        write(request_path.parent / 'worker-result.json', {'complete': True, 'proof': str(out),
+            state / 'public-db', load(state / 'public-database-receipts.json'), datetime.now(timezone.utc), state / 'runs', child_env,
+            admitted_supplier=supplier_contract(manifest, runtime))
+        write(private / 'worker-result.json', {'complete': True, 'proof': str(out),
             'blocking': sorted(blocking), 'label': label, 'exit': 1 if blocking else 0,
-            'socket_denial': 'EPERM', 'kernel_limits': request['limits']})
+            'socket_denial': 'EPERM', 'kernel_limits': observed['kernel_limits']})
         return 1 if blocking else 0
     if phase in {'report-scheduled', 'report-differential'}:
         _, new = complete_result(state, 'candidate', manifest, request['scan_tokens']['candidate'])
-        sarif = request_path.parent / 'reporter.sarif'
+        sarif = private / 'reporter.sarif'
         args = [str(tools / 'osv-reporter'), '--output-files=sarif:' + str(sarif),
                 '--new=' + str(new / 'results.json'), '--fail-on-vuln=true']
         if phase == 'report-differential':
@@ -717,12 +787,12 @@ def worker(request_path, manifest, profile):
         if report.returncode not in [0, 1]:
             raise Refusal('reporter incomplete or unsupported exit')
         for suffix, content in [('stdout', report.stdout), ('stderr', report.stderr)]:
-            path = request_path.parent / ('reporter.' + suffix)
+            path = private / ('reporter.' + suffix)
             with path.open('xb') as f:
                 os.fchmod(f.fileno(), 0o600); f.write(content.encode())
-        write(request_path.parent / 'worker-result.json', {'complete': True, 'exit': report.returncode,
+        write(private / 'worker-result.json', {'complete': True, 'exit': report.returncode,
             'sarif': str(sarif), 'sarif_sha256': digest(sarif), 'socket_denial': 'EPERM',
-            'kernel_limits': request['limits']})
+            'kernel_limits': observed['kernel_limits']})
         return report.returncode
     raise Refusal('unsupported worker phase')
 
@@ -767,7 +837,7 @@ def complete_result(state, label, manifest, worker_token=None):
                        for name, row in prepared['sources'][label]['files'].items()}
     if receipt['source'] != expected_source or receipt['compiler'] != 'go version go1.27.2 linux/amd64':
         raise Refusal('completed source/compiler differs from exact admitted Git export')
-    if receipt['databases'] != {key: row['sha256'] for key, row in prepared['databases'].items()} or receipt['supplier_pins'] != {k:v for k,v in manifest['linux_pins'].items() if k != 'osv-reporter'}:
+    if receipt['databases'] != {key: row['sha256'] for key, row in prepared['databases'].items()} or receipt['supplier_pins'] != {k:v for k,v in prepared['supplier_pins'].items() if k != 'osv-reporter'}:
         raise Refusal('scan database/supplier identity differs')
     return result, proof
 
@@ -783,6 +853,7 @@ def publish(state, name, source):
         shutil.copyfileobj(src, out, 1024 * 1024)
 
 def evidence(state, manifest):
+    require_retired_containers(state)
     destination = REPOSITORY / 'offline-evidence'
     if destination.exists() or destination.is_symlink():
         owned(destination)
@@ -846,15 +917,23 @@ def gate(phase, state, manifest):
 def main():
     phase = sys.argv[1] if len(sys.argv) > 1 else ''
     manifest, profile, bounded_run, Budget = trusted()
-    runtime = admission(manifest)
     if phase == '--worker' and len(sys.argv) == 3:
         return worker(Path(sys.argv[2]), manifest, profile)
+    manual = phase == '--manual-proof' and len(sys.argv) == 4
+    if manual:
+        phase = sys.argv[2]
+        if phase not in MANUAL_PHASES:
+            raise Refusal('unknown finite proof phase')
+        runtime = manual_admission(manifest, sys.argv[3])
+        sys.argv = [sys.argv[0], phase]
+    else:
+        runtime = admission(manifest)
     if phase not in PHASES or len(sys.argv) != 2:
         raise Refusal('unknown offline scanner phase')
     state = state_path()
     if phase.startswith('prepare-'):
         cleanup_startup_directory()
-        prepare(phase, state, manifest, profile, runtime, bounded_run, Budget)
+        prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, manual=manual)
         return 0
     owned(state)
     if phase.startswith('scan-'):
@@ -902,6 +981,7 @@ def preserve_incomplete_protocols(phase, destination):
     if not state.exists():
         return
     owned(state)
+    require_retired_containers(state)
     runs = state / 'runs'
     if not runs.exists():
         return
@@ -926,6 +1006,12 @@ def preserve_incomplete_protocols(phase, destination):
         source = state / name
         if source.exists():
             copy(source, output / name)
+    for private in sorted(state.glob('worker-*')):
+        owned(private)
+        target = output / private.name;target.mkdir(mode=0o700)
+        for name in ('runtime-witness.json','container-lifecycle.json','worker-result.json'):
+            source = private / name
+            if source.exists():copy(source, target / name)
     for proof in sorted(runs.iterdir()):
         if not re.fullmatch(r'osv-proof-[a-z0-9_]+', proof.name):
             raise Refusal('unknown producer proof directory')
@@ -956,6 +1042,12 @@ def entry():
         # Preserve incomplete vs complete-findings distinction. No fabricated
         # empty report, skipped success, new check or approval is written.
         phase = sys.argv[1] if len(sys.argv) > 1 else ''
+        if phase == '--worker':
+            try:
+                write(Path('/out/worker-result.json'), {'complete': False, 'exit': 2,
+                    'error_type': type(error).__name__, 'error': str(error)[:512] if isinstance(error, Refusal) else 'producer refused incomplete scan'})
+            except Exception:
+                pass
         print(json.dumps(failure_receipt(phase, error)), file=sys.stderr)
         try:
             cleanup_startup_directory()

@@ -10,6 +10,11 @@ on:
         type: boolean
         required: false
         default: false
+      osv_production_proof:
+        description: 'Collect approved finite supplier, production container and readonly fixture evidence'
+        type: boolean
+        required: false
+        default: false
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
@@ -103,7 +108,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/container-source-bindings.json)"
-          test "${actual%% *}" = e7a87680836f0fa47dea4a2e02e7a962e23f383c561738982ca44c22ba8aa749
+          test "${actual%% *}" = cfb86b6b2b92b52e8da37a0d0c522f3b0ad7d8abe279d335f1c4f3dfaffc7045
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-container-proof.py)"
           test "${actual%% *}" = c4db39f78f0555396dde81a444d88f73ea7d95dca0090d61e4bbe6545b7ec4a5
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-container-proof-XXXXXXXXXX")"
@@ -128,3 +133,152 @@ jobs:
       - name: Enforce the actual proof outcome
         if: ${{ !cancelled() }}
         run: test '${{ steps.proof.outcome }}' = success
+
+  osv-production-proof:
+    if: github.event_name == 'workflow_dispatch' && inputs.osv_production_proof == true && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact finite proof implementation
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Supply the fixed public source objects
+        run: |
+          set -euo pipefail
+          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
+            GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+            /usr/bin/git fetch --no-tags --no-recurse-submodules https://github.com/GoCodeAlone/workflow.git \
+              81b9b1df2386f7d44c8464c999a4ea0919813526 2fcb9baf4f03d599efb1fc4c462455a978620ae4
+      - name: Supply the exact analysis compiler
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Supply the pinned Python container
+        run: |
+          set -euo pipefail
+          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
+            /usr/bin/docker pull docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a
+      - name: Build the authenticated fixed suppliers serially
+        id: supplier
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/prepare-supplier.py)"
+          test "${actual%% *}" = a7d5cee541fa33fd0a643e2e52878c7b80b6ef968c50f7c95d48560db43cc09c
+          compiler="$(command -v go)"
+          compiler_root="$(/usr/bin/dirname "$(/usr/bin/dirname "$compiler")")"
+          mapfile -t caches < <(/usr/bin/env -i PATH="$compiler_root/bin:/usr/bin:/bin" HOME="$HOME" \
+            GOENV=off GOWORK=off GOTOOLCHAIN=local "$compiler" env GOPATH GOMODCACHE GOCACHE)
+          test "${#caches[@]}" = 3
+          # These are the standard allocated runner caches; no private Go cache.
+          /usr/bin/mkdir -p -- "${caches[@]}"
+          supplier_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-supplier-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-supplier-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\ncompiler-root=%s\ngopath=%s\nmodule-cache=%s\nbuild-cache=%s\n' \
+            "$supplier_dir" "$compiler_root" "${caches[0]}" "${caches[1]}" "${caches[2]}" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=10s 1830s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/prepare-supplier.py --execute --output "$supplier_dir" --go "$compiler" \
+              --gopath "${caches[0]}" --gomodcache "${caches[1]}" --gocache "${caches[2]}"
+      - name: Collect actual finite production executions
+        id: production
+        if: steps.supplier.outcome == 'success'
+        continue-on-error: true
+        env:
+          SUPPLIER_DIRECTORY: ${{ steps.supplier.outputs.evidence }}
+          COMPILER_ROOT: ${{ steps.supplier.outputs.compiler-root }}
+          ALLOCATED_GOPATH: ${{ steps.supplier.outputs.gopath }}
+          ALLOCATED_MODULE_CACHE: ${{ steps.supplier.outputs.module-cache }}
+          ALLOCATED_BUILD_CACHE: ${{ steps.supplier.outputs.build-cache }}
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/bootstrap-manifest.json)"
+          test "${actual%% *}" = 337c8de6189d3ad41ff932461211325df0c0c309c560f1a566a1b5616d5f7e94
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/run-production-proof.py)"
+          test "${actual%% *}" = fa1fb9cd2d27b257c4cc8293e9f091dd12866721c4f412ae3844a9cfef125d3c
+          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=10s 5430s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            GITHUB_OUTPUT="$GITHUB_OUTPUT" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/run-production-proof.py "$proof_dir" "$SUPPLIER_DIRECTORY/binaries" \
+              "$COMPILER_ROOT" "$ALLOCATED_GOPATH" "$ALLOCATED_MODULE_CACHE" "$ALLOCATED_BUILD_CACHE" --execute
+      - name: Validate committed readonly fixture repairs sequentially
+        id: fixtures
+        if: steps.supplier.outcome == 'success'
+        continue-on-error: true
+        env:
+          COMPILER_ROOT: ${{ steps.supplier.outputs.compiler-root }}
+          ALLOCATED_GOPATH: ${{ steps.supplier.outputs.gopath }}
+          ALLOCATED_MODULE_CACHE: ${{ steps.supplier.outputs.module-cache }}
+          ALLOCATED_BUILD_CACHE: ${{ steps.supplier.outputs.build-cache }}
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/check-readonly-fixtures.py)"
+          test "${actual%% *}" = 6a19b5bf414ee9aff165de8decc6f3f67b311e7e0366d19f939fa9e27df1137a
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/run.py)"
+          test "${actual%% *}" = 1bf192a8283396234c9514e0fd66939b72fe95d38e806c070f3fd4a5299eb996
+          fixture_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-fixture-proof-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-fixture-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$fixture_dir" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=10s 630s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/check-readonly-fixtures.py "$fixture_dir" "$COMPILER_ROOT/bin/go" \
+              "$ALLOCATED_MODULE_CACHE" "$ALLOCATED_BUILD_CACHE" "$ALLOCATED_GOPATH" --execute
+      - name: Retain exact supplier delivery evidence
+        if: ${{ !cancelled() && steps.supplier.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-supplier-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.supplier.outputs.evidence }}/supplier-delivery-proof.json
+            ${{ steps.supplier.outputs.evidence }}/logs
+          if-no-files-found: error
+          retention-days: 5
+      - name: Retain finite production and raw finding evidence
+        if: ${{ !cancelled() && steps.production.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-production-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.production.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 5
+      - name: Retain readonly fixture and focused behavior evidence
+        if: ${{ !cancelled() && steps.fixtures.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-readonly-fixture-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.fixtures.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 5
+      - name: Enforce actual supplier and production outcomes
+        if: ${{ !cancelled() }}
+        run: |
+          test '${{ steps.supplier.outcome }}' = success
+          test '${{ steps.production.outcome }}' = success
+          test '${{ steps.fixtures.outcome }}' = success

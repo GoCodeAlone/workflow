@@ -1,49 +1,46 @@
-# Offline scanner prerequisite preparation
+# Offline scanner
 
-Installation and scanner execution remain on HOLD. The bootstrap manifest keeps
-all five admission receipts unbound and `permanent_install_authorized: false`.
-The existing scanner profile, finding policy and automatic OSV workflow are
-unchanged.
+The pinned container prerequisite passed at commit
+`6150c3712d984942889436b5d4e53ba9ce5bc41c`,
+[hosted run38156036062](https://github.com/GoCodeAlone/workflow/actions/runs/38156036062).
+Production execution and scanner admission require their own actual evidence.
+The permanent replacement is authorized; all five admission decisions remain
+unbound pending independent review.
 
-`run-systemd-proof.py` prepares one prerequisite witness on the existing
-`ubuntu-latest` hosted path. It requires a separately authorized manual dispatch
-on `prep/osv-prerequisites-20261011-r1` with `osv_privileged_proof: true`; the input
-defaults to false. Publishing these sources does not authorize that dispatch.
-The first proof executes fixed probes only and cannot admit installation or run
-the scanner or candidate code.
+Production analysis and reporting run in one nonroot, offline container with
+memory2GiB, swap0, pids256 and CPU2. Every invocation witnesses the actual
+namespace, descriptor, socket/syscall/ABI, readonly and quota controls. Readonly
+inputs cannot have writable aliases. Only owned worker/runs/home/tmp state and
+the separate existing build cache are writable.
 
-Before submission, the launcher checks the exact checkout and dispatch identity,
-authenticated temporary bubblewrap, existing namespace eligibility, canonical
-tools, systemd 255 manager defaults, unit lookup metadata and the complete
-ancestor controller sets. It repeats the read-only preflight immediately before
-submission. Unknown, denied, changed or conflicting state stops the proof;
-there is no policy or alternate-host fallback. Configuration contents are not
-read. Both the launcher and unit manager bind stdin to the verified canonical
-null device before any child execution.
+The host prepares authenticated public modules and fixed Go/npm database
+archives. [SUPPLIER.md](SUPPLIER.md) describes the source-conserving supplier
+build. Actual paths bind to fresh same-job delivery evidence; admission does
+not reuse paths from a previous VM. Credentialed uploads remain host-side.
 
-The sole new transient unit runs as the actual nonzero runner UID/GID in
-`system.slice`, with an empty delegated root, a `supervisor` leaf and a private
-worker sibling. Both root and worker retain memory 2 GiB, swap 0 and 256 tasks.
-The root runtime is 150 seconds, startup 15 seconds and stop 5 seconds; the root
-command is enclosed by a 180-second timeout with a 10-second kill grace. The
-whole launcher has a separate 240-second orchestration timeout, and the job
-remains eight minutes. IO and legacy BlockIO accounting are explicitly disabled;
-only memory and pids may be activated inside the new empty owned root. Both
-ancestor controller sets must already provide memory and pids and remain
-unchanged.
+`manual-proof-plan.json` permits finite dispatch on the owned ref and fixed
+candidate/base commits. Its collector preserves the actual event, raw findings,
+finding exit1 and incomplete exit2. The immutable code/runtime/profile contract
+is separate from the admission index. Manual proof cannot supply the four
+normal-event delivery proofs or authorize automatic installation.
 
-Cleanup binds the captured unit invocation, control group, main PID and owner
-before stopping that exact unit. Missing or replaced attestation refuses cleanup
-and success. The unit's independent runtime bound and hosted VM teardown remain
-in force. Receipts are provisional: actual supplier and proof step outcomes must
-both succeed, and receipt closure past the deadline vetoes the result.
+Host-owned creation and retirement records sit outside worker writable mounts.
+Shared deadlines reserve cleanup. The collector attempts authenticated closure
+even after a phase failure; raw publication requires full-ID retirement first.
 
-Run the offline regressions without executing systemd, sudo, namespaces or a
-scanner:
+GO-2026-5932 and the original baseline loading failures remain genuine holds.
+Forward fixture repair requires direct committed-fixture readonly load/tidy/test
+checks plus focused conformance behavior tests. An artifact-operation exception
+does not waive full-source findings. Historical systemd/bubblewrap sources are
+retained; production uses the approved container backend.
+
+Offline controls execute no Docker, Go build, network or namespace probes:
 
 ```sh
-python3 -I -S -B -X pycache_prefix=/tmp/osv-cgroup-test-cache-absent scripts/osv-offline/test-osv-cgroup.py
-python3 -I -S -B -X pycache_prefix=/tmp/osv-launcher-test-cache-absent scripts/osv-offline/test-run-systemd-proof.py
-python3 -I -S -B -X pycache_prefix=/tmp/osv-runtime-test-cache-absent scripts/osv-offline/test-prove-runtime.py
-python3 -I -S -B -X pycache_prefix=/tmp/osv-supplier-test-cache-absent scripts/osv-offline/test-supply-bubblewrap.py
+python3 -I -S -B scripts/osv-offline/test-osv-container.py
+python3 -I -S -B scripts/osv-offline/test-container-seccomp.py
+python3 -I -S -B scripts/osv-offline/test-container-worker.py
+python3 -I -S -B scripts/osv-offline/test-container-proof.py
+python3 -I -S -B scripts/osv-offline/test-production-manager.py
+python3 -I -S -B scripts/osv-offline/test-prepare-supplier.py
 ```

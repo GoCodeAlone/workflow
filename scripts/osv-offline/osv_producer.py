@@ -97,7 +97,7 @@ def source_contract(root, go_binary, env, out, label, budget):
     return roots,versions,set(modules)
 
 
-def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent, env):
+def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent, env, *, admitted_supplier=None):
     """Execute only after the caller verifies authority for this exact source root.
 
     No command-line entrypoint intentionally: the approved profile supplies the
@@ -108,6 +108,12 @@ def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent
     if parent.is_relative_to(root) or not parent.is_dir() or parent.is_symlink():
         raise IncompleteScan('output parent must be trusted and outside source')
     pins=PINS.get((platform.system(),platform.machine()))
+    if admitted_supplier is not None:
+        if (platform.system(),platform.machine())!=('Linux','x86_64'):
+            raise IncompleteScan('hosted supplier admission requires native Linux/amd64')
+        from osv_supplier import verify_delivery
+        verified=verify_delivery(admitted_supplier)
+        pins={name:verified[name] for name in ('osv-scanner','govulncheck')}
     if not pins: raise IncompleteScan('unreviewed producer platform')
     for name,digest in pins.items():
         path=tools/name
