@@ -213,7 +213,7 @@ def run(argv, cwd, env, budget, seconds, logdir, label, commands):
     return bytes(raw[0])
 
 
-def environment(go, home, caches, temporary, config, online=False, binaries=None):
+def environment(go, home, caches, temporary, config, online=False):
     result = {'PATH': f'{go.parent}:/usr/bin:/bin', 'HOME': str(home), 'LANG': 'C.UTF-8',
               'LC_ALL': 'C.UTF-8', 'TZ': 'UTC', 'TMPDIR': str(temporary),
               'XDG_CONFIG_HOME': str(config),
@@ -226,8 +226,6 @@ def environment(go, home, caches, temporary, config, online=False, binaries=None
               'GOFLAGS': '-mod=readonly', 'CGO_ENABLED': '0', 'GOOS': 'linux',
               'GOARCH': 'amd64', 'GOAMD64': 'v1', 'GOMAXPROCS': '2',
               'GOMEMLIMIT': '768MiB'}
-    if binaries is not None:
-        result['GOBIN'] = str(binaries)
     return result
 
 
@@ -691,15 +689,13 @@ def supplier(args):
         stage = 'serial-offline-supplier-builds'
         supplied = {}
         for name in ('osv-scanner', 'osv-reporter', 'govulncheck'):
-            if name == 'govulncheck':
-                argv = [str(go), 'install', '-trimpath', '-buildvcs=false', '-p=2', VULN[0] + '/cmd/govulncheck@' + VULN[1]]
-                build_env = environment(go, home, caches, temporary, config, binaries=binaries)
-                cwd = work
-            else:
-                argv = [str(go), 'build', '-mod=readonly', '-trimpath', '-buildvcs=false', '-p=2',
-                        '-o', str(binaries / name), './cmd/' + name]
-                build_env = env; cwd = source
-            run(argv, cwd, build_env, budget, BUILD_SECONDS, logs, 'build-' + name, commands)
+            # @version install discards this fixed graph and performs an online
+            # deprecation lookup. Build the authenticated VULN requirement in
+            # the same readonly/offline graph as both scanner commands instead.
+            target = VULN[0] + '/cmd/govulncheck' if name == 'govulncheck' else './cmd/' + name
+            argv = [str(go), 'build', '-mod=readonly', '-trimpath', '-buildvcs=false', '-p=2',
+                    '-o', str(binaries / name), target]
+            run(argv, source, env, budget, BUILD_SECONDS, logs, 'build-' + name, commands)
             raw = read_file(binaries / name, 256 * 1024 * 1024, budget)
             require(len(raw) >= 20 and raw[:6] == b'\x7fELF\x02\x01' and raw[18:20] == b'\x3e\x00',
                     'supplier build is not Linux amd64 ELF')

@@ -83,9 +83,14 @@ flags are not represented as an OS firewall.
 Compilation is serial and offline (`GOPROXY=off`, `GOSUMDB=off`), using
 `-trimpath -buildvcs=false -p=2`, CGO disabled, Linux/amd64/v1,
 GOMAXPROCS=2 and GOMEMLIMIT=768MiB. Scanner and reporter use `-mod=readonly` from
-the conserved source export. Govulncheck is installed only at the authenticated
-version `golang.org/x/vuln/cmd/govulncheck@v1.6.0` into the owned `binaries`
-subtree. No built binary runs; `go version -m` reads build metadata.
+the conserved source export. Govulncheck uses `go build -mod=readonly` for
+`golang.org/x/vuln/cmd/govulncheck` in that same fixed graph, whose authenticated
+requirement is `golang.org/x/vuln@v1.6.0`. Its source ZIP/h1 and actual main-module
+build metadata must match that version. Unlike
+[version-suffixed go install](https://pkg.go.dev/cmd/go#hdr-Compile_and_install_packages_and_dependencies),
+this retains the reviewed graph and avoids the online deprecation lookup that
+failed the actual offline run. All three commands write only to the owned
+`binaries` subtree. No built binary runs; `go version -m` reads build metadata.
 Go's [supported buildvcs=false flag](https://pkg.go.dev/cmd/go#hdr-Compile_packages_and_dependencies)
 omits the unrelated historical workspace VCS stamp. New hashes require actual
 hosted rebuilding and admission; equality to the old pins is never claimed.

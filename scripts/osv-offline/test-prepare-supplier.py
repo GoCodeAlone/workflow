@@ -522,6 +522,15 @@ class OrchestrationControls(unittest.TestCase):
         self.assertEqual([c[3] for c in self.calls if c[3].startswith('build-')],
                          ['build-osv-scanner', 'build-osv-reporter', 'build-govulncheck'])
         source = self.output / 'work/scanner-source'
+        for argv,cwd,env,label in self.calls:
+            if not label.startswith('build-'):continue
+            name=label[len('build-'):]
+            target=s.VULN[0]+'/cmd/govulncheck' if name=='govulncheck' else './cmd/'+name
+            self.assertEqual(argv,[self.args.go,'build','-mod=readonly','-trimpath','-buildvcs=false','-p=2',
+                                  '-o',str(self.output/'binaries'/name),target])
+            self.assertEqual(cwd,source)
+            self.assertEqual((env['GOPROXY'],env['GOSUMDB']),('off','off'))
+            self.assertNotIn('GOBIN',env)
         self.assertIn(b'golang.org/x/net v0.58.0/go.mod ', (source / 'go.sum').read_bytes())
         self.assertIn(b'golang.org/x/net v0.60.0/go.mod ', (source / 'go.sum').read_bytes())
 
