@@ -2,7 +2,7 @@
   "accepted": false,
   "artifact_bytes": 115900576,
   "artifact_sha256": "9819a5b582e1f0b6ab135b75c5113baf36f7507a6904e64e2984c318447e8bdf",
-  "cold_start": "Workflow pins hosted.py; hosted.py validates the exact review input, manifest and all eight helper bytes before the first helper import.",
+  "cold_start": "Workflow pins split-hosted.py; its cold guard validates the exact review/trial, complete twelve-file source bundle and all eight helper bytes before the first helper import.",
   "files": {
     "candidate_contract.py": {
       "bytes": 7504,
@@ -15,9 +15,9 @@
       "sha256": "c1e16164426c00903fd581a2a48568b8a3652772520fbf57542fadfb83df1e2a"
     },
     "candidate_enforcement.py": {
-      "bytes": 15383,
+      "bytes": 16351,
       "mode": "0644",
-      "sha256": "ce0496a6313d2010c3c0e9256ac14da7f4075ce4be66dc55cb4e8fa18bda1332"
+      "sha256": "dd8d39f64acf5362ccba7dbbc1aaec5e1db6d62bbc093838a72c50bb6d4d9199"
     },
     "container-seccomp.json": {
       "bytes": 1954,

@@ -1,5 +1,6 @@
 """Offline source/file controls ONLY. No native syscalls, Docker or target exec."""
 import ctypes
+import errno
 import hashlib
 import importlib.util
 import json
@@ -9,6 +10,7 @@ import stat
 import struct
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 HERE=Path(__file__).resolve().parent
@@ -63,6 +65,92 @@ class Fixture(unittest.TestCase):
     def test_static_abi_layouts_not_runtime_admission(self):
         self.assertEqual((ctypes.sizeof(e.Filter),ctypes.sizeof(e.Program),ctypes.sizeof(e.Data),
             ctypes.sizeof(e.Notification),ctypes.sizeof(e.Response),ctypes.sizeof(e.LandlockPath)),(8,16,64,80,24,12))
+    def notification_mocks(self,api,clock):
+        self.timers=[];self.old_handler=object();self.handlers=[]
+        def handler(signum,value):
+            self.handlers.append((signum,value));return self.old_handler
+        self.addCleanup(patch.stopall)
+        patch.object(e,'libc',return_value=api).start()
+        patch.object(e.time,'monotonic',side_effect=clock).start()
+        patch.object(e.signal,'signal',side_effect=handler).start()
+        patch.object(e.signal,'siginterrupt').start()
+        patch.object(e.signal,'setitimer',side_effect=lambda kind,seconds:self.timers.append((kind,seconds))).start()
+    def test_ioctl_failure_preserves_typed_errno_and_operation(self):
+        def failed(*args):ctypes.set_errno(errno.EBADF);return -1
+        with patch.object(e,'libc',return_value=types.SimpleNamespace(ioctl=failed)):
+            with self.assertRaises(e.IoctlRefusal) as caught:e.ioctl(9,0xc0502100,e.Notification(),'notification receive')
+        self.assertIsInstance(caught.exception,c.Refusal)
+        self.assertEqual(caught.exception.errno,errno.EBADF)
+        self.assertEqual(caught.exception.operation,'notification receive')
+    def test_recv_retries_only_cancellations_with_fresh_zero_buffers(self):
+        buffers=[];observed=[]
+        def receive(fd,number,pointer):
+            self.assertEqual(number.value,0xc0502100)
+            n=pointer._obj;buffers.append(n)
+            observed.append(bytes(n));self.assertEqual(bytes(n),b'\0'*80)
+            self.assertEqual(ctypes.get_errno(),0)
+            if len(buffers)<3:
+                ctypes.memset(ctypes.byref(n),255,80);ctypes.set_errno(errno.ENOENT);return -1
+            n.id=27;n.pid=100;n.data.arch=e.AUDIT_X86_64;n.data.nr=59;return 0
+        self.notification_mocks(types.SimpleNamespace(ioctl=receive),lambda:10)
+        result=e.receive(9,0.1)
+        self.assertIs(result,buffers[-1]);self.assertEqual(len({id(n) for n in buffers}),3)
+        self.assertEqual(len(observed),3);self.assertEqual(len(self.timers),2)
+        self.assertEqual(self.timers[0][0],e.signal.ITIMER_REAL);self.assertAlmostEqual(self.timers[0][1],0.1)
+        self.assertEqual(self.timers[-1],(e.signal.ITIMER_REAL,0))
+        self.assertEqual(self.handlers[-1],(e.signal.SIGALRM,self.old_handler))
+        event={'id':result.id,'pid':result.pid,'nr':result.data.nr,'arch':result.data.arch,'flags':result.flags}
+        self.assertTrue(e.FirstExec(100).decide(event))
+    def test_persistent_canceled_recv_hits_one_absolute_deadline(self):
+        calls=[];now=[0]
+        def clock():now[0]+=0.01;return now[0]
+        def canceled(fd,number,pointer):
+            calls.append(bytes(pointer._obj));ctypes.memset(pointer,255,80)
+            ctypes.set_errno(errno.ENOENT);return -1
+        self.notification_mocks(types.SimpleNamespace(ioctl=canceled),clock)
+        with self.assertRaisesRegex(c.Refusal,'notification receive deadline'):e.receive(9,0.07)
+        self.assertGreaterEqual(len(calls),2);self.assertTrue(all(raw==b'\0'*80 for raw in calls))
+        self.assertEqual(len(self.timers),2);self.assertGreater(self.timers[0][1],0);self.assertLess(self.timers[0][1],0.07)
+        self.assertEqual(self.timers[-1],(e.signal.ITIMER_REAL,0))
+        self.assertEqual(self.handlers[-1],(e.signal.SIGALRM,self.old_handler))
+    def test_other_recv_errno_never_retries_or_grants(self):
+        for code in (errno.EPERM,errno.EINVAL,errno.EINTR,errno.EAGAIN,errno.EBADF):
+            calls=[]
+            def refused(fd,number,pointer):calls.append(pointer._obj);ctypes.set_errno(code);return -1
+            self.notification_mocks(types.SimpleNamespace(ioctl=refused),lambda:10)
+            with self.assertRaises(e.IoctlRefusal) as caught:e.receive(9,0.1)
+            self.assertEqual(caught.exception.errno,code);self.assertEqual(len(calls),1)
+            self.assertEqual(len(self.timers),2)
+            patch.stopall()
+    def test_recovered_notification_still_rejects_flags_arch_and_number(self):
+        for flags,arch,nr in ((1,e.AUDIT_X86_64,59),(0,0x40000003,59),(0,e.AUDIT_X86_64,1)):
+            calls=[]
+            def receive(fd,number,pointer):
+                calls.append(pointer._obj)
+                if len(calls)==1:ctypes.set_errno(errno.ENOENT);return -1
+                n=pointer._obj;n.flags=flags;n.data.arch=arch;n.data.nr=nr;return 0
+            self.notification_mocks(types.SimpleNamespace(ioctl=receive),lambda:10)
+            with self.assertRaisesRegex(c.Refusal,'unexpected exec notification'):e.receive(9,0.1)
+            self.assertEqual(len(calls),2);patch.stopall()
+    def test_late_successful_recv_cannot_escape_original_deadline(self):
+        now=[0];returned=[]
+        def receive(fd,number,pointer):
+            n=pointer._obj;n.pid=100;n.data.arch=e.AUDIT_X86_64;n.data.nr=59
+            returned.append(n);now[0]=1;return 0
+        self.notification_mocks(types.SimpleNamespace(ioctl=receive),lambda:now[0])
+        with self.assertRaisesRegex(c.Refusal,'notification receive deadline'):e.receive(9,0.1)
+        self.assertEqual(len(returned),1);self.assertEqual(self.timers,[(e.signal.ITIMER_REAL,0.1),(e.signal.ITIMER_REAL,0)])
+    def test_id_validation_and_send_enoent_are_not_retried(self):
+        for failed_number,expected_calls in ((0x40082102,1),(0xc0182101,2)):
+            calls=[]
+            def ioctl(fd,number,pointer):
+                calls.append(number.value)
+                if number.value==failed_number:ctypes.set_errno(errno.ENOENT);return -1
+                return 0
+            n=e.Notification();n.id=27
+            with patch.object(e,'libc',return_value=types.SimpleNamespace(ioctl=ioctl)):
+                with self.assertRaises(e.IoctlRefusal) as caught:e.respond(9,n,True)
+            self.assertEqual(caught.exception.errno,errno.ENOENT);self.assertEqual(len(calls),expected_calls)
     def test_only_exact_first_owned_exec_and_irreversible_refusal(self):
         policy=e.FirstExec(100);self.assertTrue(policy.decide(self.event()))
         self.assertFalse(policy.decide(self.event()));self.assertFalse(policy.decide(self.event(101)))

@@ -134,21 +134,43 @@ class FirstExec:
         self.events.append({**event,'decision':'initial-trusted-continue' if allow else 'EPERM'})
         return allow
 
+class IoctlRefusal(c.Refusal):
+    def __init__(self,what,error_number):
+        self.errno=error_number
+        self.operation=what
+        super().__init__(what+' refused, errno='+str(error_number))
+
 def ioctl(fd,number,obj,what):
-    checked(libc().ioctl(ct.c_int(fd),ct.c_ulong(number),ct.byref(obj)),what)
+    api=libc();ct.set_errno(0)
+    value=api.ioctl(ct.c_int(fd),ct.c_ulong(number),ct.byref(obj))
+    if value<0:raise IoctlRefusal(what,ct.get_errno())
+    return value
 def receive(fd,seconds):
     # A canceled notification can leave RECV blocked even after poll. The real
     # timer interrupts the ioctl; do not rely on nonblocking listener semantics.
     if seconds<=0:raise c.Refusal('notification deadline')
+    deadline=time.monotonic()+seconds
     def expired(signum,frame):raise c.Refusal('notification receive deadline')
     old=signal.signal(signal.SIGALRM,expired)
     signal.siginterrupt(signal.SIGALRM,True)
-    signal.setitimer(signal.ITIMER_REAL,seconds)
     try:
-        n=Notification();ioctl(fd,0xc0502100,n,'notification receive')
-        if n.flags or n.data.arch!=AUDIT_X86_64 or n.data.nr not in EXEC:
-            raise c.Refusal('unexpected exec notification')
-        return n
+        left=deadline-time.monotonic()
+        if left<=0:raise c.Refusal('notification receive deadline')
+        signal.setitimer(signal.ITIMER_REAL,left)
+        while True:
+            if time.monotonic()>=deadline:raise c.Refusal('notification receive deadline')
+            # A dying target can abort RECV with ENOENT. Its partially populated
+            # buffer is never reused, validated, decided or granted CONTINUE.
+            n=Notification()
+            try:
+                ioctl(fd,0xc0502100,n,'notification receive')
+            except IoctlRefusal as error:
+                if error.errno==errno.ENOENT:continue
+                raise
+            if time.monotonic()>=deadline:raise c.Refusal('notification receive deadline')
+            if n.flags or n.data.arch!=AUDIT_X86_64 or n.data.nr not in EXEC:
+                raise c.Refusal('unexpected exec notification')
+            return n
     finally:
         signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,old)
 def respond(fd,n,allow):
