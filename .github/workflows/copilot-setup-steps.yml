@@ -71,7 +71,7 @@ jobs:
   osv-runtime-prerequisite:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     permissions:
       contents: read
     steps:
@@ -80,14 +80,37 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Probe existing R4 Linux facilities without installation
-        id: proof
+      - name: Supply authenticated Ubuntu bubblewrap in temporary private storage
+        id: supplier
         continue-on-error: true
         run: |
           set -euo pipefail
           umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/supply-bubblewrap.py)"
+          test "${actual%% *}" = f9c73572a789eb4aaee7051281bbf594392ace2a5914026cd868866378326f80
+          supplier_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-ubuntu-bubblewrap-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-supplier-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$supplier_dir" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=10s 210s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/supply-bubblewrap.py "$supplier_dir"
+      - name: Probe exact R4 Linux facilities with the authenticated temporary tool
+        if: steps.supplier.outcome == 'success'
+        id: proof
+        continue-on-error: true
+        env:
+          BUBBLEWRAP_SUPPLIER_DIR: ${{ steps.supplier.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/prove-runtime.py)"
-          test "${actual%% *}" = dd76ac3a3660445971c9a00f17a0ed17fa9f4514b797ee2127e7e97fec3529b1
+          test "${actual%% *}" = 7c81e5ada833caa4fe46abfb38bc3aadc6ff04077bd44b1349ea3ae5a7a69cb4
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
@@ -96,10 +119,20 @@ jobs:
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" \
             GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" \
+            RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
             ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/prove-runtime.py "$proof_dir"
+            scripts/osv-offline/prove-runtime.py "$proof_dir" \
+            --bubblewrap "$BUBBLEWRAP_SUPPLIER_DIR/bwrap" \
+            --supplier-receipt "$BUBBLEWRAP_SUPPLIER_DIR/bubblewrap-supplier-receipt.json"
+      - name: Retain bounded official-package prerequisite evidence
+        if: ${{ !cancelled() && steps.supplier.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-bubblewrap-prerequisite-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.supplier.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 5
       - name: Retain bounded authentic prerequisite evidence
         if: ${{ !cancelled() && steps.proof.outputs.evidence != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -110,4 +143,6 @@ jobs:
           retention-days: 5
       - name: Enforce the actual prerequisite result
         if: ${{ !cancelled() }}
-        run: test '${{ steps.proof.outcome }}' = success
+        run: |
+          test '${{ steps.supplier.outcome }}' = success
+          test '${{ steps.proof.outcome }}' = success

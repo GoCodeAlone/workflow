@@ -20,7 +20,7 @@ MANIFEST_SHA = 'bd66229470c06e769a56b48106bf552e0cbc783c4779fc19c54cae86934ed209
 PROFILE_SHA = '2deb233b43cf4fdc5babfe481c88bafe1bc8413062ea1e93041039e01b4c9997'
 IDENTITY = ('GITHUB_REPOSITORY', 'GITHUB_SHA', 'GITHUB_RUN_ID',
             'GITHUB_RUN_ATTEMPT', 'GITHUB_EVENT_NAME', 'GITHUB_JOB',
-            'RUNNER_OS', 'RUNNER_ARCH', 'ImageOS', 'ImageVersion')
+            'RUNNER_OS', 'RUNNER_ARCH', 'ImageOS', 'ImageVersion', 'RUNNER_ENVIRONMENT')
 
 
 def sha(path):
@@ -126,7 +126,38 @@ def child(request_path):
     write(Path('/out/child-proof.json'), result)
 
 
-def prove(output):
+def supplied_bubblewrap(binary, receipt, manager):
+    root = binary.parent
+    info = root.lstat()
+    if (binary.name != 'bwrap' or receipt != root/'bubblewrap-supplier-receipt.json' or
+            not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or
+            stat.S_IMODE(info.st_mode) != 0o700 or
+            root.parent.resolve() != Path(os.environ['RUNNER_TEMP']).resolve() or
+            set(p.name for p in root.iterdir()) != {'bwrap', 'bubblewrap.deb', receipt.name}):
+        raise RuntimeError('supplier must be one owned temporary prerequisite file set')
+    for path in (binary, receipt, root/'bubblewrap.deb'):
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or
+                info.st_mode & (0o077 | stat.S_ISUID | stat.S_ISGID) or info.st_nlink != 1 or
+                info.st_size > (65536 if path == receipt else 1024 * 1024)):
+            raise RuntimeError('supplier input must be a private owned regular file')
+    if receipt.stat().st_size > 65536:
+        raise RuntimeError('supplier receipt exceeds finite bound')
+    supplied = manager.load(receipt)
+    if (supplied.get('schema') != 'workflow.offline-scanner.bubblewrap-supplier.v1' or
+            'failure' in supplied or 'cleanup_failure' in supplied or
+            supplied.get('supplied') is not True or supplied.get('installation_admitted') is not False or
+            supplied.get('package_hooks_executed') is not False or
+            supplied.get('policy_settings_changed') is not False or
+            supplied.get('identity') != {k: os.environ.get(k, '') for k in IDENTITY} or
+            supplied.get('binary_path') != str(binary) or
+            sha(binary) != supplied.get('binary_sha256') or
+            sha(root/'bubblewrap.deb') != supplied.get('package', {}).get('sha256')):
+        raise RuntimeError('current-run supplier identity/bytes mismatch')
+    return supplied, sha(receipt)
+
+
+def prove(output, bubblewrap=None, supplier_receipt=None):
     record = {'schema': 'workflow.offline-scanner.runtime-prerequisite-proof.v1',
               'accepted': False, 'profile_sha256': PROFILE_SHA,
               'candidate_execution': False, 'scanner_execution': False,
@@ -150,8 +181,18 @@ def prove(output):
         record['launcher_sha256'] = sha(Path(__file__))
         record['kernel'] = platform.release()
         record['python_version'] = platform.python_version()
+        bubblewrap = Path('/usr/bin/bwrap') if bubblewrap is None else bubblewrap
+        if supplier_receipt is not None:
+            if os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted':
+                raise RuntimeError('temporary supplier is restricted to ephemeral GitHub-hosted runners')
+            stage = 'authenticated-owned-supplier'
+            supplied, receipt_sha = supplied_bubblewrap(bubblewrap, supplier_receipt, m)
+            record['supplier_receipt_sha256'] = receipt_sha
+            record['package'] = supplied['package']
+        elif bubblewrap != Path('/usr/bin/bwrap'):
+            raise RuntimeError('arbitrary runtime tool path is forbidden')
         stage = 'existing-tools'
-        for name, path in [('bubblewrap', Path('/usr/bin/bwrap')), ('python', Path('/usr/bin/python3'))]:
+        for name, path in [('bubblewrap', bubblewrap), ('python', Path('/usr/bin/python3'))]:
             actual = path.resolve(strict=True)
             if not stat.S_ISREG(actual.stat().st_mode):
                 raise RuntimeError('existing tool is not a regular file: ' + str(path))
@@ -186,7 +227,7 @@ def prove(output):
             os.fchmod(f.fileno(), 0o600)
             f.write(m.socket_filter())
         stage = 'exact-r4-kernel-boundary'
-        args = ['/usr/bin/bwrap', '--unshare-all', '--die-with-parent', '--new-session',
+        args = [str(bubblewrap), '--unshare-all', '--die-with-parent', '--new-session',
                 '--cap-drop', 'ALL', '--clearenv']
         for path in ('/usr', '/lib', '/lib64'):
             if not Path(path).exists():
@@ -222,6 +263,10 @@ def prove(output):
         for row in tools.values():
             if sha(Path(row['resolved_path'])) != row['sha256']:
                 raise RuntimeError('runtime tool changed')
+        if supplier_receipt is not None:
+            _, after_sha = supplied_bubblewrap(bubblewrap, supplier_receipt, m)
+            if after_sha != receipt_sha:
+                raise RuntimeError('supplier receipt changed')
         budget.left()
         record['runtime_boundary_pass'] = True
         code = 0
@@ -250,9 +295,15 @@ def interrupted(signum, frame):
 if __name__ == '__main__':
     if len(sys.argv) == 3 and sys.argv[1] == '--worker':
         child(Path(sys.argv[2]))
-    elif len(sys.argv) == 2:
+    else:
+        import argparse
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('output', type=Path)
+        parser.add_argument('--bubblewrap', type=Path)
+        parser.add_argument('--supplier-receipt', type=Path)
+        args = parser.parse_args()
+        if bool(args.bubblewrap) != bool(args.supplier_receipt):
+            parser.error('owned binary and authenticated supplier receipt must be supplied together')
         signal.signal(signal.SIGTERM, interrupted)
         signal.signal(signal.SIGINT, interrupted)
-        sys.exit(prove(owned_output(Path(sys.argv[1]))))
-    else:
-        raise SystemExit('usage: prove-runtime.py OWNED_OUTPUT')
+        sys.exit(prove(owned_output(args.output), args.bubblewrap, args.supplier_receipt))
