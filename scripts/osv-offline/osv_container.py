@@ -40,6 +40,18 @@ def confirmed_absence(result, identifier):
     try:return json.loads(result.stdout)==[]
     except (ValueError,TypeError):return False
 
+def create_diagnostic(stderr):
+    # Fixed diagnostic codes only; daemon-origin text is never published.
+    text=stderr.lower()
+    if 'permission denied' in text:return 'permission-denied'
+    if 'operation not permitted' in text:return 'operation-not-permitted'
+    if 'cannot connect to the docker daemon' in text:return 'connection-failed'
+    if "option 'bind-recursive=readonly' requires 'bind-propagation=rprivate' to be specified in conjunction" in text:
+        return 'recursive-readonly-propagation-required'
+    if any(s in text for s in ('unknown flag:','invalid argument','invalid value for','invalid field','conflicting options:')):
+        return 'argument-error'
+    return 'unclassified'
+
 def eligible():
     if (platform.system() != 'Linux' or platform.machine() != 'x86_64' or
         os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted' or os.geteuid() == 0):
@@ -89,6 +101,7 @@ class Container:
         self.seconds = seconds
         self.identifier = None
         self.creation_attempted = False
+        self.creation_response = None
         self.inspection_receipts = []
         self.nonce = secrets.token_hex(16)
         self.name = 'wf-osv-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'] + '-' + self.nonce
@@ -121,6 +134,7 @@ class Container:
     def lifecycle_evidence(self):
         return {'constructed':True,'creation_attempted':self.creation_attempted,
             'container_id':self.identifier,'name':self.name,'retired':self.retired,
+            'creation_response':dict(self.creation_response) if self.creation_response is not None else None,
             'inspections':[dict(row) for row in self.inspection_receipts]}
 
     def owned(self, row):
@@ -157,10 +171,20 @@ class Container:
             source = Path(source)
             if not source.is_absolute() or source.is_symlink() or not source.exists() or ',' in str(source):
                 raise BoundaryError('unbound container mount')
-            argv += ['--mount', 'type=bind,src='+str(source)+',dst='+target+(',readonly,bind-recursive=readonly' if readonly else '')]
+            argv += ['--mount', 'type=bind,src='+str(source)+',dst='+target+(',readonly,bind-propagation=rprivate,bind-recursive=readonly' if readonly else '')]
         argv += [IMAGE, *self.payload[1:]]
         self.creation_attempted = True
-        r = self.run(argv, 30)
+        self.creation_response={'response_observed':False,'target':self.name,'image':IMAGE,
+            'argv_sha256':hashlib.sha256(json.dumps(argv,separators=(',',':')).encode()).hexdigest()}
+        try:r = self.run(argv, 30)
+        except Exception as error:
+            self.creation_response['exception_type']=type(error).__name__
+            raise
+        self.creation_response.update(response_observed=True,exit_code=r.returncode,
+            stdout_bytes=len(r.stdout.encode()),stderr_bytes=len(r.stderr.encode()),
+            stdout_sha256=hashlib.sha256(r.stdout.encode()).hexdigest(),
+            stderr_sha256=hashlib.sha256(r.stderr.encode()).hexdigest(),
+            diagnostic_code=create_diagnostic(r.stderr))
         # Even a failed Docker client may have created a daemon-owned resource.
         # Recover only an exact label/image/name-bound ID, never start by name.
         row = self.inspect(self.name)
@@ -204,6 +228,8 @@ class Container:
         expected_mounts = {(str(s), t, not ro) for s,t,ro in self.mounts}
         if actual != expected_mounts:
             raise BoundaryError('container mount inventory mismatch')
+        if any(r.get('Propagation')!='rprivate' for r in row['Mounts'] if r['Type']=='bind' and not r['RW']):
+            raise BoundaryError('read-only bind propagation differs')
         if any(r['Type'] not in ('bind','tmpfs') or
                (r['Type']=='tmpfs' and r['Destination']!='/tmp') for r in row['Mounts']):
             raise BoundaryError('unexpected writable container mount')

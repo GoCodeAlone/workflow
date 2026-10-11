@@ -22,6 +22,9 @@ An uncertain create request cannot credit retirement from a first absence
 snapshot. Absence requires an exact-target Docker not-found response and an
 empty inspection result. Receipts record creation attempts and inspection
 classifications, byte counts and hashes without retaining raw diagnostics.
+Creation responses are recorded before inspection; fixed diagnostic codes do
+not authorize cleanup. Recursive read-only binds require explicit private
+propagation in Docker 28 and an exact propagation readback.
 Every read-only input needs a kernel mount-flag witness, with a real
 EROFS write-denial witness on the separately owned fixture.
 No host credential, home or socket is mounted. Credentialed reporting remains

@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/container-source-bindings.json)"
-          test "${actual%% *}" = ee29cf5846fb6593b5d0cf8e9f9b5c69f82d97e5ced15ff8ab2654a55d1d36de
+          test "${actual%% *}" = e7a87680836f0fa47dea4a2e02e7a962e23f383c561738982ca44c22ba8aa749
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-container-proof.py)"
           test "${actual%% *}" = c4db39f78f0555396dde81a444d88f73ea7d95dca0090d61e4bbe6545b7ec4a5
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-container-proof-XXXXXXXXXX")"

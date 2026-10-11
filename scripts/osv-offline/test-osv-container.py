@@ -29,7 +29,7 @@ class LifecycleTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv,0,json.dumps([state['row']]),'')
             if argv[0]=='create':
                 i='a'*64
-                mounts=[{'Type':'bind','Source':str(s),'Destination':t,'RW':not ro} for s,t,ro in c.mounts]
+                mounts=[{'Type':'bind','Source':str(s),'Destination':t,'RW':not ro,'Propagation':'rprivate'} for s,t,ro in c.mounts]
                 state['row']={'Id':i,'Name':'/'+c.name,'Image':m.IMAGE_CONFIG,'Config':{'Image':m.IMAGE,'Labels':dict(c.labels),
                     'User':str(os.getuid())+':'+str(os.getgid()),'Entrypoint':[c.payload[0]],'Cmd':c.payload[1:],
                     'Volumes':None,'Env':m.IMAGE_ENV,'Healthcheck':{'Test':['NONE']}},'Mounts':mounts,
@@ -124,6 +124,45 @@ class LifecycleTests(unittest.TestCase):
             with self.assertRaises(m.BoundaryError):c.inspect(c.name)
             self.assertEqual(len(s['calls']),16)
             self.assertEqual(len(c.lifecycle_evidence()['inspections']),16)
+
+    def test_create_response_precedes_failing_inspect_and_publishes_no_raw_diagnostic(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp));original=c.run
+            stderr="option 'bind-recursive=readonly' requires 'bind-propagation=rprivate' to be specified in conjunction\n"+'\x1b[31mprivate daemon text'*10000
+            def run(argv,seconds=15):
+                if argv[0]=='create':return subprocess.CompletedProcess(argv,125,'',stderr)
+                if c.creation_attempted:raise m.BoundaryError('post-create inspection failed')
+                return original(argv,seconds)
+            c.run=run
+            with self.assertRaises(m.BoundaryError):c.create()
+            r=c.lifecycle_evidence()['creation_response']
+            self.assertTrue(r['response_observed']);self.assertEqual(r['exit_code'],125)
+            self.assertEqual(r['stderr_bytes'],len(stderr.encode()))
+            self.assertEqual(r['diagnostic_code'],'recursive-readonly-propagation-required')
+            self.assertNotIn('stderr',r);self.assertNotIn('private daemon text',json.dumps(r))
+            self.assertFalse(c.retired);self.assertIsNone(c.identifier)
+
+    def test_create_timeout_is_unobserved_and_diagnostics_never_credit_retirement(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp));s['create_exception']=True
+            with self.assertRaises(m.BoundaryError):c.create()
+            r=c.lifecycle_evidence()['creation_response']
+            self.assertFalse(r['response_observed']);self.assertEqual(r['exception_type'],'BoundaryError')
+            self.assertNotIn('exit_code',r)
+            with self.assertRaises(m.BoundaryError):c.cleanup()
+            self.assertFalse(c.retired)
+        for text,code in [('permission denied','permission-denied'),('operation not permitted','operation-not-permitted'),('Cannot connect to the Docker daemon','connection-failed'),('unknown flag: --example','argument-error'),('arbitrary daemon text','unclassified')]:
+            self.assertEqual(m.create_diagnostic(text),code)
+
+    def test_recursive_readonly_requires_explicit_private_argument_and_actual_propagation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp));c.create()
+            args=next(a for a in s['calls'] if a[0]=='create')
+            ro_args=[args[i+1] for i,v in enumerate(args[:-1]) if v=='--mount' and ',readonly' in args[i+1]]
+            self.assertTrue(ro_args);self.assertTrue(all(',bind-propagation=rprivate,bind-recursive=readonly' in v for v in ro_args))
+            s['row']['Mounts'][0]['Propagation']='rshared'
+            with self.assertRaises(m.BoundaryError):c.start_wait()
+            self.assertFalse(any(a[0]=='start' for a in s['calls']))
 
     def test_cid_mismatch_does_not_start_and_closes_only_authenticated_created_id(self):
         with tempfile.TemporaryDirectory() as temp:
