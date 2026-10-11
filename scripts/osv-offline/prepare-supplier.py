@@ -7,6 +7,7 @@ The receipt is provisional and additionally requires the actual step success.
 import argparse
 import base64
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -14,11 +15,13 @@ import platform
 import re
 import selectors
 import signal
+import ssl
 import stat
 import subprocess
 import sys
 import time
 import zipfile
+from urllib.parse import quote
 
 SCANNER = ('github.com/google/osv-scanner/v2', 'v2.6.0')
 ORIGIN = 'e840a6e8adb14b7777c78e26cfbf6e2abc1d1fc6'
@@ -26,6 +29,7 @@ SCANNER_SUM = 'h1:hqtNLANWaKcqOC6znJX8J/23PtzV82RX23oMS9/ab4I='
 SCANNER_MOD_SUM = 'h1:3XUKJWYB7D2fWvFDMTZg9OBrlCEf/WBGZVc4IFjTljs='
 VULN = ('golang.org/x/vuln', 'v1.6.0')
 XNET = ('golang.org/x/net', 'v0.60.0')
+UPSTREAM_XNET_MOD_SUM = 'h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU='
 EXTRA_SUMS = {
     VULN: ('h1:FeMO9Rm/HwyduOztbvKcOw+zvDEPr4I4aQNSfevFcKY=',
            'h1:bWlG2493/sjR7ksvicBgMrznH3eYQEyK8ifUYBrqUbg='),
@@ -48,6 +52,9 @@ FILE_BYTES = 64 * 1024 * 1024
 SOURCE_BYTES = 500 * 1024 * 1024
 SOURCE_FILES = 20000
 AGGREGATE_SOURCE_BYTES = 4 * 1024 * 1024 * 1024
+MOD_BYTES = 1024 * 1024
+MOD_CATALOG_COUNT = 399
+MOD_CATALOG_SHA = '86669b0754b3ec99dfa7bfd2db3ecdfcad5fc2915d39528c195f0173bbf96f79'
 H1 = re.compile(r'h1:[A-Za-z0-9+/]{43}=\Z')
 MODULE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._~!/+\-]{0,250}\Z')
 VERSION = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?(?:\+incompatible)?\Z')
@@ -381,6 +388,114 @@ def expected_sums(identity, rows):
     return rows[identity], rows[module, version + '/go.mod']
 
 
+def metadata_catalog(rows):
+    result = []
+    for (module, version), digest in sorted(rows.items()):
+        if not version.endswith('/go.mod'):
+            continue
+        version = version[:-7]
+        require(MODULE.fullmatch(module) and VERSION.fullmatch(version) and H1.fullmatch(digest)
+                and all(p and p not in {'.', '..'} for p in module.split('/')),
+                'invalid fixed supplier metadata identity')
+        result.append([module, version, digest])
+    raw = json.dumps(result, separators=(',', ':'), ensure_ascii=True).encode()
+    require(len(result) == MOD_CATALOG_COUNT and sha(raw) == MOD_CATALOG_SHA,
+            'reviewed supplier metadata catalog changed')
+    return result
+
+
+def fetch_mod(module, version, budget):
+    # Direct TLS to one fixed public origin: no proxy/netrc/environment handler,
+    # redirect, retry, dynamic graph lookup, ZIP, credential or target execution.
+    require(MODULE.fullmatch(module) and VERSION.fullmatch(version) and
+            all(p and p not in {'.', '..'} for p in module.split('/')),
+            'invalid fixed supplier metadata request')
+    path = '/' + quote(escape(module), safe='/!') + '/@v/' + quote(escape(version), safe='!') + '.mod'
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(cafile='/etc/ssl/certs/ca-certificates.crt')
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    require(signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0), 'existing supplier alarm refused')
+    previous = signal.getsignal(signal.SIGALRM)
+    remaining = min(30, budget.left())
+    def deadline(_signum, _frame):
+        raise RuntimeError('supplier metadata request deadline exceeded')
+    connection = None
+    signal.signal(signal.SIGALRM, deadline)
+    try:
+        signal.setitimer(signal.ITIMER_REAL, remaining)
+        connection = http.client.HTTPSConnection('proxy.golang.org', 443,
+            timeout=min(10, budget.left()), context=context)
+        connection.request('GET', path, headers={'Accept': 'application/octet-stream',
+            'User-Agent': 'workflow-fixed-supplier-metadata/1', 'Connection': 'close'})
+        response = connection.getresponse()
+        require(response.status == 200, 'supplier metadata HTTP status/redirect refused')
+        lengths = response.headers.get_all('Content-Length', [])
+        require(len(lengths) <= 1 and (not lengths or
+                re.fullmatch(r'[0-9]{1,10}', lengths[0]) and int(lengths[0]) <= MOD_BYTES),
+                'supplier metadata declared size refused')
+        require(response.headers.get_all('Content-Encoding', []) in ([], ['identity']),
+                'supplier metadata content encoding refused')
+        raw = bytearray()
+        while True:
+            budget.left()
+            chunk = response.read(min(65536, MOD_BYTES + 1 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+            require(len(raw) <= MOD_BYTES, 'supplier metadata body exceeded limit')
+        require(raw and (not lengths or len(raw) == int(lengths[0])),
+                'supplier metadata body size mismatch')
+        budget.left()
+        return bytes(raw)
+    finally:
+        try:
+            if connection is not None:
+                connection.close()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+
+
+def metadata_path(cache, module, version, create=False):
+    path = cache / 'cache/download' / escape(module) / '@v' / (escape(version) + '.mod')
+    # Validate each existing parent before touching the standard cache. Never
+    # follow a symlink, replace existing metadata or create another cache root.
+    current = cache
+    for part in path.parent.relative_to(cache).parts:
+        current = current / part
+        if create and not current.exists():
+            current.mkdir(mode=0o755)
+        canonical(current, True)
+    require(path.parent == path.parent.resolve(strict=True), 'supplier metadata cache parent escaped')
+    return path
+
+
+def preload_metadata(catalog, cache, budget, records, maximum=AGGREGATE_SOURCE_BYTES):
+    total = 0
+    for module, version, digest in catalog:
+        budget.left()
+        path = metadata_path(cache, module, version, create=True)
+        cached = path.exists() or path.is_symlink()
+        raw = read_file(path, MOD_BYTES, budget) if cached else fetch_mod(module, version, budget)
+        require(hash1({'go.mod': raw}) == digest, 'supplier metadata go.mod h1 mismatch')
+        total += len(raw)
+        require(total <= maximum, 'aggregate supplier metadata bytes exceeded')
+        if not cached:
+            write_fresh(path, raw, mode=0o444)
+        require(read_file(path, MOD_BYTES, budget) == raw, 'supplier metadata publication changed')
+        records.append({'module': module, 'version': version, 'go_mod_h1': digest,
+            'go_mod_sha256': sha(raw), 'bytes': len(raw),
+            'origin': 'authenticated-existing-cache' if cached else 'fixed-public-proxy-mod-only'})
+    return total
+
+
+def conserve_metadata(records, cache, budget):
+    for row in records:
+        raw = read_file(metadata_path(cache, row['module'], row['version']), MOD_BYTES, budget)
+        require(len(raw) == row['bytes'] and sha(raw) == row['go_mod_sha256'] and
+                hash1({'go.mod': raw}) == row['go_mod_h1'], 'supplier metadata changed at closeout')
+
+
 def patch_source(source, budget):
     for name, expected in UPSTREAM_SHA.items():
         require(sha(read_file(source / name, 1024 * 1024, budget)) == expected,
@@ -393,7 +508,7 @@ def patch_source(source, budget):
         require(mod.count(old) == 1, 'scanner patch context missing/duplicated')
         mod = mod.replace(old, new)
     sums = (source / 'go.sum').read_bytes()
-    anchor = b'golang.org/x/net v0.58.0/go.mod h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU=\n'
+    anchor = ('golang.org/x/net v0.58.0/go.mod ' + UPSTREAM_XNET_MOD_SUM + '\n').encode()
     additions = ('golang.org/x/net v0.60.0 ' + EXTRA_SUMS[XNET][0] + '\n' +
                  'golang.org/x/net v0.60.0/go.mod ' + EXTRA_SUMS[XNET][1] + '\n').encode()
     require(sums.count(anchor) == 1 and b'golang.org/x/net v0.60.0 ' not in sums,
@@ -562,6 +677,15 @@ def supplier(args):
         receipt['patch'] = {'changed': ['go.mod', 'go.sum'], 'extra': [], 'missing': [],
                             'upstream_sha256': UPSTREAM_SHA, 'patched_sha256': PATCHED_SHA}
         receipt['dependencies'] = records
+        stage = 'authenticated-public-supplier-metadata'
+        catalog = metadata_catalog(checksum)
+        module_metadata = {'catalog_sha256': MOD_CATALOG_SHA, 'catalog_count': MOD_CATALOG_COUNT,
+                    'complete': False, 'conserved': False, 'records': []}
+        receipt['metadata_only'] = module_metadata
+        metadata_bytes = preload_metadata(catalog, caches['GOMODCACHE'], budget, module_metadata['records'],
+                                          maximum=AGGREGATE_SOURCE_BYTES-total)
+        require(total + metadata_bytes <= AGGREGATE_SOURCE_BYTES, 'aggregate supplier source bytes exceeded')
+        module_metadata['complete'] = True
         stage = 'offline-cache-verification'
         run([str(go), 'mod', 'verify'], source, env, budget, 180, logs, 'cache-verify-before', commands)
         stage = 'serial-offline-supplier-builds'
@@ -584,6 +708,8 @@ def supplier(args):
             supplied[name] = {'sha256': sha(raw), 'bytes': len(raw), **buildinfo(metadata, name)}
         stage = 'source-and-cache-closeout'
         run([str(go), 'mod', 'verify'], source, env, budget, 180, logs, 'cache-verify-after', commands)
+        conserve_metadata(module_metadata['records'], caches['GOMODCACHE'], budget)
+        module_metadata['conserved'] = True
         require(inventory(source, budget) == expected, 'supplier build modified authenticated source')
         require(read_file(telemetry, 16, budget) == b'off\n', 'supplier telemetry mode changed')
         receipt['ephemeral_telemetry_mode'] = {'path': str(telemetry), 'sha256': sha(b'off\n'), 'actual_mode': 'off'}

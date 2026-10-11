@@ -5,11 +5,14 @@ Temporary files and small Python children do not establish Linux acceptance.
 """
 import argparse
 import base64
+import copy
+from email.message import Message
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import sys
 import tempfile
@@ -21,6 +24,9 @@ SOURCE = Path(__file__).with_name('prepare-supplier.py')
 spec = importlib.util.spec_from_file_location('supplier_under_test', SOURCE)
 s = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(s)
+delivery_spec = importlib.util.spec_from_file_location('supplier_delivery_under_test', SOURCE.with_name('osv_supplier.py'))
+delivery = importlib.util.module_from_spec(delivery_spec)
+delivery_spec.loader.exec_module(delivery)
 
 
 def reference_h1(files):
@@ -214,6 +220,134 @@ class SupplierControls(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'lacks authenticated'):
             s.expected_sums(('example.com/a', 'v1.0.0'), {})
 
+    def test_metadata_catalog_only_exact_reviewed_manifest_rows(self):
+        rows = {('example.com/metadata', 'v1.0.0/go.mod'): reference_h1({'go.mod': b'module example.com/metadata\n'})}
+        expected = [['example.com/metadata', 'v1.0.0', rows['example.com/metadata', 'v1.0.0/go.mod']]]
+        digest = s.sha(json.dumps(expected, separators=(',', ':'), ensure_ascii=True).encode())
+        with mock.patch.object(s, 'MOD_CATALOG_COUNT', 1), mock.patch.object(s, 'MOD_CATALOG_SHA', digest):
+            self.assertEqual(s.metadata_catalog(rows), expected)
+            for change in ({}, {('evil.example/code', 'v1.0.0/go.mod'): next(iter(rows.values()))},
+                    {('example.com/metadata', 'v1.0.0/go.mod'): reference_h1({'go.mod': b'changed'})}):
+                with self.subTest(change=change), self.assertRaisesRegex(RuntimeError, 'catalog changed'):
+                    s.metadata_catalog(change)
+
+    def test_metadata_only_preload_authenticates_before_publication_and_conserves(self):
+        cache = self.base / 'standard-synthetic-cache'; cache.mkdir()
+        raw = b'module example.com/old\n'; digest = reference_h1({'go.mod': raw})
+        catalog = [['example.com/old', 'v1.0.0', digest]]; records = []
+        with mock.patch.object(s, 'fetch_mod', return_value=raw) as fetch:
+            self.assertEqual(s.preload_metadata(catalog, cache, s.Budget(5), records), len(raw))
+            fetch.assert_called_once()
+        path = cache / 'cache/download/example.com/old/@v/v1.0.0.mod'
+        self.assertEqual(path.read_bytes(), raw); self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+        self.assertEqual(list(path.parent.iterdir()), [path])
+        with mock.patch.object(s, 'fetch_mod', side_effect=AssertionError('network must not be used')):
+            second = []; s.preload_metadata(catalog, cache, s.Budget(5), second)
+        self.assertEqual(second[0]['origin'], 'authenticated-existing-cache')
+        s.conserve_metadata(records, cache, s.Budget(5))
+        path.chmod(0o600); path.write_bytes(b'changed')
+        with self.assertRaisesRegex(RuntimeError, 'changed at closeout'):
+            s.conserve_metadata(records, cache, s.Budget(5))
+
+    def test_wrong_metadata_h1_cached_or_downloaded_has_no_overwrite_fallback(self):
+        raw = b'module example.com/old\n'; catalog = [['example.com/old', 'v1.0.0', reference_h1({'go.mod': raw})]]
+        for cached in (False, True):
+            with self.subTest(cached=cached):
+                cache = self.base / str(cached); cache.mkdir()
+                path = s.metadata_path(cache, *catalog[0][:2], create=True)
+                if cached:path.write_bytes(b'wrong')
+                with mock.patch.object(s, 'fetch_mod', return_value=b'wrong') as fetch:
+                    with self.assertRaisesRegex(RuntimeError, 'h1 mismatch'):
+                        s.preload_metadata(catalog, cache, s.Budget(5), [])
+                    if cached:fetch.assert_not_called()
+                self.assertEqual(path.read_bytes(), b'wrong') if cached else self.assertFalse(path.exists())
+
+    def test_metadata_symlink_parent_and_file_are_refused(self):
+        raw = b'module example.com/old\n'; catalog = [['example.com/old', 'v1.0.0', reference_h1({'go.mod': raw})]]
+        for kind in ('parent', 'file'):
+            with self.subTest(kind=kind):
+                cache = self.base / kind; cache.mkdir()
+                outside = self.base / ('outside-' + kind); outside.mkdir()
+                if kind == 'parent':(cache / 'cache').symlink_to(outside, target_is_directory=True)
+                else:
+                    target = outside / 'mod'; target.write_bytes(raw)
+                    s.metadata_path(cache, *catalog[0][:2], create=True).symlink_to(target)
+                with mock.patch.object(s, 'fetch_mod', side_effect=AssertionError('no network')):
+                    with self.assertRaises(RuntimeError):s.preload_metadata(catalog, cache, s.Budget(5), [])
+                self.assertEqual(list(outside.iterdir()), [] if kind == 'parent' else [outside / 'mod'])
+
+    def response(self, status=200, body=b'module example.com/Old\n', headers=None):
+        response = mock.Mock(); response.status = status; response.headers = Message()
+        for key, value in (headers or []):response.headers.add_header(key, value)
+        parts = [body, b'']; response.read.side_effect = lambda size: parts.pop(0)
+        connection = mock.Mock(); connection.getresponse.return_value = response
+        return connection
+
+    def test_metadata_tls_request_has_one_origin_no_credentials_redirect_or_proxy(self):
+        connection = self.response()
+        context = mock.Mock()
+        with mock.patch.dict(os.environ, {'HTTPS_PROXY':'http://private.invalid','SSL_CERT_FILE':'/private/key','SSLKEYLOGFILE':'/private/keylog'}), \
+                mock.patch.object(s.ssl, 'SSLContext', return_value=context), \
+                mock.patch.object(s.http.client, 'HTTPSConnection', return_value=connection) as create:
+            self.assertEqual(s.fetch_mod('example.com/Old', 'v1.0.0+incompatible', s.Budget(5)), b'module example.com/Old\n')
+        context.load_verify_locations.assert_called_once_with(cafile='/etc/ssl/certs/ca-certificates.crt')
+        self.assertEqual(create.call_args.args, ('proxy.golang.org', 443))
+        self.assertEqual(connection.request.call_args.args, ('GET', '/example.com/!old/@v/v1.0.0%2Bincompatible.mod'))
+        self.assertEqual(set(connection.request.call_args.kwargs['headers']), {'Accept','User-Agent','Connection'})
+        connection.close.assert_called_once();self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
+    def test_metadata_redirect_size_encoding_deadline_and_final_io_refuse(self):
+        for connection in (self.response(status=302), self.response(headers=[('Content-Length','1048577')]),
+                self.response(headers=[('Content-Length','1'),('Content-Length','1')]),
+                self.response(headers=[('Content-Encoding','gzip')]), self.response(body=b''),
+                self.response(headers=[('Content-Length','1')])):
+            with self.subTest(connection=connection), mock.patch.object(s.ssl, 'SSLContext'), \
+                    mock.patch.object(s.http.client, 'HTTPSConnection', return_value=connection):
+                with self.assertRaises(RuntimeError):s.fetch_mod('example.com/old', 'v1.0.0', s.Budget(5))
+                connection.close.assert_called_once()
+        connection = self.response(body=b'overlimit')
+        with mock.patch.object(s, 'MOD_BYTES', 2), mock.patch.object(s.ssl, 'SSLContext'), \
+                mock.patch.object(s.http.client, 'HTTPSConnection', return_value=connection):
+            with self.assertRaisesRegex(RuntimeError, 'body exceeded'):
+                s.fetch_mod('example.com/old', 'v1.0.0', s.Budget(5))
+        connection = self.response(); previous = signal.getsignal(signal.SIGALRM)
+        connection.getresponse.side_effect = lambda: signal.raise_signal(signal.SIGALRM)
+        with mock.patch.object(s.ssl, 'SSLContext'), mock.patch.object(s.http.client, 'HTTPSConnection', return_value=connection):
+            with self.assertRaisesRegex(RuntimeError, 'request deadline'):
+                s.fetch_mod('example.com/old', 'v1.0.0', s.Budget(5))
+        self.assertEqual(signal.getsignal(signal.SIGALRM), previous)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+        raw=b'module example.com/old\n';cache=self.base/'cache';cache.mkdir()
+        catalog=[['example.com/old','v1.0.0',reference_h1({'go.mod':raw})]]
+        with mock.patch.object(s, 'fetch_mod', return_value=raw), mock.patch.object(s, 'write_fresh', side_effect=OSError('controlled I/O')):
+            with self.assertRaisesRegex(OSError, 'controlled I/O'):s.preload_metadata(catalog,cache,s.Budget(5),[])
+
+    def test_independent_metadata_consumer_requires_catalog_completion_and_actual_bytes(self):
+        raw=b'module example.com/old\n';cache=self.base/'cache';cache.mkdir()
+        catalog=[['example.com/old','v1.0.0',reference_h1({'go.mod':raw})]]
+        digest=s.sha(json.dumps(catalog,separators=(',',':'),ensure_ascii=True).encode());records=[]
+        with mock.patch.object(s,'fetch_mod',return_value=raw):s.preload_metadata(catalog,cache,s.Budget(5),records)
+        receipt={'metadata_only':{'complete':True,'conserved':True,'catalog_count':1,'catalog_sha256':digest,'records':records}}
+        with mock.patch.object(delivery,'METADATA_COUNT',1),mock.patch.object(delivery,'METADATA_SHA256',digest):
+            delivery.verify_metadata(receipt,cache)
+            for key,value in (('complete',False),('conserved',False),('catalog_sha256','0'*64),('catalog_count',2),('records',records*2)):
+                bad=copy.deepcopy(receipt);bad['metadata_only'][key]=value
+                with self.subTest(key=key),self.assertRaises(RuntimeError):delivery.verify_metadata(bad,cache)
+            bad=copy.deepcopy(receipt);bad['metadata_only']['records'][0]['module']='evil.example/unpinned'
+            with self.assertRaisesRegex(RuntimeError,'identities differ'):delivery.verify_metadata(bad,cache)
+            path=s.metadata_path(cache,'example.com/old','v1.0.0');path.chmod(0o600);path.write_bytes(raw.replace(b'old',b'bad'))
+            with self.assertRaisesRegex(RuntimeError,'actual metadata changed'):delivery.verify_metadata(receipt,cache)
+
+    def test_metadata_connection_close_failure_restores_alarm_and_remains_failed(self):
+        connection=self.response();connection.close.side_effect=OSError('controlled close failure')
+        previous=signal.getsignal(signal.SIGALRM)
+        with mock.patch.object(s.ssl,'SSLContext'),mock.patch.object(s.http.client,'HTTPSConnection',return_value=connection):
+            with self.assertRaisesRegex(OSError,'controlled close failure'):
+                s.fetch_mod('example.com/old','v1.0.0',s.Budget(5))
+        connection.close.assert_called_once()
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL),(0.0,0.0))
+        self.assertEqual(signal.getsignal(signal.SIGALRM),previous)
+
     def test_buildinfo_vcs_wrong_compiler_and_dependency_refused(self):
         for name in ('osv-scanner', 'osv-reporter', 'govulncheck'):
             self.assertEqual(s.buildinfo(metadata(name), name)['compiler'], 'go1.27.2')
@@ -290,17 +424,21 @@ class OrchestrationControls(unittest.TestCase):
         dependencies = others + [s.VULN, s.XNET]
         for identity in dependencies:
             self.cache_module(identity)
+        oldnet_identity = (s.XNET[0], 'v0.58.0')
+        self.cache_module(oldnet_identity)
         upstream_mod = ('module ' + s.SCANNER[0] + '\n\ngo 1.27.0\n\nrequire (\n' +
                         ''.join('\t' + a + ' ' + b + ' // indirect\n' for a, b in others +
                                 [s.VULN, (s.XNET[0], 'v0.58.0')]) + ')\n').encode()
-        oldnet = b'golang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=\n' + \
-                 b'golang.org/x/net v0.58.0/go.mod h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU=\n'
+        oldnet = ('golang.org/x/net v0.58.0 ' + self.sums[oldnet_identity] + '\n' +
+                  'golang.org/x/net v0.58.0/go.mod ' + self.sums[oldnet_identity[0], oldnet_identity[1] + '/go.mod'] + '\n').encode()
         upstream_sum = ''.join(a + ' ' + b + ' ' + value + '\n'
                                for (a, b), value in self.sums.items() if a != s.XNET[0]).encode() + oldnet
         additions = (s.XNET[0] + ' ' + s.XNET[1] + ' ' + self.sums[s.XNET] + '\n' +
                      s.XNET[0] + ' ' + s.XNET[1] + '/go.mod ' + self.sums[s.XNET[0], s.XNET[1] + '/go.mod'] + '\n').encode()
         patched_mod = upstream_mod.replace(b'go 1.27.0\n', b'go 1.27.2\n', 1).replace(
                       b'golang.org/x/net v0.58.0 // indirect', b'golang.org/x/net v0.60.0 // indirect')
+        catalog = sorted([a, b[:-7], value] for (a,b),value in
+                         s.checksum_rows(upstream_sum + additions).items() if b.endswith('/go.mod'))
         self.cache_module(s.SCANNER, {'go.mod': upstream_mod, 'go.sum': upstream_sum,
                                     'cmd/osv-scanner/main.go': b'package main\n',
                                     'cmd/osv-reporter/main.go': b'package main\n'})
@@ -310,13 +448,16 @@ class OrchestrationControls(unittest.TestCase):
           mock.patch.object(s, 'runner_home', return_value=self.home),
           mock.patch.object(s, 'SCANNER_SUM', self.sums[s.SCANNER]),
           mock.patch.object(s, 'SCANNER_MOD_SUM', self.sums[s.SCANNER[0], s.SCANNER[1] + '/go.mod']),
+          mock.patch.object(s, 'UPSTREAM_XNET_MOD_SUM', self.sums[oldnet_identity[0], oldnet_identity[1] + '/go.mod']),
+          mock.patch.object(s, 'MOD_CATALOG_COUNT', len(catalog)),
+          mock.patch.object(s, 'MOD_CATALOG_SHA', s.sha(json.dumps(catalog, separators=(',', ':'), ensure_ascii=True).encode())),
           mock.patch.object(s, 'EXTRA_SUMS', {i: (self.sums[i], self.sums[i[0], i[1] + '/go.mod']) for i in (s.VULN, s.XNET)}),
           mock.patch.object(s, 'UPSTREAM_SHA', {'go.mod': s.sha(upstream_mod), 'go.sum': s.sha(upstream_sum)}),
           mock.patch.object(s, 'PATCHED_SHA', {'go.mod': s.sha(patched_mod), 'go.sum': s.sha(upstream_sum + additions)}),
           mock.patch.object(s, 'run', side_effect=self.fake_run)]
         for patch in self.patches:
             patch.start(); self.addCleanup(patch.stop)
-        self.calls = []; self.fail = None; self.corrupt_source = False; self.corrupt_tool = False
+        self.calls = []; self.fail_phase = None; self.corrupt_source = False; self.corrupt_tool = False
 
     def cache_module(self, identity, extra=None):
         module, version = identity
@@ -339,9 +480,9 @@ class OrchestrationControls(unittest.TestCase):
 
     def fake_run(self, argv, cwd, env, budget, seconds, logs, label, commands):
         self.calls.append((argv, cwd, env, label))
-        commands.append({'phase': label, 'exit': 9 if self.fail == label else 0,
-                         'complete': self.fail != label, 'elapsed_seconds': 0.001})
-        if self.fail == label:
+        commands.append({'phase': label, 'exit': 9 if self.fail_phase == label else 0,
+                         'complete': self.fail_phase != label, 'elapsed_seconds': 0.001})
+        if self.fail_phase == label:
             raise RuntimeError('supplier native phase failed: ' + label + ' (exit 9)')
         if label == 'go-version':
             return b'go version go1.27.2 linux/amd64\n'
@@ -385,7 +526,7 @@ class OrchestrationControls(unittest.TestCase):
         self.assertIn(b'golang.org/x/net v0.60.0/go.mod ', (source / 'go.sum').read_bytes())
 
     def test_failed_native_build_is_incomplete_and_never_runs_next_target(self):
-        self.fail = 'build-osv-reporter'
+        self.fail_phase = 'build-osv-reporter'
         self.assertEqual(s.supplier(self.args), 2)
         self.assertFalse(self.receipt()['complete']); self.assertFalse(self.receipt()['supplied'])
         self.assertNotIn('build-govulncheck', [c[3] for c in self.calls])

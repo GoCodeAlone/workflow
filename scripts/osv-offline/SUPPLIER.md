@@ -49,13 +49,28 @@ Additional directives or a different module refuse. The authenticated ZIP stays
 unchanged; this path cannot extract a source tree or replace the scanner's
 required original manifest. Receipts identify the synthesized proxy origin.
 
-Only the scanner's authenticated 206 direct/indirect module requirements are
+Only the scanner's authenticated 206 direct/indirect requirement ZIPs are
 downloaded, in fixed batches of 16, through `https://proxy.golang.org` and
 `sum.golang.org`. Go's official public blob redirect is part of that existing
 supplier profile. The closed child environment contains no GitHub token,
 credential, proxy variable, private module pattern or compiler hook. Requests
 contain supplier module paths/versions and checksum protocol quantities only.
 Project preload remains the caller's separate approved phase.
+
+Go's [offline cache verification](https://go.dev/ref/mod#go-mod-verify) also needs
+older `go.mod` metadata for minimal version selection. Before verification,
+preload only the 399 fixed `/go.mod` checksum rows in the exact patched scanner
+manifest. Their canonical catalog SHA256 is
+`86669b0754b3ec99dfa7bfd2db3ecdfcad5fc2915d39528c195f0173bbf96f79`.
+Every existing or fetched body must independently match its pinned Hash1 before
+publication. Missing bodies use direct TLS to `proxy.golang.org:443` with the
+fixed Ubuntu CA bundle, no credential/proxy environment, redirect or retry,
+30-second request deadline and 1-MiB body limit within the same 1,800-second
+supplier budget. No additional ZIP, graph-selected identity or source tree is
+downloaded. Only absent `.mod` files are exclusively created in the existing
+standard cache; invalid cached metadata, symlink parents or publication failures
+refuse. Exact body hashes are conserved after all offline builds and independently
+joined to the fixed catalog and actual cache bytes by the delivery verifier.
 
 Before the first Go command, an owned temporary XDG configuration records
 telemetry `off`; actual `go env GOTELEMETRY` must report `off`, and that mode file

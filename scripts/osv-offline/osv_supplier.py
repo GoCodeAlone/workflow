@@ -1,9 +1,53 @@
 """Independent supplier source/build/digest joins for each actual hosted run."""
+import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import stat
+
+METADATA_COUNT = 399
+METADATA_SHA256 = '86669b0754b3ec99dfa7bfd2db3ecdfcad5fc2915d39528c195f0173bbf96f79'
+
+def verify_metadata(receipt, cache):
+    metadata=receipt.get('metadata_only', {})
+    rows=metadata.get('records', [])
+    if (metadata.get('complete') is not True or metadata.get('conserved') is not True or
+        metadata.get('catalog_count')!=METADATA_COUNT or metadata.get('catalog_sha256')!=METADATA_SHA256 or
+        not isinstance(rows,list) or len(rows)!=METADATA_COUNT):
+        raise RuntimeError('supplier metadata completion/catalog differs')
+    catalog=[]
+    for row in rows:
+        module=row['module'];version=row['version'];digest=row['go_mod_h1']
+        if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._~!/+\-]{0,250}', module) or
+            not all(p and p not in {'.','..'} for p in module.split('/')) or
+            not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.\-]+)?(?:\+incompatible)?',version) or
+            not re.fullmatch(r'h1:[A-Za-z0-9+/]{43}=',digest) or
+            not re.fullmatch(r'[0-9a-f]{64}',row['go_mod_sha256']) or
+            type(row['bytes']) is not int or not 0<row['bytes']<=1024*1024 or
+            row['origin'] not in {'authenticated-existing-cache','fixed-public-proxy-mod-only'}):
+            raise RuntimeError('supplier metadata record differs')
+        catalog.append([module,version,digest])
+    raw=json.dumps(sorted(catalog),separators=(',',':'),ensure_ascii=True).encode()
+    if (len({tuple(row[:2]) for row in catalog})!=METADATA_COUNT or
+        hashlib.sha256(raw).hexdigest()!=METADATA_SHA256):
+        raise RuntimeError('supplier authenticated metadata identities differ')
+    for row in rows:
+        escape=lambda value: ''.join('!'+c.lower() if 'A'<=c<='Z' else c for c in value)
+        path=Path(cache)/'cache/download'/escape(row['module'])/'@v'/(escape(row['version'])+'.mod')
+        if path!=path.resolve(strict=True):
+            raise RuntimeError('supplier metadata cache path differs')
+        with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as f:
+            before=os.fstat(f.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size!=row['bytes']:
+                raise RuntimeError('supplier actual metadata size/type differs')
+            data=f.read(1024*1024+1);after=os.fstat(f.fileno())
+        full_hash=hashlib.sha256(data).hexdigest()
+        go_hash='h1:'+base64.b64encode(hashlib.sha256((full_hash+'  go.mod\n').encode()).digest()).decode()
+        if (len(data)!=row['bytes'] or full_hash!=row['go_mod_sha256'] or go_hash!=row['go_mod_h1'] or
+            (before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_size,after.st_mtime_ns,after.st_ctime_ns)):
+            raise RuntimeError('supplier actual metadata changed')
 
 def verify_delivery(contract):
     path=Path(contract['delivery_receipt_path']);info=path.lstat()
@@ -45,6 +89,7 @@ def verify_delivery(contract):
     if tools.get('goroot')!=contract['compiler_root'] or receipt.get('cache_paths')!={
         'GOPATH':contract['existing_gopath'],'GOMODCACHE':contract['existing_module_cache'],'GOCACHE':contract['existing_build_cache']}:
         raise RuntimeError('supplier actual compiler/cache paths differ')
+    verify_metadata(receipt,contract['existing_module_cache'])
     pins=contract['pins']
     if set(pins)!={'osv-scanner','osv-reporter','govulncheck'} or any(not re.fullmatch('[0-9a-f]{64}',str(value)) for value in pins.values()):
         raise RuntimeError('supplier admitted pin inventory differs')
