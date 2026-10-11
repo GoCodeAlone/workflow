@@ -30,6 +30,16 @@ on:
         type: string
         required: false
         default: ''
+      exact_candidate_trial_json:
+        description: 'Root-issued single-dispatch trial with explicit UTC window and source/ledger pins'
+        type: string
+        required: false
+        default: ''
+      exact_candidate_trial_sha256:
+        description: 'SHA256 of the exact root-issued trial JSON bytes'
+        type: string
+        required: false
+        default: ''
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
@@ -298,149 +308,256 @@ jobs:
           test '${{ steps.production.outcome }}' = success
           test '${{ steps.fixtures.outcome }}' = success
 
-  exact-candidate-runtime:
-    if: github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+  exact-candidate-acquisition:
+    if: github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 6
     permissions:
-      contents: read
+      contents: write
     env:
       OSV_RUNTIME_SOURCE_REVIEW: ${{ inputs.exact_candidate_source_review_json }}
       OSV_RUNTIME_SOURCE_REVIEW_SHA: ${{ inputs.exact_candidate_source_review_sha256 }}
+      OSV_CANDIDATE_TRIAL: ${{ inputs.exact_candidate_trial_json }}
+      OSV_CANDIDATE_TRIAL_SHA: ${{ inputs.exact_candidate_trial_sha256 }}
+    outputs:
+      carrier_id: ${{ steps.carrier.outputs.artifact-id }}
+      carrier_digest: ${{ steps.carrier.outputs.artifact-digest }}
+      receipt_sha256: ${{ steps.acquire.outputs.receipt_sha256 }}
+      invocation_id: ${{ steps.acquire.outputs.invocation_id }}
     steps:
-      - name: Check out the exact source-reviewed candidate witness
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify complete source pins before helper imports
-        id: preflight
+      - name: Cold public source fetch without a token or checkout
+        id: source
         continue-on-error: true
         run: |
           set -euo pipefail
           umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
-          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
-          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
-          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-proof-XXXXXXXXXX")"
-          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
-          /usr/bin/timeout --signal=TERM --kill-after=5s 20s /usr/bin/env -i \
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          root="${RUNNER_TEMP}/candidate9819-acquisition-${GITHUB_RUN_ID}-1"
+          entry="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/candidate9819-entry-XXXXXXXXXX")"
+          /usr/bin/mkdir -p "$entry/scripts/osv-offline/exact-candidate-runtime"
+          wrapper="$entry/scripts/osv-offline/exact-candidate-runtime/split-hosted.py"
+          /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
+            /usr/bin/curl -q --fail --silent --show-error --proto '=https' --max-redirs 0 \
+            --connect-timeout 5 --max-time 10 --max-filesize 65536 \
+            "https://raw.githubusercontent.com/GoCodeAlone/workflow/$GITHUB_SHA/scripts/osv-offline/exact-candidate-runtime/split-hosted.py" > "$wrapper"
+          /usr/bin/chmod 400 "$wrapper"
+          actual="$(/usr/bin/sha256sum "$wrapper")"
+          test "${actual%% *}" = de09495665fdd24b21beb59bc538e0a3ea81dd0233e8091530b8364059e87fa3
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/candidate9819-startup-XXXXXXXXXX")"
+          /usr/bin/timeout --signal=TERM --kill-after=5s 65s /usr/bin/env -i \
             PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
             GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" GITHUB_OUTPUT="$GITHUB_OUTPUT" \
             OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
             OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            OSV_CANDIDATE_TRIAL="$OSV_CANDIDATE_TRIAL" OSV_CANDIDATE_TRIAL_SHA="$OSV_CANDIDATE_TRIAL_SHA" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/exact-candidate-runtime/hosted.py preflight "$proof_dir" --execute
-      - name: Supply the unchanged pinned Python image
-        id: image
-        if: steps.preflight.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i \
-            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
-            /usr/bin/docker pull docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a
-      - name: Authenticate and receive only the approved unpublished asset
-        id: delivery
-        if: steps.preflight.outcome == 'success' && steps.image.outcome == 'success'
+            "$wrapper" fetch "$root" --execute
+      - name: Fixed approved draft GETs only
+        id: acquire
+        if: steps.source.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          PROOF_DIRECTORY: ${{ steps.preflight.outputs.evidence }}
         run: |
           set -euo pipefail
           umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
-          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
-          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          root="${RUNNER_TEMP}/candidate9819-acquisition-${GITHUB_RUN_ID}-1"
+          wrapper="$root/bundle/scripts/osv-offline/exact-candidate-runtime/split-hosted.py"
+          actual="$(/usr/bin/sha256sum "$wrapper")"
+          test "${actual%% *}" = de09495665fdd24b21beb59bc538e0a3ea81dd0233e8091530b8364059e87fa3
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/candidate9819-startup-XXXXXXXXXX")"
           /usr/bin/timeout --signal=TERM --kill-after=5s 205s /usr/bin/env -i \
             PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
             GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" GITHUB_OUTPUT="$GITHUB_OUTPUT" \
             OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
             OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            OSV_CANDIDATE_TRIAL="$OSV_CANDIDATE_TRIAL" OSV_CANDIDATE_TRIAL_SHA="$OSV_CANDIDATE_TRIAL_SHA" \
             GH_TOKEN="$GH_TOKEN" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/exact-candidate-runtime/hosted.py deliver "$PROOF_DIRECTORY" --execute
-      - name: Seal the exact read-only executable receiver
-        id: receiver
-        if: steps.delivery.outcome == 'success'
+            "$wrapper" acquire "$root" --execute
+      - name: One-day same-run carrier
+        id: carrier
+        if: steps.acquire.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: candidate9819-carrier-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.acquire.outputs.carrier_directory }}
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: false
+          compression-level: 0
+          include-hidden-files: true
+      - name: Actual acquisition completion and final deadline
+        id: finalize
+        if: steps.carrier.outcome == 'success'
         continue-on-error: true
         env:
-          PROOF_DIRECTORY: ${{ steps.preflight.outputs.evidence }}
-          OSV_DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
+          OSV_CARRIER_OUTCOME: ${{ steps.carrier.outcome }}
+          OSV_CARRIER_ID: ${{ steps.carrier.outputs.artifact-id }}
+          OSV_CARRIER_DIGEST: ${{ steps.carrier.outputs.artifact-digest }}
         run: |
           set -euo pipefail
           umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
-          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
-          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          root="${RUNNER_TEMP}/candidate9819-acquisition-${GITHUB_RUN_ID}-1"
+          wrapper="$root/bundle/scripts/osv-offline/exact-candidate-runtime/split-hosted.py"
+          actual="$(/usr/bin/sha256sum "$wrapper")"
+          test "${actual%% *}" = de09495665fdd24b21beb59bc538e0a3ea81dd0233e8091530b8364059e87fa3
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/candidate9819-startup-XXXXXXXXXX")"
+          /usr/bin/timeout --signal=TERM --kill-after=5s 15s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+            OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
+            OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            OSV_CANDIDATE_TRIAL="$OSV_CANDIDATE_TRIAL" OSV_CANDIDATE_TRIAL_SHA="$OSV_CANDIDATE_TRIAL_SHA" \
+            OSV_CARRIER_OUTCOME="$OSV_CARRIER_OUTCOME" OSV_CARRIER_ID="$OSV_CARRIER_ID" OSV_CARRIER_DIGEST="$OSV_CARRIER_DIGEST" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            "$wrapper" finalize "$root" --execute
+      - name: One-day bounded acquisition diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: candidate9819-acquisition-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/candidate9819-acquisition-${{ github.run_id }}-1/state.json
+            ${{ runner.temp }}/candidate9819-acquisition-${{ github.run_id }}-1/*-failure.json
+          if-no-files-found: warn
+          retention-days: 1
+          overwrite: false
+      - name: Enforce actual acquisition job outcome
+        if: ${{ !cancelled() }}
+        env:
+          SOURCE: ${{ steps.source.outcome }}
+          ACQUIRE: ${{ steps.acquire.outcome }}
+          CARRIER: ${{ steps.carrier.outcome }}
+          FINALIZE: ${{ steps.finalize.outcome }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE" = success
+          test "$ACQUIRE" = success
+          test "$CARRIER" = success
+          test "$FINALIZE" = success
+
+  exact-candidate-runtime:
+    needs: exact-candidate-acquisition
+    if: needs.exact-candidate-acquisition.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions: {}
+    env:
+      OSV_RUNTIME_SOURCE_REVIEW: ${{ inputs.exact_candidate_source_review_json }}
+      OSV_RUNTIME_SOURCE_REVIEW_SHA: ${{ inputs.exact_candidate_source_review_sha256 }}
+      OSV_CANDIDATE_TRIAL: ${{ inputs.exact_candidate_trial_json }}
+      OSV_CANDIDATE_TRIAL_SHA: ${{ inputs.exact_candidate_trial_sha256 }}
+      OSV_PRODUCER_OUTCOME: ${{ needs.exact-candidate-acquisition.result }}
+      OSV_CARRIER_ID: ${{ needs.exact-candidate-acquisition.outputs.carrier_id }}
+      OSV_CARRIER_DIGEST: ${{ needs.exact-candidate-acquisition.outputs.carrier_digest }}
+      OSV_PRODUCER_RECEIPT_SHA: ${{ needs.exact-candidate-acquisition.outputs.receipt_sha256 }}
+      OSV_INVOCATION_ID: ${{ needs.exact-candidate-acquisition.outputs.invocation_id }}
+    steps:
+      - name: Retrieve only the successful producer's same-run artifact ID
+        id: carrier
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.exact-candidate-acquisition.outputs.carrier_id }}
+          merge-multiple: true
+          digest-mismatch: error
+          path: ${{ runner.temp }}/candidate9819-carrier
+      - name: Cold full carrier guard and exact executable receiver
+        id: receiver
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 077
+          root="${RUNNER_TEMP}/candidate9819-carrier"
+          wrapper="$root/bundle/scripts/osv-offline/exact-candidate-runtime/split-hosted.py"
+          actual="$(/usr/bin/sha256sum "$wrapper")"
+          test "${actual%% *}" = de09495665fdd24b21beb59bc538e0a3ea81dd0233e8091530b8364059e87fa3
+          export OSV_PROOF_ROOT="${RUNNER_TEMP}/candidate9819-proof-${GITHUB_RUN_ID}-1"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/candidate9819-startup-XXXXXXXXXX")"
           /usr/bin/timeout --signal=TERM --kill-after=5s 35s /usr/bin/env -i \
             PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
             GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" GITHUB_OUTPUT="$GITHUB_OUTPUT" \
             OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
             OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
-            OSV_DELIVERY_OUTCOME="$OSV_DELIVERY_OUTCOME" \
+            OSV_CANDIDATE_TRIAL="$OSV_CANDIDATE_TRIAL" OSV_CANDIDATE_TRIAL_SHA="$OSV_CANDIDATE_TRIAL_SHA" \
+            OSV_PRODUCER_OUTCOME="$OSV_PRODUCER_OUTCOME" OSV_CARRIER_ID="$OSV_CARRIER_ID" OSV_CARRIER_DIGEST="$OSV_CARRIER_DIGEST" OSV_PRODUCER_RECEIPT_SHA="$OSV_PRODUCER_RECEIPT_SHA" OSV_INVOCATION_ID="$OSV_INVOCATION_ID" OSV_PROOF_ROOT="$OSV_PROOF_ROOT" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/exact-candidate-runtime/hosted.py receive "$PROOF_DIRECTORY" --execute
-      - name: Prove actual controls then the fixed candidate schema operation
-        id: runtime
+            "$wrapper" receive "$root" --execute
+      - name: Supply only the unchanged approved Python image
+        id: image
         if: steps.receiver.outcome == 'success'
         continue-on-error: true
+        run: |
+          set -euo pipefail
+          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i             PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C             /usr/bin/docker pull docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a
+      - name: Actual native controls then exact candidate schema
+        id: runtime
+        if: steps.receiver.outcome == 'success' && steps.image.outcome == 'success'
+        continue-on-error: true
         env:
-          PROOF_DIRECTORY: ${{ steps.preflight.outputs.evidence }}
           OSV_RECEIVER_OUTCOME: ${{ steps.receiver.outcome }}
         run: |
           set -euo pipefail
           umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
-          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
-          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          root="${RUNNER_TEMP}/candidate9819-carrier"
+          wrapper="$root/bundle/scripts/osv-offline/exact-candidate-runtime/split-hosted.py"
+          actual="$(/usr/bin/sha256sum "$wrapper")"
+          test "${actual%% *}" = de09495665fdd24b21beb59bc538e0a3ea81dd0233e8091530b8364059e87fa3
+          export OSV_PROOF_ROOT="${RUNNER_TEMP}/candidate9819-proof-${GITHUB_RUN_ID}-1"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/candidate9819-startup-XXXXXXXXXX")"
           /usr/bin/timeout --signal=TERM --kill-after=5s 90s /usr/bin/env -i \
             PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
             GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" GITHUB_OUTPUT="$GITHUB_OUTPUT" \
             OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
             OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
-            OSV_RECEIVER_OUTCOME="$OSV_RECEIVER_OUTCOME" \
+            OSV_CANDIDATE_TRIAL="$OSV_CANDIDATE_TRIAL" OSV_CANDIDATE_TRIAL_SHA="$OSV_CANDIDATE_TRIAL_SHA" \
+            OSV_PRODUCER_OUTCOME="$OSV_PRODUCER_OUTCOME" OSV_CARRIER_ID="$OSV_CARRIER_ID" OSV_CARRIER_DIGEST="$OSV_CARRIER_DIGEST" OSV_PRODUCER_RECEIPT_SHA="$OSV_PRODUCER_RECEIPT_SHA" OSV_INVOCATION_ID="$OSV_INVOCATION_ID" OSV_PROOF_ROOT="$OSV_PROOF_ROOT" OSV_RECEIVER_OUTCOME="$OSV_RECEIVER_OUTCOME" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/exact-candidate-runtime/hosted.py runtime "$PROOF_DIRECTORY" --execute
-      - name: Retain bounded receipts and native schema evidence
-        if: ${{ always() && steps.preflight.outputs.evidence != '' }}
+            "$wrapper" runtime "$root" --execute
+      - name: One-day receipts and bounded schema output only
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: exact-candidate-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          name: candidate9819-schema-proof-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ steps.preflight.outputs.evidence }}/state.json
-            ${{ steps.preflight.outputs.evidence }}/review.json
-            ${{ steps.preflight.outputs.evidence }}/transport-receipt.json
-            ${{ steps.preflight.outputs.evidence }}/*-failure.json
-            ${{ steps.preflight.outputs.evidence }}/receiver/receiver-proof.json
-            ${{ steps.preflight.outputs.evidence }}/runtime/controller-*.json
-            ${{ steps.preflight.outputs.evidence }}/runtime/container-ownership.json*
-            ${{ steps.preflight.outputs.evidence }}/runtime/container/request.json
-            ${{ steps.preflight.outputs.evidence }}/runtime/container/worker-*.json
-            ${{ steps.preflight.outputs.evidence }}/runtime/container/native-controls.json
-            ${{ steps.preflight.outputs.evidence }}/runtime/container/native-control-*.json
-            ${{ steps.preflight.outputs.evidence }}/runtime/container/candidate.stdout
-            ${{ steps.preflight.outputs.evidence }}/runtime/container/candidate.stderr
-          if-no-files-found: error
-          retention-days: 5
-      - name: Enforce genuine delivery receiver and runtime phase outcomes
+            ${{ runner.temp }}/candidate9819-carrier/*-failure.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/*.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/receiver/receiver-proof.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/controller-*.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container-ownership.json*
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container/request.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container/worker-*.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container/native-controls.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container/native-control-*.json
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container/candidate.stdout
+            ${{ runner.temp }}/candidate9819-proof-${{ github.run_id }}-1/runtime/container/candidate.stderr
+          if-no-files-found: warn
+          retention-days: 1
+          overwrite: false
+      - name: Enforce actual runtime job outcome
         if: ${{ !cancelled() }}
+        env:
+          RECEIVER: ${{ steps.receiver.outcome }}
+          IMAGE: ${{ steps.image.outcome }}
+          RUNTIME: ${{ steps.runtime.outcome }}
         run: |
-          test '${{ steps.preflight.outcome }}' = success
-          test '${{ steps.image.outcome }}' = success
-          test '${{ steps.delivery.outcome }}' = success
-          test '${{ steps.receiver.outcome }}' = success
-          test '${{ steps.runtime.outcome }}' = success
+          set -euo pipefail
+          test "$RECEIVER" = success
+          test "$IMAGE" = success
+          test "$RUNTIME" = success

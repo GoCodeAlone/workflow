@@ -1,33 +1,40 @@
 # Exact existing-candidate schema witness
 
-This manual hosted job validates only SHA256 `9819a5b582e1f0b6ab135b75c5113baf36f7507a6904e64e2984c318447e8bdf` (115900576 bytes), built from source `81b9b1df2386f7d44c8464c999a4ea0919813526`. It downloads only the approved unpublished draft409874491 asset631609441 through authenticated GitHub reads. Original bytes are preserved; a separate0500 receiver is mounted read-only. There is no Go setup/build/cache or security waiver. GO-2026-5932 remains HOLD.
+This finite manual trial validates only SHA256 `9819a5b582e1f0b6ab135b75c5113baf36f7507a6904e64e2984c318447e8bdf` (115,900,576 bytes), built from source `81b9b1df2386f7d44c8464c999a4ea0919813526`. Approved draft release `409874491` and asset `631609441` remain unpublished. Original bytes are preserved and a separate immutable receiver is mounted read-only. No Go build, compiler cache or vulnerability exception is part of this witness. GO-2026-5932 remains HOLD.
 
-Use the existing Copilot Setup Steps workflow on `refs/heads/prep/osv-prerequisites-20261011-r1`, repository `GoCodeAlone/workflow`, with `exact_candidate_runtime_proof=true` and both other proof inputs false. Execution requires current independent exact-source reviews first. The agent preparing these files neither dispatches nor executes the job.
+Use Copilot Setup Steps on `refs/heads/prep/osv-prerequisites-20261011-r1` in `GoCodeAlone/workflow`, with `exact_candidate_runtime_proof=true` and both other proof inputs false. Both current independent source reviews and one root-issued dispatch ledger precede the trial. Run attempt must be 1. The two jobs have separate hosted runners:
 
-Supply `exact_candidate_source_review_json` and SHA256 of those exact UTF-8 JSON bytes (no added newline) in `exact_candidate_source_review_sha256`. This is the authenticated root-supplied review admission, not a caller-created claim of runtime or vulnerability acceptance. The JSON must have exactly these fields:
+- `exact-candidate-acquisition` has a six-minute timeout and job-only `contents:write`. The ephemeral token is passed only to fixed GitHub CLI GETs outside execution. Token expiry follows job completion; this timeout is not a cryptographic six-minute TTL.
+- `exact-candidate-runtime` has `permissions: {}` and consumes one exact artifact ID from the same actually successful acquisition run and attempt. No checkout or GitHub token is needed in this job. Actions service credentials stay outside the closed controller and container environment.
+
+Supply `exact_candidate_source_review_json` and the SHA256 of its exact UTF-8 bytes in `exact_candidate_source_review_sha256`. Admission has exactly these fields:
 
 - `schema="workflow.GO5932.source-review-admission.v1"`, `complete=true`, `accepted=false`.
-- `source_manifest_sha256`, `cold_wrapper_sha256`, `workflow_sha256`: hashes of the committed source-manifest.json, hosted.py and whole copilot-setup-steps.yml.
-- `security_decision_sha256`, `antagonistic_decision_sha256`: exact current reviewed decisions.
-- `security_critical`, `security_important`, `security_advisory`, `antagonistic_critical`, `antagonistic_important`, `antagonistic_advisory`: integer0 after actual review.
-- `allows_native_controls=true`, `candidate_runtime_authorized=true`, `artifact_sha256`: exact9819 digest above.
+- `source_manifest_sha256`, `cold_wrapper_sha256`, `workflow_sha256`: inherited manifest, inherited `hosted.py` and complete current workflow hashes.
+- `split_wrapper_sha256`, `source_binding_sha256`, `source_rows`: new cold controller hash, exact source-review binding and complete twelve-file byte/hash bundle inventory.
+- `security_decision_sha256`, `antagonistic_decision_sha256`: both current independent source decisions.
+- `security_critical`, `security_important`, `security_advisory`, `antagonistic_critical`, `antagonistic_important`, `antagonistic_advisory`: integer 0 after actual review.
+- `allows_native_controls=true`, `candidate_runtime_authorized=true`, `artifact_sha256`: the exact digest above.
 - `operation=["/candidate/wfctl","schema"]`, `workflow_ref="refs/heads/prep/osv-prerequisites-20261011-r1"`.
 
-The receipt is capped64KiB; duplicate/nonfinite JSON, extra fields, missing pins and any mismatch fail before helper imports or network actions. The workflow pins hosted.py first. Its cold guard verifies manifest and all eight helper bytes before any helper import. The exact checkout commit, current hosted event, ref/job/repository, independent seals and whole workflow hash are also bound. Container helpers are the same guarded bytes on validated read-only binds.
+Also supply `exact_candidate_trial_json` and its exact UTF-8 SHA256 in `exact_candidate_trial_sha256`. The root issues schema `workflow.GO5932.single-trial.v1` with the recorded owner approval SHA, fresh 64-hex `trial_id`, literal UTC `not_before_utc`/`expires_utc` within two hours, actual `head`, exact `review_sha256`, consumed `issuer_ledger_sha256`, integer `dispatches=1` and `accepted=false`. Root-issued times are operational fields, not owner-supplied dates. The operator ledger and attempt guard do not create a global GitHub replay lock; no automatic repeat is admitted.
 
-GH_TOKEN is available only to fixed outside-container GitHub CLI reads. Closed subprocess environment, fixed GET endpoints, bounded time/streams, exact draft/asset metadata and full downloaded hash are required. No credential/raw authentication stderr is retained. The source tree, compiler, caches, daemon socket, token and incoming download are never mounted as candidate inputs.
+The workflow authenticates `split-hosted.py` before isolated Python startup. The controller verifies every bundle byte, current event/job/run/attempt/head, trial, review and inherited eight-helper manifest before any subject helper import. Public source fetches use fixed current-commit URLs without credentials, redirects or retries; no checkout is used. Each source file is bounded at 64 KiB and the complete bundle at 512 KiB.
 
-Each following phase requires the actual preceding step outcome. Receiver and runtime use one fresh256-bit invocation token. Candidate mode runs all35 actual static-ELF native controls first, then exactly `/candidate/wfctl schema`. Controls need USER_NOTIF/CONTINUE/native notification sizes, LandlockABI>=3 and actual negative-path proof; source tests cannot establish those. Missing support or compatibility is a genuine blocker. The pre-fork manager permits only the trusted child’s first fixed exec, denies all re-exec, and layers process/code-mapping/Landlock restrictions without changing the base filter.
+Acquisition uses only the fixed release and asset GET endpoints, rechecks draft state and verifies all downloaded bytes. A credential-free bounded `gh api --help` preflight determines whether that actual CLI supports `--allow-escape-sequences`; the flag is used only for the private binary sink. Binary bytes and authentication stderr are never displayed. Failures retain native rc/byte counts/hashes plus exact fixed GET endpoint and metadata/binary role. There is no PAT, persistent token, draft publication or alternate denied-client retry.
 
-The runtime’s entire caller phase has a90-second deadline including cold guard/startup, controls, target<=30s, private output and exact-ID cleanup, with30s reserved for cleanup. An outer90s timeout/5s forced caller retirement is a failure bound, not extra accepted runtime time. CPU2/memory2GiB/swap0/pids256 and16MiB worker file limit remain unchanged. Schema stdout<=4MiB, stderr<=1MiB; native0/empty stderr/strict schema required. Genuine findings remain HOLD regardless of this operation.
+The one-day carrier contains the exact executable, guarded source bundle including the hidden workflow, authentic acquisition identity and receipt, review and trial. Its broader signed-in public-repository artifact readership is explicitly owner-approved. The pinned downloader uses the producer's exact same-run artifact ID and `digest-mismatch:error`; complete file-set, byte, run/attempt/head, nonce and actual producer outcome checks precede imports or execution. Runtime records a separately labelled derived receiver transport while retaining the acquisition identity. It does not relabel acquisition as runtime.
 
-Always-retained artifacts explicitly list receipts, native controls, controller ownership/retirement and schema streams. Both115900576-byte copies, generated executable probes and authentication configuration are excluded. Final green requires actual success of source checks, image pull, authenticated delivery, receiver and runtime. Positive receipts stay accepted:false; stale positive files cannot override a failed phase.
+Candidate mode runs all 35 actual syscall controls before exactly `/candidate/wfctl schema`. USER_NOTIF/CONTINUE, notification sizes, Landlock ABI and negative paths require real Linux proof; mocks cannot establish them. The manager permits only its trusted child's first fixed exec and denies later exec, process creation and unapproved code mappings. Unchanged CPU 2, aggregate memory 2 GiB, swap 0, PID 256, read-only/no-egress mounts, descriptor guards and exact container-ID retirement remain mandatory. The caller's 90-second accepted deadline includes controls, target, output and cleanup with the existing cleanup reserve; outer 90-second timeout is a failure bound.
 
-Offline source checks (no Docker, Linux syscall probes, Go or candidate execution):
+New carrier, proof and failure artifacts use one-day retention. Proof artifacts list bounded receipts, controls, ownership/retirement and schema streams; they exclude executable copies and authentication configuration. Existing scanner artifacts retain their separate lifecycle. No deletion permission is inferred. Positive receipts stay `accepted:false` and provisional until actual current job success. A failed source, acquisition, upload, receiver, image or runtime phase cannot become green through a stale receipt.
+
+Offline controls do not execute Docker, Linux syscall probes, Go or the candidate:
 
 ```sh
 python3 -I -S -B scripts/osv-offline/exact-candidate-runtime/test-candidate-runtime.py
 python3 -I -S -B scripts/osv-offline/exact-candidate-runtime/test-hosted.py
+python3 -I -S -B -X pycache_prefix=/absolute/fresh-absent-prefix scripts/osv-offline/exact-candidate-runtime/test-split-hosted.py -v
 ```
 
-The first suite preserves the24 original file/policy/phase controls. The second adds7 focused cold-start/delivery controls. Their mocks never transfer to actual Linux admission.
+The first two suites retain original 24 runtime and 7 hosted controls. The split suite requires a fresh absent bytecode prefix and tests admission, carrier provenance, token separation and fixed denial attribution with explicit mocks. None supplies hosted acceptance or finding clearance.
