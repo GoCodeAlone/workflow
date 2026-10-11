@@ -5,9 +5,9 @@
   "cold_start": "Workflow pins split-hosted.py; its cold guard validates the exact review/trial, complete twelve-file source bundle and all eight helper bytes before the first helper import.",
   "files": {
     "candidate_contract.py": {
-      "bytes": 7504,
+      "bytes": 9538,
       "mode": "0644",
-      "sha256": "9501c8b66cffcf5dd8c919d39ddb8042033c30aeb970985611851c87b6ae4bda"
+      "sha256": "7cddbec8e1c31f2fcb7398615b0758c7ffbb1367c106a64dfd489292e8aa9c47"
     },
     "candidate_controls.py": {
       "bytes": 10131,
@@ -25,9 +25,9 @@
       "sha256": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9"
     },
     "container-worker.py": {
-      "bytes": 8696,
+      "bytes": 8833,
       "mode": "0644",
-      "sha256": "72ea09e64a86d1aa9ac7bac6699630f9a2e8df2378d985e7fe2422eca5fe206c"
+      "sha256": "88ba7d760295830b9461d516964873054e589712f5cdb302b3b7cc13fe9f7ee4"
     },
     "osv_container.py": {
       "bytes": 19854,
@@ -84,5 +84,19 @@
     "stderr_overflow"
   ],
   "schema": "workflow.GO5932.exact-runtime-source-manifest.v1",
+  "schema_diagnostic_subject": {
+    "artifact_bytes": 115900576,
+    "artifact_sha256": "9819a5b582e1f0b6ab135b75c5113baf36f7507a6904e64e2984c318447e8bdf",
+    "cgo_enabled": "0",
+    "go_version": "go1.27.2",
+    "operation": [
+      "/candidate/wfctl",
+      "schema"
+    ],
+    "sonic_h1": "h1:90H+rcF/FwLXwfB1cudOLq/je83n683Utf4Cbp0xHCo=",
+    "sonic_version": "v1.15.2",
+    "source_commit": "81b9b1df2386f7d44c8464c999a4ea0919813526",
+    "target": "linux/amd64"
+  },
   "source_commit": "81b9b1df2386f7d44c8464c999a4ea0919813526"
 }

@@ -246,6 +246,142 @@ class Fixture(unittest.TestCase):
         self.assertEqual(c.schema(json.dumps(good).encode()),good)
         for raw in (b'{"x":1,"x":2}',b'{"x":NaN}',b'{}',json.dumps(good).encode()+b'{}'):
             with self.assertRaises((c.Refusal,ValueError)):c.schema(raw)
+    def readiness_json(self):
+        return json.dumps({'$schema':'https://json-schema.org/draft/2020-12/schema',
+            'title':'Workflow Configuration','type':'object','required':['modules'],
+            'properties':dict.fromkeys(('modules','workflows','triggers','pipelines'),{})}).encode()
+    def test_exact_schema_notice_or_empty_retains_diagnostic(self):
+        subject=c.expected_schema_subject()
+        self.assertEqual(len(c.SONIC_NOTICE),165)
+        self.assertEqual(hashlib.sha256(c.SONIC_NOTICE).hexdigest(),
+            '9362b032bcb7342f2ad38091d3fd48f63a03c5da6d72dbcd9ac3d86e0a5ec53c')
+        for raw,label in ((b'','empty'),(c.SONIC_NOTICE,'sonic_optional_stdlib_fallback')):
+            result=c.schema_diagnostic(0,self.readiness_json(),raw,subject)
+            self.assertEqual(result['classification'],label)
+            self.assertEqual(result['bytes'],len(raw))
+            self.assertEqual(result['sha256'],hashlib.sha256(raw).hexdigest())
+            self.assertTrue(result['raw_stderr_retained']);self.assertEqual(result['subject'],subject)
+    def test_schema_notice_subject_and_manifest_drift_refused(self):
+        subject=c.expected_schema_subject()
+        for key in subject:
+            for value in ('other',None):
+                changed=dict(subject);changed[key]=value
+                with self.assertRaises(c.Refusal):c.schema_diagnostic(0,self.readiness_json(),c.SONIC_NOTICE,changed)
+            changed=dict(subject);del changed[key]
+            with self.assertRaises(c.Refusal):c.schema_diagnostic(0,self.readiness_json(),c.SONIC_NOTICE,changed)
+        for changed in ({**subject,'extra':True},{**subject,'artifact_bytes':float(c.SIZE)}):
+            with self.assertRaises(c.Refusal):c.schema_diagnostic(0,self.readiness_json(),c.SONIC_NOTICE,changed)
+        manifest=json.loads((HERE/'source-manifest.json').read_bytes())
+        self.assertEqual(c.schema_subject(manifest),subject)
+        for key in ('source_commit','artifact_sha256','artifact_bytes','schema_diagnostic_subject'):
+            changed=dict(manifest);changed[key]='changed'
+            with self.assertRaises(c.Refusal):c.schema_subject(changed)
+    def test_schema_notice_exact_bytes_no_prefix_suffix_normalization(self):
+        good=c.SONIC_NOTICE
+        for raw in (good[:-1],good+b'x',b'x'+good,good+b'\n',good+good,
+            b'another message\n',good.replace(b'sonic',b'Sonic'),
+            good.replace(b'1.26',b'1.25'),good.replace(b'WARNING',b'WARN\xe2\x80\x8bING')):
+            with self.assertRaises(c.Refusal):c.schema_diagnostic(0,self.readiness_json(),raw,c.expected_schema_subject())
+    def test_schema_notice_native_exit_invalid_duplicate_nonfinite_wrong_schema(self):
+        for code in (1,-9,125,False,'0',None):
+            with self.assertRaises(c.Refusal):c.schema_diagnostic(code,self.readiness_json(),c.SONIC_NOTICE,c.expected_schema_subject())
+        for raw in (b'{}',b'{"x":1,"x":2}',b'{"x":NaN}',b'{"x":Infinity}',
+            self.readiness_json()[:-1],self.readiness_json()+b'{}',
+            self.readiness_json().replace(b'Workflow Configuration',b'Other'),
+            self.readiness_json().replace(b'"modules"',b'"other"')):
+            with self.assertRaises((c.Refusal,ValueError)):
+                c.schema_diagnostic(0,raw,c.SONIC_NOTICE,c.expected_schema_subject())
+    def worker_candidate_mock(self,stderr=None,*,code=0,after=None,dirty=False,expired=False,manifest=None):
+        # Actual Python worker/strict parser/raw file writes/conservation flow;
+        # substitutes only native witness/controls/broker/artifact reads. No Linux
+        # syscall, binary or container execution is credited by this fixture.
+        out=self.directory('worker-'+str(len(list(self.base.iterdir()))))
+        operations=tuple(str(self.directory('operation-'+str(len(list(self.base.iterdir()))))) for _ in range(4))
+        budget=c.Budget(5)
+        if expired:
+            class Clock:
+                expired=False
+                def left(obj):
+                    if obj.expired:raise c.Refusal('MOCK terminal deadline')
+                    return 10
+            budget=Clock()
+        actual_path=Path
+        def path(raw):
+            value=str(raw)
+            return out/value[5:] if value.startswith('/out/') else actual_path(raw)
+        real_seal=c.seal
+        def seal(raw,value,clock):return real_seal(path(raw),value,clock)
+        before={'sha256':c.SHA,'bytes':c.SIZE,'mode':'0o500','MOCK':True};checks=[]
+        def artifact(raw,clock,*,elf):
+            self.assertEqual(raw,'/candidate/wfctl');self.assertTrue(elf);checks.append(raw)
+            if len(checks)==2:
+                if expired:budget.expired=True
+                return before if after is None else after
+            return before
+        native={'native_exit':code,'stdout':self.readiness_json(),
+            'stderr':c.SONIC_NOTICE if stderr is None else stderr,
+            'complete_process_enforcement':True,'MOCK_not_native':True}
+        def target(*args,**kwargs):
+            if dirty:(actual_path(operations[0])/'unexpected').write_bytes(b'drift')
+            return native
+        request={'mode':'candidate','identity':IDENTITY,'invocation_id':TOKEN,
+            'source_manifest_sha256':hashlib.sha256((HERE/'source-manifest.json').read_bytes()).hexdigest(),
+            'artifact_sha256':c.SHA}
+        controls={'complete':True,'all_native_pass':True,'MOCK_not_native':True,
+            'rows':[{'name':n,'pass':True,'MOCK':True} for n in
+                json.loads((HERE/'source-manifest.json').read_bytes())['native_control_names']]}
+        result={}
+        with patch.object(worker,'Path',side_effect=path),patch.object(worker,'OPERATIONS',operations),\
+            patch.object(worker,'witness',return_value={'MOCK':True}),\
+            patch.object(worker.probes,'controls',return_value=controls),\
+            patch.object(worker.e,'broker',side_effect=target) as broker,\
+            patch.object(c,'hash_artifact',side_effect=artifact),patch.object(c,'seal',side_effect=seal):
+            if manifest is None:
+                self.result=result;self.worker_out=out;self.artifact_checks=checks
+                worker.execute(request,budget,result)
+            else:
+                with patch.object(worker,'verify_bundle',return_value=manifest):
+                    with self.assertRaises(c.Refusal):worker.execute(request,budget,result)
+                    broker.assert_not_called()
+                    self.assertFalse(checks)
+        return result,out,checks
+    def test_worker_exact_notice_preserves_raw_and_final_conservation(self):
+        result,out,checks=self.worker_candidate_mock()
+        self.assertTrue(result['complete']);self.assertFalse(result['accepted'])
+        self.assertTrue(result['candidate_process_exit_observed']);self.assertTrue(result['candidate_execution'])
+        self.assertEqual(len(checks),2)
+        self.assertEqual((out/'candidate.stderr').read_bytes(),c.SONIC_NOTICE)
+        self.assertEqual(result['schema_diagnostic']['sha256'],result['stderr']['sha256'])
+        self.assertEqual(result['schema_diagnostic']['bytes'],result['stderr']['bytes'])
+        self.assertEqual(result['schema_diagnostic']['classification'],'sonic_optional_stdlib_fallback')
+    def test_worker_empty_stderr_preserves_original_readiness(self):
+        result,out,checks=self.worker_candidate_mock(b'')
+        self.assertTrue(result['complete']);self.assertEqual(len(checks),2)
+        self.assertEqual(result['schema_diagnostic']['classification'],'empty')
+        self.assertEqual((out/'candidate.stderr').read_bytes(),b'')
+    def test_worker_other_stderr_or_exit_refuses_and_preserves_raw(self):
+        for raw,code in ((c.SONIC_NOTICE+b'x',0),(c.SONIC_NOTICE,1)):
+            with self.assertRaises(c.Refusal):self.worker_candidate_mock(raw,code=code)
+            self.assertFalse(self.result['complete']);self.assertTrue(self.result['candidate_process_exit_observed'])
+            self.assertEqual((self.worker_out/'candidate.stderr').read_bytes(),raw)
+            self.assertEqual(len(self.artifact_checks),1)
+    def test_worker_notice_still_refuses_post_execution_artifact_drift(self):
+        with self.assertRaisesRegex(c.Refusal,'read-only candidate metadata changed'):
+            self.worker_candidate_mock(after={'sha256':'0'*64})
+        self.assertFalse(self.result['complete']);self.assertEqual(len(self.artifact_checks),2)
+        self.assertEqual((self.worker_out/'candidate.stderr').read_bytes(),c.SONIC_NOTICE)
+    def test_worker_notice_still_refuses_owned_operation_drift(self):
+        with self.assertRaisesRegex(c.Refusal,'fresh exclusively owned canonical directory required'):
+            self.worker_candidate_mock(dirty=True)
+        self.assertFalse(self.result['complete']);self.assertEqual(len(self.artifact_checks),2)
+    def test_worker_notice_bad_provenance_refuses_before_candidate(self):
+        manifest=json.loads((HERE/'source-manifest.json').read_bytes())
+        manifest['schema_diagnostic_subject']['sonic_h1']='h1:other'
+        self.worker_candidate_mock(manifest=manifest)
+    def test_worker_notice_still_refuses_post_conservation_deadline(self):
+        with self.assertRaisesRegex(c.Refusal,'MOCK terminal deadline'):
+            self.worker_candidate_mock(expired=True)
+        self.assertFalse(self.result['complete']);self.assertEqual(len(self.artifact_checks),2)
     def test_real_late_seal_refuses_and_drops_positive(self):
         class Clock:
             def __init__(self):self.expired=False

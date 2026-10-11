@@ -11,6 +11,8 @@ import time
 SHA = '9819a5b582e1f0b6ab135b75c5113baf36f7507a6904e64e2984c318447e8bdf'
 SIZE = 115900576
 SOURCE = '81b9b1df2386f7d44c8464c999a4ea0919813526'
+SONIC_NOTICE = (b'WARNING: sonic/ast only supports (go1.17~1.26 and amd64 CPU) or '
+    b'(go1.20~1.26 and arm64 CPU), but your environment is not suitable and will fallback to encoding/json\n')
 IDENTITY = ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')
 TARGET_ENV = {'CI':'1','HOME':'/operation/home','LANG':'C','LC_ALL':'C',
     'PATH':'/nonexistent','TMPDIR':'/operation/tmp','WFCTL_NO_UPDATE_CHECK':'1',
@@ -147,3 +149,33 @@ def schema(raw):
         not {'modules','workflows','triggers','pipelines'}<=d['properties'].keys()):
         raise Refusal('exact schema readiness response required')
     return d
+
+# This is an exact-artifact diagnostic classification, not a general warning
+# allowlist. SHA/SOURCE bind the independently inspected buildinfo and supplier
+# fallback source; caller-provided metadata cannot select another subject.
+def expected_schema_subject():
+    return {'source_commit':SOURCE,'artifact_sha256':SHA,'artifact_bytes':SIZE,
+        'go_version':'go1.27.2','target':'linux/amd64','cgo_enabled':'0',
+        'sonic_version':'v1.15.2','sonic_h1':'h1:90H+rcF/FwLXwfB1cudOLq/je83n683Utf4Cbp0xHCo=',
+        'operation':['/candidate/wfctl','schema']}
+def schema_subject(manifest):
+    subject=manifest.get('schema_diagnostic_subject')
+    if (not isinstance(subject,dict) or type(subject.get('artifact_bytes')) is not int or
+        subject!=expected_schema_subject() or
+        manifest.get('source_commit')!=SOURCE or manifest.get('artifact_sha256')!=SHA or
+        type(manifest.get('artifact_bytes')) is not int or manifest['artifact_bytes']!=SIZE):
+        raise Refusal('exact schema diagnostic subject/provenance required')
+    return dict(subject)
+def schema_diagnostic(native_exit,stdout,stderr,subject):
+    if (type(native_exit) is not int or native_exit!=0 or
+        not isinstance(stdout,bytes) or not isinstance(stderr,bytes) or
+        not isinstance(subject,dict) or type(subject.get('artifact_bytes')) is not int or
+        subject!=expected_schema_subject()):
+        raise Refusal('exact native schema outcome/subject required')
+    schema(stdout)
+    if not stderr:classification='empty'
+    elif stderr==SONIC_NOTICE:classification='sonic_optional_stdlib_fallback'
+    else:raise Refusal('unrecognized native schema stderr')
+    return {'classification':classification,'bytes':len(stderr),
+        'sha256':hashlib.sha256(stderr).hexdigest(),'raw_stderr_retained':True,
+        'subject':dict(subject)}

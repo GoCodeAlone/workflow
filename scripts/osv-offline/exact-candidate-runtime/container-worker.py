@@ -93,10 +93,10 @@ def raw_write(path,raw,budget,limit):
 def execute(request,budget,result=None):
     if request.get('mode') not in ('controls-only','candidate'):
         raise c.Refusal('fixed worker mode required')
-    verify_bundle(budget,request['source_manifest_sha256'])
+    manifest=verify_bundle(budget,request['source_manifest_sha256'])
     if result is None:result={}
     result.update({'schema':'workflow.GO5932.exact-runtime-worker.v1','complete':False,'accepted':False,
-        'candidate_execution':False,'identity':request['identity'],'invocation_id':request['invocation_id'],
+        'candidate_execution':False,'candidate_process_exit_observed':False,'identity':request['identity'],'invocation_id':request['invocation_id'],
         'source_manifest_sha256':request['source_manifest_sha256'],'mode':request['mode']})
     result['witness']=witness(request)
     # Real controls run before any candidate launch in this same container.
@@ -106,6 +106,7 @@ def execute(request,budget,result=None):
     c.seal('/out/native-controls.json',controls,budget)
     result['native_controls_sha256']=hashlib.sha256(Path('/out/native-controls.json').read_bytes()).hexdigest()
     if request['mode']=='candidate':
+        subject=c.schema_subject(manifest)
         before=c.hash_artifact('/candidate/wfctl',budget,elf=True)
         if before['sha256']!=request['artifact_sha256']:raise c.Refusal('candidate bytes differ')
         result.update(candidate_execution_attempted=True,artifact=before,argv=['/candidate/wfctl','schema'],
@@ -118,10 +119,11 @@ def execute(request,budget,result=None):
             result['execution']=partial;fault.worker_result=result
             raise
         result['execution']={k:v for k,v in native.items() if k not in ('stdout','stderr')}
+        result['candidate_process_exit_observed']=True
         result['stdout']=raw_write('/out/candidate.stdout',native['stdout'],budget,4194304)
         result['stderr']=raw_write('/out/candidate.stderr',native['stderr'],budget,1048576)
-        if native['native_exit']!=0 or native['stderr']:raise c.Refusal('native schema exit/stderr refused')
-        c.schema(native['stdout'])
+        result['schema_diagnostic']=c.schema_diagnostic(
+            native['native_exit'],native['stdout'],native['stderr'],subject)
         result['candidate_execution']=True
         if c.hash_artifact('/candidate/wfctl',budget,elf=True)!=before:
             raise c.Refusal('read-only candidate metadata changed')
