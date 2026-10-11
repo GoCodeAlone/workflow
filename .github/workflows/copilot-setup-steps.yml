@@ -5,8 +5,8 @@ name: "Copilot Setup Steps"
 on:
   workflow_dispatch:
     inputs:
-      osv_privileged_proof:
-        description: 'Run the separately authorized ephemeral systemd prerequisite proof'
+      osv_container_proof:
+        description: 'Run the approved pinned container boundary proof on the disposable runner'
         type: boolean
         required: false
         default: false
@@ -72,10 +72,9 @@ jobs:
           golangci-lint version
           echo "All tools installed successfully!"
 
-  # Temporary, separately reviewed prerequisite-only execution on an owned ref.
-  # Main workflows, required checks and the legacy OSV workflow are unchanged.
-  osv-runtime-prerequisite:
-    if: github.event_name == 'workflow_dispatch' && inputs.osv_privileged_proof == true && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+  # Separately approved proof on the owned ref; no legacy namespace retry.
+  osv-container-prerequisite:
+    if: github.event_name == 'workflow_dispatch' && inputs.osv_container_proof == true && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -86,70 +85,46 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Supply authenticated Ubuntu bubblewrap in temporary private storage
-        id: supplier
+      - name: Supply the exact official analysis compiler
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Supply the pinned official Python container
+        run: |
+          set -euo pipefail
+          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
+            /usr/bin/docker pull docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a
+      - name: Prove the approved aggregate container boundary
+        id: proof
         continue-on-error: true
         run: |
           set -euo pipefail
           umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/supply-bubblewrap.py)"
-          test "${actual%% *}" = 72d3b656c61ba966c13bae1c5ff09405f88f378bbe2e64116a49c87832592183
-          supplier_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-ubuntu-bubblewrap-XXXXXXXXXX")"
-          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-supplier-startup-XXXXXXXXXX")"
-          printf 'evidence=%s\n' "$supplier_dir" >> "$GITHUB_OUTPUT"
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/container-source-bindings.json)"
+          test "${actual%% *}" = 1fd3c5117a4c9fa8b627007920bd990f5ba41a68dc8c415e8c1c518ecd88782c
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/run-container-proof.py)"
+          test "${actual%% *}" = 8aa18c160de53caacfb4502beb0e2dc36f2617c5114674fb10ab940635441b6a
+          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-container-proof-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-container-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
+          compiler_root="$(/usr/bin/dirname "$(/usr/bin/dirname "$(command -v go)")")"
           /usr/bin/timeout --signal=TERM --kill-after=10s 210s /usr/bin/env -i \
             PATH=/usr/bin:/bin LANG=C LC_ALL=C RUNNER_TEMP="$RUNNER_TEMP" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" \
             GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
-            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
-            ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
+            GITHUB_JOB="$GITHUB_JOB" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/supply-bubblewrap.py "$supplier_dir"
-      - name: Probe the reviewed boundary in one bounded delegated transient service
-        if: steps.supplier.outcome == 'success'
-        id: proof
-        continue-on-error: true
-        env:
-          BUBBLEWRAP_SUPPLIER_DIR: ${{ steps.supplier.outputs.evidence }}
-        run: |
-          set -euo pipefail
-          umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/run-systemd-proof.py)"
-          test "${actual%% *}" = 4ea996697b23c8ae63eeb13251f401c344ae4694b17221e8388866cae788c2d9
-          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-XXXXXXXXXX")"
-          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-startup-XXXXXXXXXX")"
-          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
-          /usr/bin/timeout --signal=TERM --kill-after=10s 240s /usr/bin/env -i \
-            PATH=/usr/bin:/bin LANG=C LC_ALL=C RUNNER_TEMP="$RUNNER_TEMP" \
-            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" \
-            GITHUB_REF="$GITHUB_REF" \
-            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
-            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_JOB="$GITHUB_JOB" \
-            RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
-            ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
-            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/run-systemd-proof.py "$proof_dir" --execute \
-            --bubblewrap "$BUBBLEWRAP_SUPPLIER_DIR/bwrap" \
-            --supplier-receipt "$BUBBLEWRAP_SUPPLIER_DIR/bubblewrap-supplier-receipt.json"
-      - name: Retain bounded official-package prerequisite evidence
-        if: ${{ !cancelled() && steps.supplier.outputs.evidence != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: osv-bubblewrap-prerequisite-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ steps.supplier.outputs.evidence }}
-          if-no-files-found: error
-          retention-days: 5
-      - name: Retain bounded authentic prerequisite evidence
+            scripts/osv-offline/run-container-proof.py "$proof_dir" "$compiler_root" --execute
+      - name: Retain actual container boundary evidence
         if: ${{ !cancelled() && steps.proof.outputs.evidence != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: osv-runtime-prerequisite-${{ github.run_id }}-${{ github.run_attempt }}
+          name: osv-container-prerequisite-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.proof.outputs.evidence }}
           if-no-files-found: error
           retention-days: 5
-      - name: Enforce the actual prerequisite result
+      - name: Enforce the actual proof outcome
         if: ${{ !cancelled() }}
-        run: |
-          test '${{ steps.supplier.outcome }}' = success
-          test '${{ steps.proof.outcome }}' = success
+        run: test '${{ steps.proof.outcome }}' = success

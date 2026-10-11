@@ -1,0 +1,11 @@
+{
+  "files": {
+    "container-seccomp.json": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9",
+    "container-worker.py": "820c4644281add003be470bba326e257b78d073f691a8898ca212e22240ea0f3",
+    "osv_container.py": "e043b9e0f69ff3480d0da57479d6328ed4868edbaf523ab98c71abbbb2534166",
+    "run-container-proof.py": "8aa18c160de53caacfb4502beb0e2dc36f2617c5114674fb10ab940635441b6a"
+  },
+  "image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
+  "image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
+  "schema": "workflow.offline-scanner.container-source-bindings.v1"
+}
