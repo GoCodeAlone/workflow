@@ -73,53 +73,23 @@ func (d *DOProvider) Push(ctx registry.Context, cfg registry.ProviderConfig, ima
 	return nil
 }
 
-// Prune runs garbage collection and deletes tags beyond retention.keep_latest.
-// It always preserves the "latest" tag.
+// Prune fails closed until repository-scoped retention can protect deployed and
+// rollback digests and require approval of each irreversible deletion.
 func (d *DOProvider) Prune(ctx registry.Context, cfg registry.ProviderConfig) error {
 	ret := cfg.Registry.Retention
-	if ret == nil || ret.KeepLatest <= 0 {
+	if ret == nil {
 		return nil
 	}
-
-	token, err := resolveToken(cfg)
-	if err != nil {
+	if err := validatePrunePath(cfg.Registry.Path); err != nil {
 		return err
 	}
-
-	gcArgs := []string{"registry", "garbage-collection", "start",
-		"--force", "--include-untagged-manifests"}
-
-	repo := registryRepo(cfg.Registry.Path)
-
-	if ctx.DryRun() {
-		fmt.Fprintf(ctx.Out(), "[dry-run] DIGITALOCEAN_TOKEN=<token> doctl %s\n", joinArgs(gcArgs))
-		fmt.Fprintf(ctx.Out(), "[dry-run] doctl registry repository list-tags %s --format Tag,UpdatedAt (keep latest %d, preserve 'latest')\n",
-			repo, ret.KeepLatest)
-		return nil
+	if ret.KeepLatest <= 0 {
+		return fmt.Errorf("do registry %q: retention.keep_latest must be positive", cfg.Registry.Name)
 	}
-
-	gcCmd := exec.CommandContext(ctx, "doctl", gcArgs...) //nolint:gosec
-	gcCmd.Env = append(os.Environ(), "DIGITALOCEAN_TOKEN="+token)
-	gcCmd.Stdout = ctx.Out()
-	gcCmd.Stderr = ctx.Out()
-	if err := gcCmd.Run(); err != nil {
-		return fmt.Errorf("doctl garbage-collection: %w", err)
+	if ret.UntaggedTTL != "" {
+		return fmt.Errorf("do registry %q: retention.untagged_ttl is unsupported; registry-wide garbage collection cannot enforce repository scope or age", cfg.Registry.Name)
 	}
-
-	// List tags sorted by updated_at, delete beyond keep_latest (preserve "latest").
-	listArgs := []string{"registry", "repository", "list-tags", repo,
-		"--format", "Tag,UpdatedAt", "--no-header", "--output", "json"}
-	listCmd := exec.CommandContext(ctx, "doctl", listArgs...) //nolint:gosec
-	listCmd.Env = append(os.Environ(), "DIGITALOCEAN_TOKEN="+token)
-	out, err := listCmd.Output()
-	if err != nil {
-		return fmt.Errorf("doctl list tags: %w", err)
-	}
-
-	if err := pruneTagsFromJSON(ctx, token, cfg.Registry.Path, out, ret.KeepLatest); err != nil {
-		return err
-	}
-	return nil
+	return fmt.Errorf("do registry %q: pruning disabled: repository-scoped garbage collection cannot protect deployed/rollback digests; explicit approval of each irreversible deletion is required", cfg.Registry.Name)
 }
 
 func resolveToken(cfg registry.ProviderConfig) (string, error) {
@@ -132,17 +102,6 @@ func resolveToken(cfg registry.ProviderConfig) (string, error) {
 		return "", fmt.Errorf("do registry %q: env var %s is not set or empty", cfg.Registry.Name, envVar)
 	}
 	return token, nil
-}
-
-// registryRepo returns the last slash-separated component of path,
-// which is the repository name expected by `doctl registry repository list-tags`.
-func registryRepo(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			return path[i+1:]
-		}
-	}
-	return path
 }
 
 func joinArgs(args []string) string {
