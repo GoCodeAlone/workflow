@@ -18,6 +18,7 @@ defaults:
 jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
+    if: github.ref != 'refs/heads/prep/osv-prerequisites-20261011-r1'
     runs-on: ubuntu-latest
 
     # Set the permissions to the lowest permissions possible needed for your steps.
@@ -64,3 +65,49 @@ jobs:
           go version
           golangci-lint version
           echo "All tools installed successfully!"
+
+  # Temporary, separately reviewed prerequisite-only execution on an owned ref.
+  # Main workflows, required checks and the legacy OSV workflow are unchanged.
+  osv-runtime-prerequisite:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact reviewed proof commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Probe existing R4 Linux facilities without installation
+        id: proof
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/prove-runtime.py)"
+          test "${actual%% *}" = dd76ac3a3660445971c9a00f17a0ed17fa9f4514b797ee2127e7e97fec3529b1
+          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=10s 150s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" \
+            ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/prove-runtime.py "$proof_dir"
+      - name: Retain bounded authentic prerequisite evidence
+        if: ${{ !cancelled() && steps.proof.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-runtime-prerequisite-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.proof.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 5
+      - name: Enforce the actual prerequisite result
+        if: ${{ !cancelled() }}
+        run: test '${{ steps.proof.outcome }}' = success

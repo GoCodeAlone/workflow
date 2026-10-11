@@ -1,0 +1,36 @@
+{
+  "first_install_execution_receipt_sha256": null,
+  "hosted_job_timing_acceptance_sha256": null,
+  "linux_pins": {
+    "govulncheck": "55425f57ab2501c257efd0fe4abe361974849fab3e54dd0e8f04d4d3c57a2d65",
+    "osv-reporter": "d148474ac6f4a407a369544e18a96f2d900e6c0a8309b5255cd3b4b4c2a198eb",
+    "osv-scanner": "c810df66004c75f734eb4502ea5ff44115e4e3444e18d8b38bd87ff33094d69d"
+  },
+  "linux_runtime_acceptance_sha256": null,
+  "linux_tools": {
+    "bubblewrap_path": "/usr/bin/bwrap",
+    "bubblewrap_sha256": null,
+    "cgroup_parent": "runner-provided delegated cgroup2 required; exact admission pending",
+    "python_path": "/usr/bin/python3",
+    "python_sha256": null
+  },
+  "permanent_install_authorized": false,
+  "prepared_source_refs": {
+    "baseline": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
+    "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
+  },
+  "public_preload_inventory_sha256": "dd5ee66e70ae1699c21d4f4a976fbf78208caf58d5e547fe72f4d491ce9ecbb9",
+  "resource_contract": "Exact M profile inherits reviewed standalone L total1800/native720/source240/manifest30 envelope. Actual hosted job timing/OS/supplier admission remains separate and unbound; no production timeout approval transfers.",
+  "reviewed_protocol_binding_sha256": "4197aa92770c04bbf8e349cc3672b02fae157ebbf28da816773414861dbb888f",
+  "source_object_delivery_acceptance_sha256": null,
+  "status": "LOCAL R3 BUGFIX PREPARATION; HOSTED/SUPPLIER/OBJECT DELIVERY/INSTALL ACCEPTANCE HOLD",
+  "supplier_delivery_receipt_sha256": null,
+  "trusted_files": {
+    "osv_completion.py": "ed53e247af358c187058c73f4052f181bb41864ec3b4a6fb2643cc5ec60aa937",
+    "osv_io.py": "10fe83ba3608e73d198509ec7002c2db330a3b091964d6f1a752e835ec07b96b",
+    "osv_producer.py": "055df30c58d14d780fe4b5e5869480bea2cfea6728985e81d70f22fed273f7f1",
+    "osv_trusted.py": "2148339ccbaefdcb81396affa481ce3643a491b95228ddd61507eccdcca11bcc",
+    "scanner-profile.json": "2deb233b43cf4fdc5babfe481c88bafe1bc8413062ea1e93041039e01b4c9997"
+  },
+  "version": 1
+}
