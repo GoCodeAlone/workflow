@@ -4,7 +4,7 @@
 Ubuntu 24.04 GitHub-hosted Linux/amd64 runner. Source review and actual serial
 rebuilding are separate requirements. It does not execute a compiled scanner,
 reporter or govulncheck, preload project dependencies, acquire advisory archives,
-admit installation, or change host configuration. OSV's upstream contribution
+or admit installation. OSV's upstream contribution
 instructions were inspected; this is local Workflow supplier preparation, with
 no upstream submission or maintainer action.
 
@@ -22,6 +22,13 @@ executable. The supplier never creates another GOPATH, module cache or build
 cache. A missing directory refuses before downloads. No clone, npm operation,
 private proxy, VCS fallback, auto toolchain, install hook or candidate source is
 used. Cache contents are updated only by the fixed public Go supplier phase.
+
+The reported GOROOT must equal the canonical installed executable's SDK root.
+An existing writable root is tightened through its opened directory descriptor
+only when it belongs to the current runner UID: group and other write bits are
+removed. The receipt records original/final modes and conserved inode/owner.
+Foreign-owned writable roots, symlinks and special modes refuse. Compiler files,
+cache permissions and other SDK directories are preserved.
 
 The scanner source is `github.com/google/osv-scanner/v2@v2.6.0`, authenticated by
 the reviewed ZIP/go.mod h1s and exact origin metadata

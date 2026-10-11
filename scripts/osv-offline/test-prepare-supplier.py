@@ -65,6 +65,26 @@ class SupplierControls(unittest.TestCase):
         self.assertEqual(s.hash1(files), reference_h1(files))
         self.assertNotEqual(s.hash1(files), s.hash1({'abc': files['abc'] + b'!', 'xyz': files['xyz']}))
 
+    def test_owned_sdk_root_is_tightened_without_replacing_identity(self):
+        root = self.base / 'sdk'; root.mkdir(mode=0o700)
+        root.chmod(0o777); before = root.stat()
+        receipt = {}
+        self.assertEqual(s.admit_toolchain_root(root, root / 'bin/go', s.Budget(5), receipt), root)
+        after = root.stat()
+        self.assertEqual((after.st_dev, after.st_ino), (before.st_dev, before.st_ino))
+        self.assertEqual(stat.S_IMODE(after.st_mode), 0o755)
+        self.assertEqual(receipt['toolchain_root_permissions']['before'], '0o777')
+        self.assertEqual(receipt['toolchain_root_permissions']['after'], '0o755')
+
+    def test_unowned_writable_sdk_root_is_refused_without_permission_change(self):
+        root = self.base / 'sdk'; root.mkdir(mode=0o700); root.chmod(0o777)
+        receipt = {}
+        with mock.patch.object(s.os, 'getuid', return_value=root.stat().st_uid + 1):
+            with self.assertRaisesRegex(RuntimeError, 'unowned writable'):
+                s.admit_toolchain_root(root, root / 'bin/go', s.Budget(5), receipt)
+        self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o777)
+        self.assertEqual(receipt, {})
+
     def test_zip_identity_and_exact_extraction(self):
         path, h1, files = self.module()
         destination = self.base / 'source'

@@ -77,6 +77,43 @@ def canonical(path, directory=False):
     return path
 
 
+def admit_toolchain_root(value, go, budget, receipt):
+    # setup-go may create its dedicated SDK root with writable group/other bits.
+    # Tighten only the exact owned root; never relax admission or use privilege.
+    path = Path(value)
+    require(path.is_absolute() and path == path.resolve(strict=True) and
+            path == go.parent.parent, 'Go executable/GOROOT mismatch')
+    before = path.lstat()
+    mode = stat.S_IMODE(before.st_mode)
+    require(stat.S_ISDIR(before.st_mode) and not mode & 0o6000,
+            'unsafe toolchain root type or special mode')
+    budget.left()
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(descriptor)
+        require((before.st_dev, before.st_ino, before.st_uid, before.st_gid, before.st_mode) ==
+                (opened.st_dev, opened.st_ino, opened.st_uid, opened.st_gid, opened.st_mode),
+                'toolchain root changed before permission check')
+        if mode & 0o22:
+            require(before.st_uid == os.getuid(), 'unowned writable toolchain root refused')
+            os.fchmod(descriptor, mode & ~0o22)
+        after = os.fstat(descriptor)
+        current = path.lstat()
+        require((before.st_dev, before.st_ino, before.st_uid, before.st_gid) ==
+                (after.st_dev, after.st_ino, after.st_uid, after.st_gid) ==
+                (current.st_dev, current.st_ino, current.st_uid, current.st_gid) and
+                stat.S_IMODE(after.st_mode) == stat.S_IMODE(current.st_mode) == (mode & ~0o22),
+                'toolchain root permission conservation failed')
+    finally:
+        os.close(descriptor)
+    budget.left()
+    receipt['toolchain_root_permissions'] = {'path': str(path),
+        'uid': before.st_uid, 'gid': before.st_gid, 'before': oct(mode),
+        'after': oct(stat.S_IMODE(after.st_mode)), 'identity_conserved': True,
+        'ownership_required_for_change': True}
+    return canonical(path, True)
+
+
 def read_file(path, maximum, budget):
     info = path.lstat()
     require(stat.S_ISREG(info.st_mode) and 0 <= info.st_size <= maximum,
@@ -472,7 +509,7 @@ def supplier(args):
         require(goenv.get('GOVERSION') == 'go1.27.2' and goenv.get('GOTELEMETRY') == 'off' and
                 all(goenv.get(k) == str(v) for k, v in caches.items()),
                 'actual toolchain/cache environment differs')
-        goroot = canonical(goenv['GOROOT'], True)
+        goroot = admit_toolchain_root(goenv['GOROOT'], go, budget, receipt)
         require(go == goroot / 'bin/go', 'Go executable/GOROOT mismatch')
         receipt['toolchain'] = {'version': 'go1.27.2', 'goroot': str(goroot),
             'tool_sha256': {name: sha(read_file(goroot / rel, 128 * 1024 * 1024, budget)) for name, rel in
