@@ -173,7 +173,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/prepare-supplier.py)"
-          test "${actual%% *}" = abb2485a9a1d37cceda80fe067d3db9cec27134caff3f9a11c8ce49a8569ad5d
+          test "${actual%% *}" = 246d36a719511bdebd35bcd79906482ef7467ac2131acb9f005c25a354c96a5a
           compiler="$(command -v go)"
           compiler_root="$(/usr/bin/dirname "$(/usr/bin/dirname "$compiler")")"
           mapfile -t caches < <(/usr/bin/env -i PATH="$compiler_root/bin:/usr/bin:/bin" HOME="$HOME" \
@@ -208,7 +208,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/bootstrap-manifest.json)"
-          test "${actual%% *}" = f75cb2d7d1923594cabc391f544f183f829fdf0725fb9ae4120eb44b9b2681f9
+          test "${actual%% *}" = 66b34d391fad003f5fd6ee724c902533eca9868029f77a851d485179ab5ae694
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-production-proof.py)"
           test "${actual%% *}" = fa1fb9cd2d27b257c4cc8293e9f091dd12866721c4f412ae3844a9cfef125d3c
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-XXXXXXXXXX")"

@@ -40,6 +40,15 @@ reviewed go.mod/go.sum changes are applied: Go1.27.0 to Go1.27.2, x/net0.58.0 to
 0.60.0, and its two authenticated checksum rows. Original checksum rows remain.
 Exact upstream and patched manifest SHA256 values are enforced in source.
 
+Legacy dependency ZIPs may omit `go.mod` under the official
+[Go proxy protocol](https://go.dev/ref/mod#goproxy-protocol).
+Their separately pinned/authenticated proxy `.mod` must contain exactly the
+requested module declaration and a newline, matching
+[Go1.27.2 LegacyGoMod](https://github.com/golang/go/blob/go1.27.2/src/cmd/go/internal/modfetch/coderepo.go#L949).
+Additional directives or a different module refuse. The authenticated ZIP stays
+unchanged; this path cannot extract a source tree or replace the scanner's
+required original manifest. Receipts identify the synthesized proxy origin.
+
 Only the scanner's authenticated 206 direct/indirect module requirements are
 downloaded, in fixed batches of 16, through `https://proxy.golang.org` and
 `sum.golang.org`. Go's official public blob redirect is part of that existing

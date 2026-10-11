@@ -92,6 +92,54 @@ class SupplierControls(unittest.TestCase):
         self.assertEqual(receipt['files'], s.inventory(destination, s.Budget(5)))
         self.assertEqual((destination / 'go.mod').read_bytes(), files['go.mod'])
 
+    def legacy_download(self, identity=('example.com/legacy', 'v1.0.0'), mod=None):
+        module, version = identity
+        cache = self.base / ('synthetic-cache-' + str(len(list(self.base.iterdir()))))
+        prefix = cache / 'cache/download' / s.escape(module) / '@v' / s.escape(version)
+        prefix.parent.mkdir(mode=0o700, parents=True)
+        zip_path = Path(str(prefix) + '.zip')
+        files = {f'{module}@{version}/legacy.go': b'package legacy\n'}
+        with zipfile.ZipFile(zip_path, 'w') as z:
+            for name, raw in files.items():
+                z.writestr(name, raw)
+        mod = f'module {module}\n'.encode() if mod is None else mod
+        Path(str(prefix) + '.mod').write_bytes(mod)
+        Path(str(prefix) + '.info').write_text(json.dumps({'Version': version}))
+        sums = (reference_h1(files), reference_h1({'go.mod': mod}))
+        row = {'Path': module, 'Version': version, 'Sum': sums[0], 'GoModSum': sums[1],
+               'Zip': str(zip_path), 'GoMod': str(prefix) + '.mod', 'Info': str(prefix) + '.info',
+               'Dir': str(cache / (s.escape(module) + '@' + s.escape(version)))}
+        return row, identity, sums, cache
+
+    def test_legacy_zip_requires_independently_authenticated_exact_synthetic_mod(self):
+        row, identity, sums, cache = self.legacy_download()
+        result = s.verify_download(row, identity, sums, cache, s.Budget(5))
+        self.assertEqual(result['go_mod_origin'], 'authenticated-proxy-synthesized')
+        self.assertEqual(result['go_mod'], b'module example.com/legacy\n')
+        self.assertEqual(result['go_mod_h1'], sums[1])
+        self.assertNotIn('go.mod', result['files'])
+        self.assertFalse(Path(row['Dir']).exists())
+        Path(row['GoMod']).write_bytes(b'module example.com/legacy\nchanged\n')
+        with self.assertRaisesRegex(RuntimeError, 'go.mod h1 mismatch'):
+            s.verify_download(row, identity, sums, cache, s.Budget(5))
+
+    def test_legacy_extra_directive_wrong_module_and_scanner_missing_mod_refuse(self):
+        for identity, mod in ((('example.com/legacy', 'v1.0.0'), b'module wrong.example/path\n'),
+                (('example.com/legacy', 'v1.0.0'), b'module example.com/legacy\nrequire evil.example/code v1.0.0\n'),
+                (s.SCANNER, None)):
+            with self.subTest(identity=identity, mod=mod):
+                row, identity, sums, cache = self.legacy_download(identity, mod)
+                with self.assertRaisesRegex(RuntimeError, 'source go.mod missing'):
+                    s.verify_download(row, identity, sums, cache, s.Budget(5))
+
+    def test_missing_archive_mod_has_no_unauthenticated_or_extraction_fallback(self):
+        row, identity, sums, cache = self.legacy_download()
+        for kwargs in ({}, {'destination': self.base / 'extracted',
+                'authenticated_mod': b'module example.com/legacy\n'}):
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(RuntimeError, 'source go.mod missing'):
+                s.archive(Path(row['Zip']), *identity, sums[0], s.Budget(5), **kwargs)
+        self.assertFalse((self.base / 'extracted').exists())
+
     def test_changed_zip_content_refuses_before_extraction(self):
         path, h1, _ = self.module()
         with zipfile.ZipFile(path, 'w') as z:

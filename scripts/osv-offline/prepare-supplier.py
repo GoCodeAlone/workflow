@@ -248,7 +248,7 @@ def escape(value):
     return ''.join('!' + c.lower() if 'A' <= c <= 'Z' else c for c in value)
 
 
-def archive(path, module, version, expected_sum, budget, destination=None):
+def archive(path, module, version, expected_sum, budget, destination=None, authenticated_mod=None):
     require(MODULE.fullmatch(module) and VERSION.fullmatch(version), 'invalid fixed module identity')
     raw = read_file(path, ZIP_BYTES, budget)
     prefix = f'{module}@{version}/'; files = {}; hashes = {}; total = 0
@@ -283,8 +283,17 @@ def archive(path, module, version, expected_sum, budget, destination=None):
         summary = ''.join(f'{digest}  {name}\n' for name, digest in sorted(files.items()))
         computed = 'h1:' + base64.b64encode(hashlib.sha256(summary.encode()).digest()).decode()
         require(computed == expected_sum, 'supplier ZIP h1 mismatch')
-        require(prefix + 'go.mod' in files, 'supplier source go.mod missing')
-        go_mod = zipped.read(prefix + 'go.mod')
+        if prefix + 'go.mod' in files:
+            go_mod = zipped.read(prefix + 'go.mod')
+            go_mod_origin = 'archive'
+        else:
+            # Go1.27.2 modfetch.LegacyGoMod: an independently authenticated .mod
+            # accompanies legacy ZIPs. Admit only its exact module-only form.
+            require(destination is None and (module, version) != SCANNER and
+                    authenticated_mod == f'module {module}\n'.encode(),
+                    f'supplier source go.mod missing: {module}@{version}')
+            go_mod = authenticated_mod
+            go_mod_origin = 'authenticated-proxy-synthesized'
         if destination is not None:
             destination.mkdir(mode=0o700)
             for name in sorted(files):
@@ -293,7 +302,7 @@ def archive(path, module, version, expected_sum, budget, destination=None):
                 write_fresh(target, zipped.read(name))
     return {'module': module, 'version': version, 'h1': expected_sum,
             'zip_sha256': sha(raw), 'zip_bytes': len(raw), 'source_bytes': total,
-            'files': hashes, 'go_mod': go_mod}
+            'files': hashes, 'go_mod': go_mod, 'go_mod_origin': go_mod_origin}
 
 
 def verify_download(row, identity, sums, cache, budget, destination=None):
@@ -313,7 +322,8 @@ def verify_download(row, identity, sums, cache, budget, destination=None):
             'supplier extracted cache path mismatch')
     mod = read_file(paths['GoMod'], 1024 * 1024, budget)
     require(hash1({'go.mod': mod}) == expected_mod, 'supplier go.mod h1 mismatch')
-    result = archive(paths['Zip'], module, version, expected_zip, budget, destination)
+    result = archive(paths['Zip'], module, version, expected_zip, budget, destination,
+                     authenticated_mod=mod)
     require(result['go_mod'] == mod, 'supplier ZIP and proxy go.mod disagree')
     info = json.loads(read_file(paths['Info'], 65536, budget), object_pairs_hook=unique_pairs)
     require(info.get('Version') == version, 'supplier info version mismatch')
