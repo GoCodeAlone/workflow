@@ -1,21 +1,1077 @@
 {
-  "schema": "workflow.offline-scanner.finite-production-proof-plan.v1",
-  "repository": "GoCodeAlone/workflow",
-  "ref": "refs/heads/prep/osv-prerequisites-20261011-r1",
+  "baseline_projection": {
+    "accepted": false,
+    "derived_fixture_catalog": {
+      "cmd/wfctl/testdata/conformance/iac-pass/go.mod": {
+        "declared_go": "1.26.5",
+        "local_references": [
+          [
+            "../../../../..",
+            "go.mod"
+          ]
+        ],
+        "module": "example.com/iac-pass",
+        "module_names": [
+          "../../../../..",
+          "example.com/iac-pass",
+          "github.com/BurntSushi/toml",
+          "github.com/GoCodeAlone/go-plugin",
+          "github.com/GoCodeAlone/modular",
+          "github.com/GoCodeAlone/workflow",
+          "github.com/GoCodeAlone/yaegi",
+          "github.com/cloudevents/sdk-go/v2",
+          "github.com/dustin/go-humanize",
+          "github.com/fatih/color",
+          "github.com/fsnotify/fsnotify",
+          "github.com/golobby/cast",
+          "github.com/google/uuid",
+          "github.com/hashicorp/go-hclog",
+          "github.com/hashicorp/yamux",
+          "github.com/json-iterator/go",
+          "github.com/mattn/go-colorable",
+          "github.com/mattn/go-isatty",
+          "github.com/mitchellh/go-testing-interface",
+          "github.com/modern-go/concurrent",
+          "github.com/modern-go/reflect2",
+          "github.com/ncruces/go-strftime",
+          "github.com/oklog/run",
+          "github.com/remyoudompheng/bigfft",
+          "github.com/rogpeppe/go-internal",
+          "go.uber.org/multierr",
+          "go.uber.org/zap",
+          "golang.org/x/net",
+          "golang.org/x/sys",
+          "golang.org/x/text",
+          "google.golang.org/genproto/googleapis/rpc",
+          "google.golang.org/grpc",
+          "google.golang.org/protobuf",
+          "gopkg.in/yaml.v3",
+          "modernc.org/libc",
+          "modernc.org/mathutil",
+          "modernc.org/memory",
+          "modernc.org/sqlite"
+        ],
+        "packages": [
+          [
+            "Go",
+            "../../../../..",
+            ""
+          ],
+          [
+            "Go",
+            "github.com/BurntSushi/toml",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/go-plugin",
+            "1.7.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/modular",
+            "1.13.6"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/yaegi",
+            "0.17.2"
+          ],
+          [
+            "Go",
+            "github.com/cloudevents/sdk-go/v2",
+            "2.16.2"
+          ],
+          [
+            "Go",
+            "github.com/dustin/go-humanize",
+            "1.0.1"
+          ],
+          [
+            "Go",
+            "github.com/fatih/color",
+            "1.19.0"
+          ],
+          [
+            "Go",
+            "github.com/fsnotify/fsnotify",
+            "1.10.1"
+          ],
+          [
+            "Go",
+            "github.com/golobby/cast",
+            "1.3.3"
+          ],
+          [
+            "Go",
+            "github.com/google/uuid",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/go-hclog",
+            "1.6.3"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/yamux",
+            "0.1.2"
+          ],
+          [
+            "Go",
+            "github.com/json-iterator/go",
+            "1.1.13-0.20220915233716-71ac16282d12"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-colorable",
+            "0.1.15"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-isatty",
+            "0.0.22"
+          ],
+          [
+            "Go",
+            "github.com/mitchellh/go-testing-interface",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/concurrent",
+            "0.0.0-20180306012644-bacd9c7ef1dd"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/reflect2",
+            "1.0.3-0.20250322232337-35a7c28c31ee"
+          ],
+          [
+            "Go",
+            "github.com/ncruces/go-strftime",
+            "1.0.0"
+          ],
+          [
+            "Go",
+            "github.com/oklog/run",
+            "1.2.0"
+          ],
+          [
+            "Go",
+            "github.com/remyoudompheng/bigfft",
+            "0.0.0-20230129092748-24d4a6f8daec"
+          ],
+          [
+            "Go",
+            "github.com/rogpeppe/go-internal",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "go.uber.org/multierr",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "go.uber.org/zap",
+            "1.28.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/net",
+            "0.58.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/sys",
+            "0.48.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/text",
+            "0.42.0"
+          ],
+          [
+            "Go",
+            "google.golang.org/genproto/googleapis/rpc",
+            "0.0.0-20260630182238-925bb5da69e7"
+          ],
+          [
+            "Go",
+            "google.golang.org/grpc",
+            "1.83.2"
+          ],
+          [
+            "Go",
+            "google.golang.org/protobuf",
+            "1.36.12-0.20260120151049-f2248ac996af"
+          ],
+          [
+            "Go",
+            "gopkg.in/yaml.v3",
+            "3.0.1"
+          ],
+          [
+            "Go",
+            "modernc.org/libc",
+            "1.73.4"
+          ],
+          [
+            "Go",
+            "modernc.org/mathutil",
+            "1.7.1"
+          ],
+          [
+            "Go",
+            "modernc.org/memory",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "modernc.org/sqlite",
+            "1.53.0"
+          ],
+          [
+            "Go",
+            "stdlib",
+            "1.27.2"
+          ]
+        ],
+        "sha256": "3d66dbcf279a4cda35d6534affa184f061c93867972386d9f08c91fd084a48e8",
+        "toolchain": null
+      },
+      "cmd/wfctl/testdata/conformance/no-iac/go.mod": {
+        "declared_go": "1.26.5",
+        "local_references": [
+          [
+            "../../../../..",
+            "go.mod"
+          ]
+        ],
+        "module": "example.com/no-iac",
+        "module_names": [
+          "../../../../..",
+          "example.com/no-iac",
+          "github.com/BurntSushi/toml",
+          "github.com/GoCodeAlone/go-plugin",
+          "github.com/GoCodeAlone/modular",
+          "github.com/GoCodeAlone/workflow",
+          "github.com/GoCodeAlone/yaegi",
+          "github.com/cloudevents/sdk-go/v2",
+          "github.com/dustin/go-humanize",
+          "github.com/fatih/color",
+          "github.com/fsnotify/fsnotify",
+          "github.com/golobby/cast",
+          "github.com/google/uuid",
+          "github.com/hashicorp/go-hclog",
+          "github.com/hashicorp/yamux",
+          "github.com/json-iterator/go",
+          "github.com/mattn/go-colorable",
+          "github.com/mattn/go-isatty",
+          "github.com/mitchellh/go-testing-interface",
+          "github.com/modern-go/concurrent",
+          "github.com/modern-go/reflect2",
+          "github.com/ncruces/go-strftime",
+          "github.com/oklog/run",
+          "github.com/remyoudompheng/bigfft",
+          "github.com/rogpeppe/go-internal",
+          "go.uber.org/multierr",
+          "go.uber.org/zap",
+          "golang.org/x/net",
+          "golang.org/x/sys",
+          "golang.org/x/text",
+          "google.golang.org/genproto/googleapis/rpc",
+          "google.golang.org/grpc",
+          "google.golang.org/protobuf",
+          "gopkg.in/yaml.v3",
+          "modernc.org/libc",
+          "modernc.org/mathutil",
+          "modernc.org/memory",
+          "modernc.org/sqlite"
+        ],
+        "packages": [
+          [
+            "Go",
+            "../../../../..",
+            ""
+          ],
+          [
+            "Go",
+            "github.com/BurntSushi/toml",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/go-plugin",
+            "1.7.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/modular",
+            "1.13.6"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/yaegi",
+            "0.17.2"
+          ],
+          [
+            "Go",
+            "github.com/cloudevents/sdk-go/v2",
+            "2.16.2"
+          ],
+          [
+            "Go",
+            "github.com/dustin/go-humanize",
+            "1.0.1"
+          ],
+          [
+            "Go",
+            "github.com/fatih/color",
+            "1.19.0"
+          ],
+          [
+            "Go",
+            "github.com/fsnotify/fsnotify",
+            "1.10.1"
+          ],
+          [
+            "Go",
+            "github.com/golobby/cast",
+            "1.3.3"
+          ],
+          [
+            "Go",
+            "github.com/google/uuid",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/go-hclog",
+            "1.6.3"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/yamux",
+            "0.1.2"
+          ],
+          [
+            "Go",
+            "github.com/json-iterator/go",
+            "1.1.13-0.20220915233716-71ac16282d12"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-colorable",
+            "0.1.15"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-isatty",
+            "0.0.22"
+          ],
+          [
+            "Go",
+            "github.com/mitchellh/go-testing-interface",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/concurrent",
+            "0.0.0-20180306012644-bacd9c7ef1dd"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/reflect2",
+            "1.0.3-0.20250322232337-35a7c28c31ee"
+          ],
+          [
+            "Go",
+            "github.com/ncruces/go-strftime",
+            "1.0.0"
+          ],
+          [
+            "Go",
+            "github.com/oklog/run",
+            "1.2.0"
+          ],
+          [
+            "Go",
+            "github.com/remyoudompheng/bigfft",
+            "0.0.0-20230129092748-24d4a6f8daec"
+          ],
+          [
+            "Go",
+            "github.com/rogpeppe/go-internal",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "go.uber.org/multierr",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "go.uber.org/zap",
+            "1.28.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/net",
+            "0.58.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/sys",
+            "0.48.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/text",
+            "0.42.0"
+          ],
+          [
+            "Go",
+            "google.golang.org/genproto/googleapis/rpc",
+            "0.0.0-20260630182238-925bb5da69e7"
+          ],
+          [
+            "Go",
+            "google.golang.org/grpc",
+            "1.83.2"
+          ],
+          [
+            "Go",
+            "google.golang.org/protobuf",
+            "1.36.12-0.20260120151049-f2248ac996af"
+          ],
+          [
+            "Go",
+            "gopkg.in/yaml.v3",
+            "3.0.1"
+          ],
+          [
+            "Go",
+            "modernc.org/libc",
+            "1.73.4"
+          ],
+          [
+            "Go",
+            "modernc.org/mathutil",
+            "1.7.1"
+          ],
+          [
+            "Go",
+            "modernc.org/memory",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "modernc.org/sqlite",
+            "1.53.0"
+          ],
+          [
+            "Go",
+            "stdlib",
+            "1.27.2"
+          ]
+        ],
+        "sha256": "493d8528df4a8459eaef8a034015a33fc1f36790d3cf82cbe1ce69637f7dfc31",
+        "toolchain": null
+      }
+    },
+    "derived_tree": "abcceb1d8098fab0c735e03a149313dc8b645312",
+    "disposition_sha256": "9f7422cb51dc4179d52b01467cc26a79be2b6ecc49e13bdff18350f38cc80eff",
+    "file_count": 3525,
+    "files": {
+      "cmd/wfctl/testdata/conformance/iac-pass/go.mod": {
+        "new": {
+          "bytes": 1973,
+          "git_blob": "2b1fad7459052905a435c491b31a873f1c9c1599",
+          "git_mode": "100644",
+          "sha256": "3d66dbcf279a4cda35d6534affa184f061c93867972386d9f08c91fd084a48e8"
+        },
+        "old": {
+          "bytes": 2030,
+          "git_blob": "eb16b83b165384f6e86346b1660fdf2a1cecb788",
+          "git_mode": "100644",
+          "sha256": "1daf143529d9eaccd0e0ac641585515ce5c35cc5bb3c5e507ff235ac9d1dfef5"
+        }
+      },
+      "cmd/wfctl/testdata/conformance/iac-pass/go.sum": {
+        "new": {
+          "bytes": 33466,
+          "git_blob": "f6bbe04602bcd7691f353961817195010af15e96",
+          "git_mode": "100644",
+          "sha256": "92964116154588b5e45a6fac63e9a87be5b8a9f169fc9f2944252215e7ed916a"
+        },
+        "old": {
+          "bytes": 33080,
+          "git_blob": "648e856c724d5413560d25d0ac0d04b412453149",
+          "git_mode": "100644",
+          "sha256": "f96ff4f8404efa28944d5af04dab54670af449d408c0696df1d821dc231b685c"
+        }
+      },
+      "cmd/wfctl/testdata/conformance/no-iac/go.mod": {
+        "new": {
+          "bytes": 1971,
+          "git_blob": "4f28758702a5df46d3720ca762947d304260920e",
+          "git_mode": "100644",
+          "sha256": "493d8528df4a8459eaef8a034015a33fc1f36790d3cf82cbe1ce69637f7dfc31"
+        },
+        "old": {
+          "bytes": 2028,
+          "git_blob": "f7f3538da2e4cef0b50af1ca5fd13d5ff12efebf",
+          "git_mode": "100644",
+          "sha256": "941a452ef0da613e859dd3e990d77fba6ccfd1ec821c1f61170a6e43816cfbb2"
+        }
+      },
+      "cmd/wfctl/testdata/conformance/no-iac/go.sum": {
+        "new": {
+          "bytes": 33466,
+          "git_blob": "f6bbe04602bcd7691f353961817195010af15e96",
+          "git_mode": "100644",
+          "sha256": "92964116154588b5e45a6fac63e9a87be5b8a9f169fc9f2944252215e7ed916a"
+        },
+        "old": {
+          "bytes": 33080,
+          "git_blob": "648e856c724d5413560d25d0ac0d04b412453149",
+          "git_mode": "100644",
+          "sha256": "f96ff4f8404efa28944d5af04dab54670af449d408c0696df1d821dc231b685c"
+        }
+      }
+    },
+    "finding_waiver": false,
+    "fixture_proof_sha256": "c4b347ed89d5ac2d8f19027499745a5ecdd9ceac425175aab840e72cd9652bec",
+    "manual_only": true,
+    "original_fixture_catalog": {
+      "cmd/wfctl/testdata/conformance/iac-pass/go.mod": {
+        "declared_go": "1.26.5",
+        "local_references": [
+          [
+            "../../../../..",
+            "go.mod"
+          ]
+        ],
+        "module": "example.com/iac-pass",
+        "module_names": [
+          "../../../../..",
+          "example.com/iac-pass",
+          "github.com/BurntSushi/toml",
+          "github.com/GoCodeAlone/go-plugin",
+          "github.com/GoCodeAlone/modular",
+          "github.com/GoCodeAlone/workflow",
+          "github.com/GoCodeAlone/yaegi",
+          "github.com/cloudevents/sdk-go/v2",
+          "github.com/dustin/go-humanize",
+          "github.com/fatih/color",
+          "github.com/fsnotify/fsnotify",
+          "github.com/golobby/cast",
+          "github.com/google/uuid",
+          "github.com/hashicorp/go-hclog",
+          "github.com/hashicorp/yamux",
+          "github.com/json-iterator/go",
+          "github.com/mattn/go-colorable",
+          "github.com/mattn/go-isatty",
+          "github.com/mitchellh/go-testing-interface",
+          "github.com/modern-go/concurrent",
+          "github.com/modern-go/reflect2",
+          "github.com/ncruces/go-strftime",
+          "github.com/oklog/run",
+          "github.com/remyoudompheng/bigfft",
+          "github.com/rogpeppe/go-internal",
+          "go.opentelemetry.io/otel/sdk/metric",
+          "go.uber.org/multierr",
+          "go.uber.org/zap",
+          "golang.org/x/net",
+          "golang.org/x/sys",
+          "golang.org/x/text",
+          "google.golang.org/genproto/googleapis/rpc",
+          "google.golang.org/grpc",
+          "google.golang.org/protobuf",
+          "gopkg.in/yaml.v3",
+          "modernc.org/libc",
+          "modernc.org/mathutil",
+          "modernc.org/memory",
+          "modernc.org/sqlite"
+        ],
+        "packages": [
+          [
+            "Go",
+            "../../../../..",
+            ""
+          ],
+          [
+            "Go",
+            "github.com/BurntSushi/toml",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/go-plugin",
+            "1.7.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/modular",
+            "1.13.5"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/yaegi",
+            "0.17.2"
+          ],
+          [
+            "Go",
+            "github.com/cloudevents/sdk-go/v2",
+            "2.16.2"
+          ],
+          [
+            "Go",
+            "github.com/dustin/go-humanize",
+            "1.0.1"
+          ],
+          [
+            "Go",
+            "github.com/fatih/color",
+            "1.19.0"
+          ],
+          [
+            "Go",
+            "github.com/fsnotify/fsnotify",
+            "1.10.1"
+          ],
+          [
+            "Go",
+            "github.com/golobby/cast",
+            "1.3.3"
+          ],
+          [
+            "Go",
+            "github.com/google/uuid",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/go-hclog",
+            "1.6.3"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/yamux",
+            "0.1.2"
+          ],
+          [
+            "Go",
+            "github.com/json-iterator/go",
+            "1.1.13-0.20220915233716-71ac16282d12"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-colorable",
+            "0.1.15"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-isatty",
+            "0.0.22"
+          ],
+          [
+            "Go",
+            "github.com/mitchellh/go-testing-interface",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/concurrent",
+            "0.0.0-20180306012644-bacd9c7ef1dd"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/reflect2",
+            "1.0.3-0.20250322232337-35a7c28c31ee"
+          ],
+          [
+            "Go",
+            "github.com/ncruces/go-strftime",
+            "1.0.0"
+          ],
+          [
+            "Go",
+            "github.com/oklog/run",
+            "1.2.0"
+          ],
+          [
+            "Go",
+            "github.com/remyoudompheng/bigfft",
+            "0.0.0-20230129092748-24d4a6f8daec"
+          ],
+          [
+            "Go",
+            "github.com/rogpeppe/go-internal",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "go.opentelemetry.io/otel/sdk/metric",
+            "1.44.0"
+          ],
+          [
+            "Go",
+            "go.uber.org/multierr",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "go.uber.org/zap",
+            "1.28.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/net",
+            "0.56.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/sys",
+            "0.46.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/text",
+            "0.42.0"
+          ],
+          [
+            "Go",
+            "google.golang.org/genproto/googleapis/rpc",
+            "0.0.0-20260622175928-b703f567277d"
+          ],
+          [
+            "Go",
+            "google.golang.org/grpc",
+            "1.81.1"
+          ],
+          [
+            "Go",
+            "google.golang.org/protobuf",
+            "1.36.12-0.20260120151049-f2248ac996af"
+          ],
+          [
+            "Go",
+            "gopkg.in/yaml.v3",
+            "3.0.1"
+          ],
+          [
+            "Go",
+            "modernc.org/libc",
+            "1.73.4"
+          ],
+          [
+            "Go",
+            "modernc.org/mathutil",
+            "1.7.1"
+          ],
+          [
+            "Go",
+            "modernc.org/memory",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "modernc.org/sqlite",
+            "1.53.0"
+          ],
+          [
+            "Go",
+            "stdlib",
+            "1.27.2"
+          ]
+        ],
+        "sha256": "1daf143529d9eaccd0e0ac641585515ce5c35cc5bb3c5e507ff235ac9d1dfef5",
+        "toolchain": null
+      },
+      "cmd/wfctl/testdata/conformance/no-iac/go.mod": {
+        "declared_go": "1.26.5",
+        "local_references": [
+          [
+            "../../../../..",
+            "go.mod"
+          ]
+        ],
+        "module": "example.com/no-iac",
+        "module_names": [
+          "../../../../..",
+          "example.com/no-iac",
+          "github.com/BurntSushi/toml",
+          "github.com/GoCodeAlone/go-plugin",
+          "github.com/GoCodeAlone/modular",
+          "github.com/GoCodeAlone/workflow",
+          "github.com/GoCodeAlone/yaegi",
+          "github.com/cloudevents/sdk-go/v2",
+          "github.com/dustin/go-humanize",
+          "github.com/fatih/color",
+          "github.com/fsnotify/fsnotify",
+          "github.com/golobby/cast",
+          "github.com/google/uuid",
+          "github.com/hashicorp/go-hclog",
+          "github.com/hashicorp/yamux",
+          "github.com/json-iterator/go",
+          "github.com/mattn/go-colorable",
+          "github.com/mattn/go-isatty",
+          "github.com/mitchellh/go-testing-interface",
+          "github.com/modern-go/concurrent",
+          "github.com/modern-go/reflect2",
+          "github.com/ncruces/go-strftime",
+          "github.com/oklog/run",
+          "github.com/remyoudompheng/bigfft",
+          "github.com/rogpeppe/go-internal",
+          "go.opentelemetry.io/otel/sdk/metric",
+          "go.uber.org/multierr",
+          "go.uber.org/zap",
+          "golang.org/x/net",
+          "golang.org/x/sys",
+          "golang.org/x/text",
+          "google.golang.org/genproto/googleapis/rpc",
+          "google.golang.org/grpc",
+          "google.golang.org/protobuf",
+          "gopkg.in/yaml.v3",
+          "modernc.org/libc",
+          "modernc.org/mathutil",
+          "modernc.org/memory",
+          "modernc.org/sqlite"
+        ],
+        "packages": [
+          [
+            "Go",
+            "../../../../..",
+            ""
+          ],
+          [
+            "Go",
+            "github.com/BurntSushi/toml",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/go-plugin",
+            "1.7.0"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/modular",
+            "1.13.5"
+          ],
+          [
+            "Go",
+            "github.com/GoCodeAlone/yaegi",
+            "0.17.2"
+          ],
+          [
+            "Go",
+            "github.com/cloudevents/sdk-go/v2",
+            "2.16.2"
+          ],
+          [
+            "Go",
+            "github.com/dustin/go-humanize",
+            "1.0.1"
+          ],
+          [
+            "Go",
+            "github.com/fatih/color",
+            "1.19.0"
+          ],
+          [
+            "Go",
+            "github.com/fsnotify/fsnotify",
+            "1.10.1"
+          ],
+          [
+            "Go",
+            "github.com/golobby/cast",
+            "1.3.3"
+          ],
+          [
+            "Go",
+            "github.com/google/uuid",
+            "1.6.0"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/go-hclog",
+            "1.6.3"
+          ],
+          [
+            "Go",
+            "github.com/hashicorp/yamux",
+            "0.1.2"
+          ],
+          [
+            "Go",
+            "github.com/json-iterator/go",
+            "1.1.13-0.20220915233716-71ac16282d12"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-colorable",
+            "0.1.15"
+          ],
+          [
+            "Go",
+            "github.com/mattn/go-isatty",
+            "0.0.22"
+          ],
+          [
+            "Go",
+            "github.com/mitchellh/go-testing-interface",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/concurrent",
+            "0.0.0-20180306012644-bacd9c7ef1dd"
+          ],
+          [
+            "Go",
+            "github.com/modern-go/reflect2",
+            "1.0.3-0.20250322232337-35a7c28c31ee"
+          ],
+          [
+            "Go",
+            "github.com/ncruces/go-strftime",
+            "1.0.0"
+          ],
+          [
+            "Go",
+            "github.com/oklog/run",
+            "1.2.0"
+          ],
+          [
+            "Go",
+            "github.com/remyoudompheng/bigfft",
+            "0.0.0-20230129092748-24d4a6f8daec"
+          ],
+          [
+            "Go",
+            "github.com/rogpeppe/go-internal",
+            "1.14.1"
+          ],
+          [
+            "Go",
+            "go.opentelemetry.io/otel/sdk/metric",
+            "1.44.0"
+          ],
+          [
+            "Go",
+            "go.uber.org/multierr",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "go.uber.org/zap",
+            "1.28.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/net",
+            "0.56.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/sys",
+            "0.46.0"
+          ],
+          [
+            "Go",
+            "golang.org/x/text",
+            "0.42.0"
+          ],
+          [
+            "Go",
+            "google.golang.org/genproto/googleapis/rpc",
+            "0.0.0-20260622175928-b703f567277d"
+          ],
+          [
+            "Go",
+            "google.golang.org/grpc",
+            "1.81.1"
+          ],
+          [
+            "Go",
+            "google.golang.org/protobuf",
+            "1.36.12-0.20260120151049-f2248ac996af"
+          ],
+          [
+            "Go",
+            "gopkg.in/yaml.v3",
+            "3.0.1"
+          ],
+          [
+            "Go",
+            "modernc.org/libc",
+            "1.73.4"
+          ],
+          [
+            "Go",
+            "modernc.org/mathutil",
+            "1.7.1"
+          ],
+          [
+            "Go",
+            "modernc.org/memory",
+            "1.11.0"
+          ],
+          [
+            "Go",
+            "modernc.org/sqlite",
+            "1.53.0"
+          ],
+          [
+            "Go",
+            "stdlib",
+            "1.27.2"
+          ]
+        ],
+        "sha256": "941a452ef0da613e859dd3e990d77fba6ccfd1ec821c1f61170a6e43816cfbb2",
+        "toolchain": null
+      }
+    },
+    "original_ref": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
+    "original_tree": "0a664bef6a3480f9caa6d85a01550135f2103e71",
+    "patch_sha256": "9785b6b5e45876f9306ba505852704316c1c7bd5aee4fb9e10ad81cb187f5dfe",
+    "payloads": {
+      "3d66dbcf279a4cda35d6534affa184f061c93867972386d9f08c91fd084a48e8": "module example.com/iac-pass\n\ngo 1.26.5\n\nrequire github.com/GoCodeAlone/workflow v0.0.0\n\nrequire (\n\tgithub.com/BurntSushi/toml v1.6.0 // indirect\n\tgithub.com/GoCodeAlone/go-plugin v1.7.0 // indirect\n\tgithub.com/GoCodeAlone/modular v1.13.6 // indirect\n\tgithub.com/GoCodeAlone/yaegi v0.17.2 // indirect\n\tgithub.com/cloudevents/sdk-go/v2 v2.16.2 // indirect\n\tgithub.com/dustin/go-humanize v1.0.1 // indirect\n\tgithub.com/fatih/color v1.19.0 // indirect\n\tgithub.com/fsnotify/fsnotify v1.10.1 // indirect\n\tgithub.com/golobby/cast v1.3.3 // indirect\n\tgithub.com/google/uuid v1.6.0 // indirect\n\tgithub.com/hashicorp/go-hclog v1.6.3 // indirect\n\tgithub.com/hashicorp/yamux v0.1.2 // indirect\n\tgithub.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect\n\tgithub.com/mattn/go-colorable v0.1.15 // indirect\n\tgithub.com/mattn/go-isatty v0.0.22 // indirect\n\tgithub.com/mitchellh/go-testing-interface v1.14.1 // indirect\n\tgithub.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect\n\tgithub.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect\n\tgithub.com/ncruces/go-strftime v1.0.0 // indirect\n\tgithub.com/oklog/run v1.2.0 // indirect\n\tgithub.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect\n\tgithub.com/rogpeppe/go-internal v1.14.1 // indirect\n\tgo.uber.org/multierr v1.11.0 // indirect\n\tgo.uber.org/zap v1.28.0 // indirect\n\tgolang.org/x/net v0.58.0 // indirect\n\tgolang.org/x/sys v0.48.0 // indirect\n\tgolang.org/x/text v0.42.0 // indirect\n\tgoogle.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 // indirect\n\tgoogle.golang.org/grpc v1.83.2 // indirect\n\tgoogle.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect\n\tgopkg.in/yaml.v3 v3.0.1 // indirect\n\tmodernc.org/libc v1.73.4 // indirect\n\tmodernc.org/mathutil v1.7.1 // indirect\n\tmodernc.org/memory v1.11.0 // indirect\n\tmodernc.org/sqlite v1.53.0 // indirect\n)\n\nreplace github.com/GoCodeAlone/workflow => ../../../../..\n",
+      "493d8528df4a8459eaef8a034015a33fc1f36790d3cf82cbe1ce69637f7dfc31": "module example.com/no-iac\n\ngo 1.26.5\n\nrequire github.com/GoCodeAlone/workflow v0.0.0\n\nrequire (\n\tgithub.com/BurntSushi/toml v1.6.0 // indirect\n\tgithub.com/GoCodeAlone/go-plugin v1.7.0 // indirect\n\tgithub.com/GoCodeAlone/modular v1.13.6 // indirect\n\tgithub.com/GoCodeAlone/yaegi v0.17.2 // indirect\n\tgithub.com/cloudevents/sdk-go/v2 v2.16.2 // indirect\n\tgithub.com/dustin/go-humanize v1.0.1 // indirect\n\tgithub.com/fatih/color v1.19.0 // indirect\n\tgithub.com/fsnotify/fsnotify v1.10.1 // indirect\n\tgithub.com/golobby/cast v1.3.3 // indirect\n\tgithub.com/google/uuid v1.6.0 // indirect\n\tgithub.com/hashicorp/go-hclog v1.6.3 // indirect\n\tgithub.com/hashicorp/yamux v0.1.2 // indirect\n\tgithub.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect\n\tgithub.com/mattn/go-colorable v0.1.15 // indirect\n\tgithub.com/mattn/go-isatty v0.0.22 // indirect\n\tgithub.com/mitchellh/go-testing-interface v1.14.1 // indirect\n\tgithub.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect\n\tgithub.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect\n\tgithub.com/ncruces/go-strftime v1.0.0 // indirect\n\tgithub.com/oklog/run v1.2.0 // indirect\n\tgithub.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect\n\tgithub.com/rogpeppe/go-internal v1.14.1 // indirect\n\tgo.uber.org/multierr v1.11.0 // indirect\n\tgo.uber.org/zap v1.28.0 // indirect\n\tgolang.org/x/net v0.58.0 // indirect\n\tgolang.org/x/sys v0.48.0 // indirect\n\tgolang.org/x/text v0.42.0 // indirect\n\tgoogle.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 // indirect\n\tgoogle.golang.org/grpc v1.83.2 // indirect\n\tgoogle.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect\n\tgopkg.in/yaml.v3 v3.0.1 // indirect\n\tmodernc.org/libc v1.73.4 // indirect\n\tmodernc.org/mathutil v1.7.1 // indirect\n\tmodernc.org/memory v1.11.0 // indirect\n\tmodernc.org/sqlite v1.53.0 // indirect\n)\n\nreplace github.com/GoCodeAlone/workflow => ../../../../..\n",
+      "92964116154588b5e45a6fac63e9a87be5b8a9f169fc9f2944252215e7ed916a": "github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=\ngithub.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=\ngithub.com/DataDog/datadog-go/v5 v5.8.3 h1:s58CUJ9s8lezjhTNJO/SxkPBv2qZjS3ktpRSqGF5n0s=\ngithub.com/DataDog/datadog-go/v5 v5.8.3/go.mod h1:K9kcYBlxkcPP8tvvjZZKs/m1edNAUFzBbdpTUKfCsuw=\ngithub.com/GoCodeAlone/go-plugin v1.7.0 h1:EwnhqPlXiNmp85S+MXnKKvm3YlfA6O4NzBb4+GSlEVY=\ngithub.com/GoCodeAlone/go-plugin v1.7.0/go.mod h1:HbGQRZUIa+jbDfjsaZIMJYvrz+LnxL0mJpggfynSTMk=\ngithub.com/GoCodeAlone/modular v1.13.6 h1:AIdfdR/KTPHX8T5KJBXUHMokliutUHjl6jRfkqdh/7Q=\ngithub.com/GoCodeAlone/modular v1.13.6/go.mod h1:Vs92YltRNqA/v3peoHdqHTCjD10ww7rY3iURf1Ju450=\ngithub.com/GoCodeAlone/modular/modules/auth v1.19.0 h1:ughD47BqEAhg7+3trucwcs5KzEpq9gIS/6jY4nkeGtA=\ngithub.com/GoCodeAlone/modular/modules/auth v1.19.0/go.mod h1:pGPazN7Irlza8kUxE7WsXri44PhURKYBGym1tlBUl+k=\ngithub.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0 h1:2ljVafd/1LYchF47WrnA1+ji8mcmVXMJ4F5qDrhZZi4=\ngithub.com/GoCodeAlone/modular/modules/eventbus/v2 v2.10.0/go.mod h1:AKLcRGsw5gp2Q1zhuK0TBnMJOsaRe3aJ2OKnLFE2O5w=\ngithub.com/GoCodeAlone/yaegi v0.17.2 h1:WK6Y6e0t1a6U7r+S2dN3CGWW1PizYD3zO0zneToZPxM=\ngithub.com/GoCodeAlone/yaegi v0.17.2/go.mod h1:z5Pr6Wse6QJcQvpgxTxzMAevFarH0N37TG88Y9dprx0=\ngithub.com/IBM/sarama v1.50.3 h1:zpY2iZYmt+z+0Bo3aYF+cD48OBt2hIgiDPZUuZKTXcc=\ngithub.com/IBM/sarama v1.50.3/go.mod h1:Jo4MSfdDT3ycmQj7/ab8eLZwnvwCKZm/8H7SCbtyo8U=\ngithub.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=\ngithub.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=\ngithub.com/aws/aws-sdk-go-v2 v1.41.6 h1:1AX0AthnBQzMx1vbmir3Y4WsnJgiydmnJjiLu+LvXOg=\ngithub.com/aws/aws-sdk-go-v2 v1.41.6/go.mod h1:dy0UzBIfwSeot4grGvY1AqFWN5zgziMmWGzysDnHFcQ=\ngithub.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 h1:eBMB84YGghSocM7PsjmmPffTa+1FBUeNvGvFou6V/4o=\ngithub.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8/go.mod h1:lyw7GFp3qENLh7kwzf7iMzAxDn+NzjXEAGjKS2UOKqI=\ngithub.com/aws/aws-sdk-go-v2/config v1.32.16 h1:Q0iQ7quUgJP0F/SCRTieScnaMdXr9h/2+wze1u3cNeM=\ngithub.com/aws/aws-sdk-go-v2/config v1.32.16/go.mod h1:duCCnJEFqpt2RC6no1iK6q+8HpwOAkiUua0pY507dQc=\ngithub.com/aws/aws-sdk-go-v2/credentials v1.19.15 h1:fyvgWTszojq8hEnMi8PPBTvZdTtEVmAVyo+NFLHBhH4=\ngithub.com/aws/aws-sdk-go-v2/credentials v1.19.15/go.mod h1:gJiYyMOjNg8OEdRWOf3CrFQxM2a98qmrtjx1zuiQfB8=\ngithub.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.22 h1:IOGsJ1xVWhsi+ZO7/NW8OuZZBtMJLZbk4P5HDjJO0jQ=\ngithub.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.22/go.mod h1:b+hYdbU+jGKfXE8kKM6g1+h+L/Go3vMvzlxBsiuGsxg=\ngithub.com/aws/aws-sdk-go-v2/internal/configsources v1.4.22 h1:GmLa5Kw1ESqtFpXsx5MmC84QWa/ZrLZvlJGa2y+4kcQ=\ngithub.com/aws/aws-sdk-go-v2/internal/configsources v1.4.22/go.mod h1:6sW9iWm9DK9YRpRGga/qzrzNLgKpT2cIxb7Vo2eNOp0=\ngithub.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.22 h1:dY4kWZiSaXIzxnKlj17nHnBcXXBfac6UlsAx2qL6XrU=\ngithub.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.22/go.mod h1:KIpEUx0JuRZLO7U6cbV204cWAEco2iC3l061IxlwLtI=\ngithub.com/aws/aws-sdk-go-v2/internal/v4a v1.4.23 h1:FPXsW9+gMuIeKmz7j6ENWcWtBGTe1kH8r9thNt5Uxx4=\ngithub.com/aws/aws-sdk-go-v2/internal/v4a v1.4.23/go.mod h1:7J8iGMdRKk6lw2C+cMIphgAnT8uTwBwNOsGkyOCm80U=\ngithub.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.8 h1:HtOTYcbVcGABLOVuPYaIihj6IlkqubBwFj10K5fxRek=\ngithub.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.8/go.mod h1:VsK9abqQeGlzPgUr+isNWzPlK2vKe9INMLWnY65f5Xs=\ngithub.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.22 h1:PUmZeJU6Y1Lbvt9WFuJ0ugUK2xn6hIWUBBbKuOWF30s=\ngithub.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.22/go.mod h1:nO6egFBoAaoXze24a2C0NjQCvdpk8OueRoYimvEB9jo=\ngithub.com/aws/aws-sdk-go-v2/service/kinesis v1.43.5 h1:LxgRVyuY+5DEPSX7kmin/V7toE8MWZ9U8n2dqRtX+RE=\ngithub.com/aws/aws-sdk-go-v2/service/kinesis v1.43.5/go.mod h1:eUebEBEqVfOwEyDDDbGauH4PNqDCuepRvTaNbJeWr5w=\ngithub.com/aws/aws-sdk-go-v2/service/signin v1.0.10 h1:a1Fq/KXn75wSzoJaPQTgZO0wHGqE9mjFnylnqEPTchA=\ngithub.com/aws/aws-sdk-go-v2/service/signin v1.0.10/go.mod h1:p6+MXNxW7IA6dMgHfTAzljuwSKD0NCm/4lbS4t6+7vI=\ngithub.com/aws/aws-sdk-go-v2/service/sso v1.30.16 h1:x6bKbmDhsgSZwv6q19wY/u3rLk/3FGjJWyqKcIRufpE=\ngithub.com/aws/aws-sdk-go-v2/service/sso v1.30.16/go.mod h1:CudnEVKRtLn0+3uMV0yEXZ+YZOKnAtUJ5DmDhilVnIw=\ngithub.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.20 h1:oK/njaL8GtyEihkWMD4k3VgHCT64RQKkZwh0DG5j8ak=\ngithub.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.20/go.mod h1:JHs8/y1f3zY7U5WcuzoJ/yAYGYtNIVPKLIbp61euvmg=\ngithub.com/aws/aws-sdk-go-v2/service/sts v1.42.0 h1:ks8KBcZPh3PYISr5dAiXCM5/Thcuxk8l+PG4+A0exds=\ngithub.com/aws/aws-sdk-go-v2/service/sts v1.42.0/go.mod h1:pFw33T0WLvXU3rw1WBkpMlkgIn54eCB5FYLhjDc9Foo=\ngithub.com/aws/smithy-go v1.25.0 h1:Sz/XJ64rwuiKtB6j98nDIPyYrV1nVNJ4YU74gttcl5U=\ngithub.com/aws/smithy-go v1.25.0/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=\ngithub.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=\ngithub.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=\ngithub.com/bufbuild/protocompile v0.10.0 h1:+jW/wnLMLxaCEG8AX9lD0bQ5v9h1RUiMKOBOT5ll9dM=\ngithub.com/bufbuild/protocompile v0.10.0/go.mod h1:G9qQIQo0xZ6Uyj6CMNz0saGmx2so+KONo8/KrELABiY=\ngithub.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=\ngithub.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=\ngithub.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=\ngithub.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F97BxZthm/crw=\ngithub.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=\ngithub.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=\ngithub.com/cloudevents/sdk-go/v2 v2.16.2 h1:ZYDFrYke4FD+jM8TZTJJO6JhKHzOQl2oqpFK1D+NnQM=\ngithub.com/cloudevents/sdk-go/v2 v2.16.2/go.mod h1:laOcGImm4nVJEU+PHnUrKL56CKmRL65RlQF0kRmW/kg=\ngithub.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=\ngithub.com/cucumber/gherkin/go/v26 v26.2.0 h1:EgIjePLWiPeslwIWmNQ3XHcypPsWAHoMCz/YEBKP4GI=\ngithub.com/cucumber/gherkin/go/v26 v26.2.0/go.mod h1:t2GAPnB8maCT4lkHL99BDCVNzCh1d7dBhCLt150Nr/0=\ngithub.com/cucumber/godog v0.15.1 h1:rb/6oHDdvVZKS66hrhpjFQFHjthFSrQBCOI1LwshNTI=\ngithub.com/cucumber/godog v0.15.1/go.mod h1:qju+SQDewOljHuq9NSM66s0xEhogx0q30flfxL4WUk8=\ngithub.com/cucumber/messages/go/v21 v21.0.1 h1:wzA0LxwjlWQYZd32VTlAVDTkW6inOFmSM+RuOwHZiMI=\ngithub.com/cucumber/messages/go/v21 v21.0.1/go.mod h1:zheH/2HS9JLVFukdrsPWoPdmUtmYQAQPLk7w5vWsk5s=\ngithub.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=\ngithub.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=\ngithub.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=\ngithub.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=\ngithub.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=\ngithub.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=\ngithub.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=\ngithub.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=\ngithub.com/eapache/go-resiliency v1.7.0 h1:n3NRTnBn5N0Cbi/IeOHuQn9s2UwVUH7Ga0ZWcP+9JTA=\ngithub.com/eapache/go-resiliency v1.7.0/go.mod h1:5yPzW0MIvSe0JDsv0v+DvcjEv2FyD6iZYSs1ZI+iQho=\ngithub.com/expr-lang/expr v1.17.8 h1:W1loDTT+0PQf5YteHSTpju2qfUfNoBt4yw9+wOEU9VM=\ngithub.com/expr-lang/expr v1.17.8/go.mod h1:8/vRC7+7HBzESEqt5kKpYXxrxkr31SaO8r40VO/1IT4=\ngithub.com/fatih/color v1.13.0/go.mod h1:kLAiJbzzSOZDVNGyDpeOxJ47H46qBXwg5ILebYFFOfk=\ngithub.com/fatih/color v1.19.0 h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=\ngithub.com/fatih/color v1.19.0/go.mod h1:zNk67I0ZUT1bEGsSGyCZYZNrHuTkJJB+r6Q9VuMi0LE=\ngithub.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=\ngithub.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=\ngithub.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx59Ho=\ngithub.com/fsnotify/fsnotify v1.10.1/go.mod h1:TLheqan6HD6GBK6PrDWyDPBaEV8LspOxvPSjC+bVfgo=\ngithub.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=\ngithub.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=\ngithub.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=\ngithub.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=\ngithub.com/go-logr/stdr v1.2.2 h1:hSWxHoqTgW2S2qGc0LTAI563KZ5YKYRhT3MFKZMbjag=\ngithub.com/go-logr/stdr v1.2.2/go.mod h1:mMo/vtBO5dYbehREoey6XUKy/eSumjCCveDpRre4VKE=\ngithub.com/go-openapi/jsonpointer v0.24.0 h1:AA6mCjHYHmZ+1RU2Js089EaOK/iwXXNwQsTgnsTha2M=\ngithub.com/go-openapi/jsonpointer v0.24.0/go.mod h1:Z3rw7dWu1p9IgitXCFamSlA5lmDiklEB6vkaxcNZW5Y=\ngithub.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=\ngithub.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=\ngithub.com/gofrs/uuid v4.4.0+incompatible h1:3qXRTX8/NbyulANqlc0lchS1gqAVxRgsuW1YrTJupqA=\ngithub.com/gofrs/uuid v4.4.0+incompatible/go.mod h1:b2aQJv3Z4Fp6yNu3cdSllBxTCLRxnplIgP/c0N/04lM=\ngithub.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=\ngithub.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=\ngithub.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=\ngithub.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=\ngithub.com/golobby/cast v1.3.3 h1:s2Lawb9RMz7YyYf8IrfMQY4IFmA1R/lgfmj97Vc6fig=\ngithub.com/golobby/cast v1.3.3/go.mod h1:0oDO5IT84HTXcbLDf1YXuk0xtg/cRDrxhbpWKxwtJCY=\ngithub.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=\ngithub.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=\ngithub.com/google/gofuzz v1.0.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=\ngithub.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e h1:ijClszYn+mADRFY17kjQEVQ1XRhq2/JR1M3sGqeJoxs=\ngithub.com/google/pprof v0.0.0-20250317173921-a4b03ec1a45e/go.mod h1:boTsfXsheKC2y+lKOCMpSfarhxDeIzfZG1jqGcPl3cA=\ngithub.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=\ngithub.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=\ngithub.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 h1:5VipnvEpbqr2gA2VbM+nYVbkIF28c5ZQfqCBQ5g2xfk=\ngithub.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0/go.mod h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=\ngithub.com/hashicorp/errwrap v1.1.0 h1:OxrOeh75EUXMY8TBjag2fzXGZ40LB6IKw45YeGUDY2I=\ngithub.com/hashicorp/errwrap v1.1.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=\ngithub.com/hashicorp/go-cleanhttp v0.5.2 h1:035FKYIWjmULyFRBKPs8TBQoi0x6d9G4xc9neXJWAZQ=\ngithub.com/hashicorp/go-cleanhttp v0.5.2/go.mod h1:kO/YDlP8L1346E6Sodw+PrpBSV4/SoxCXGY6BqNFT48=\ngithub.com/hashicorp/go-hclog v1.6.3 h1:Qr2kF+eVWjTiYmU7Y31tYlP1h0q/X3Nl3tPGdaB11/k=\ngithub.com/hashicorp/go-hclog v1.6.3/go.mod h1:W4Qnvbt70Wk/zYJryRzDRU/4r0kIg0PVHBcfoyhpF5M=\ngithub.com/hashicorp/go-immutable-radix v1.3.1 h1:DKHmCUm2hRBK510BaiZlwvpD40f8bJFeZnpfm2KLowc=\ngithub.com/hashicorp/go-immutable-radix v1.3.1/go.mod h1:0y9vanUI8NX6FsYoO3zeMjhV/C5i9g4Q3DwcSNZ4P60=\ngithub.com/hashicorp/go-memdb v1.3.5 h1:b3taDMxCBCBVgyRrS1AZVHO14ubMYZB++QpNhBg+Nyo=\ngithub.com/hashicorp/go-memdb v1.3.5/go.mod h1:8IVKKBkVe+fxFgdFOYxzQQNjz+sWCyHCdIC/+5+Vy1Y=\ngithub.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=\ngithub.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=\ngithub.com/hashicorp/go-retryablehttp v0.7.8 h1:ylXZWnqa7Lhqpk0L1P1LzDtGcCR0rPVUrx/c8Unxc48=\ngithub.com/hashicorp/go-retryablehttp v0.7.8/go.mod h1:rjiScheydd+CxvumBsIrFKlx3iS0jrZ7LvzFGFmuKbw=\ngithub.com/hashicorp/go-rootcerts v1.0.2 h1:jzhAVGtqPKbwpyCPELlgNWhE1znq+qwJtW5Oi2viEzc=\ngithub.com/hashicorp/go-rootcerts v1.0.2/go.mod h1:pqUvnprVnM5bf7AOirdbb01K4ccR319Vf4pU3K5EGc8=\ngithub.com/hashicorp/go-secure-stdlib/parseutil v0.2.0 h1:U+kC2dOhMFQctRfhK0gRctKAPTloZdMU5ZJxaesJ/VM=\ngithub.com/hashicorp/go-secure-stdlib/parseutil v0.2.0/go.mod h1:Ll013mhdmsVDuoIXVfBtvgGJsXDYkTw1kooNcoCXuE0=\ngithub.com/hashicorp/go-secure-stdlib/strutil v0.1.2 h1:kes8mmyCpxJsI7FTwtzRqEy9CdjCtrXrXGuOpxEA7Ts=\ngithub.com/hashicorp/go-secure-stdlib/strutil v0.1.2/go.mod h1:Gou2R9+il93BqX25LAKCLuM+y9U2T4hlwvT1yprcna4=\ngithub.com/hashicorp/go-sockaddr v1.0.7 h1:G+pTkSO01HpR5qCxg7lxfsFEZaG+C0VssTy/9dbT+Fw=\ngithub.com/hashicorp/go-sockaddr v1.0.7/go.mod h1:FZQbEYa1pxkQ7WLpyXJ6cbjpT8q0YgQaK/JakXqGyWw=\ngithub.com/hashicorp/go-uuid v1.0.3 h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/Co8=\ngithub.com/hashicorp/go-uuid v1.0.3/go.mod h1:6SBZvOh/SIDV7/2o3Jml5SYk/TvGqwFJ/bN7x4byOro=\ngithub.com/hashicorp/golang-lru v1.0.2 h1:dV3g9Z/unq5DpblPpw+Oqcv4dU/1omnb4Ok8iPY6p1c=\ngithub.com/hashicorp/golang-lru v1.0.2/go.mod h1:iADmTwqILo4mZ8BN3D2Q6+9jd8WM5uGBxy+E8yxSoD4=\ngithub.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=\ngithub.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=\ngithub.com/hashicorp/hcl v1.0.1-vault-7 h1:ag5OxFVy3QYTFTJODRzTKVZ6xvdfLLCA1cy/Y6xGI0I=\ngithub.com/hashicorp/hcl v1.0.1-vault-7/go.mod h1:XYhtn6ijBSAj6n4YqAaf7RBPS4I06AItNorpy+MoQNM=\ngithub.com/hashicorp/vault/api v1.23.0 h1:gXgluBsSECfRWTSW9niY2jwg2e9mMJc4WoHNv4g3h6A=\ngithub.com/hashicorp/vault/api v1.23.0/go.mod h1:zransKiB9ftp+kgY8ydjnvCU7Wk8i9L0DYWpXeMj9ko=\ngithub.com/hashicorp/yamux v0.1.2 h1:XtB8kyFOyHXYVFnwT5C3+Bdo8gArse7j2AQ0DA0Uey8=\ngithub.com/hashicorp/yamux v0.1.2/go.mod h1:C+zze2n6e/7wshOZep2A70/aQU6QBRWJO/G6FT1wIns=\ngithub.com/itchyny/gojq v0.12.19 h1:ttXA0XCLEMoaLOz5lSeFOZ6u6Q3QxmG46vfgI4O0DEs=\ngithub.com/itchyny/gojq v0.12.19/go.mod h1:5galtVPDywX8SPSOrqjGxkBeDhSxEW1gSxoy7tn1iZY=\ngithub.com/itchyny/timefmt-go v0.1.8 h1:1YEo1JvfXeAHKdjelbYr/uCuhkybaHCeTkH8Bo791OI=\ngithub.com/itchyny/timefmt-go v0.1.8/go.mod h1:5E46Q+zj7vbTgWY8o5YkMeYb4I6GeWLFnetPy5oBrAI=\ngithub.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=\ngithub.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=\ngithub.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=\ngithub.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=\ngithub.com/jackc/pgx/v5 v5.10.0 h1:VhSvgU2jSli8o3AqIEOTJr7rZwAEUVo4E4XhR94Zfr0=\ngithub.com/jackc/pgx/v5 v5.10.0/go.mod h1:mal1tBGAFfLHvZzaYh77YS/eC6IX9OWbRV1QIIM0Jn4=\ngithub.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=\ngithub.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=\ngithub.com/jcmturner/aescts/v2 v2.0.0 h1:9YKLH6ey7H4eDBXW8khjYslgyqG2xZikXP0EQFKrle8=\ngithub.com/jcmturner/aescts/v2 v2.0.0/go.mod h1:AiaICIRyfYg35RUkr8yESTqvSy7csK90qZ5xfvvsoNs=\ngithub.com/jcmturner/dnsutils/v2 v2.0.0 h1:lltnkeZGL0wILNvrNiVCR6Ro5PGU/SeBvVO/8c/iPbo=\ngithub.com/jcmturner/dnsutils/v2 v2.0.0/go.mod h1:b0TnjGOvI/n42bZa+hmXL+kFJZsFT7G4t3HTlQ184QM=\ngithub.com/jcmturner/gofork v1.7.6 h1:QH0l3hzAU1tfT3rZCnW5zXl+orbkNMMRGJfdJjHVETg=\ngithub.com/jcmturner/gofork v1.7.6/go.mod h1:1622LH6i/EZqLloHfE7IeZ0uEJwMSUyQ/nDd82IeqRo=\ngithub.com/jcmturner/gokrb5/v8 v8.4.4 h1:x1Sv4HaTpepFkXbt2IkL29DXRf8sOfZXo8eRKh687T8=\ngithub.com/jcmturner/gokrb5/v8 v8.4.4/go.mod h1:1btQEpgT6k+unzCwX1KdWMEwPPkkgBtP+F6aCACiMrs=\ngithub.com/jcmturner/rpc/v2 v2.0.3 h1:7FXXj8Ti1IaVFpSAziCZWNzbNuZmnvw/i6CqLNdWfZY=\ngithub.com/jcmturner/rpc/v2 v2.0.3/go.mod h1:VUJYCIDm3PVOEHw8sgt091/20OJjskO/YJki3ELg/Hc=\ngithub.com/jhump/protoreflect v1.16.0 h1:54fZg+49widqXYQ0b+usAFHbMkBGR4PpXrsHc8+TBDg=\ngithub.com/jhump/protoreflect v1.16.0/go.mod h1:oYPd7nPvcBw/5wlDfm/AVmU9zH9BgqGCI469pGxfj/8=\ngithub.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 h1:9Nu54bhS/H/Kgo2/7xNSUuC5G28VR8ljfrLKU2G4IjU=\ngithub.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12/go.mod h1:TBzl5BIHNXfS9+C35ZyJaklL7mLDbgUkcgXzSLa8Tk0=\ngithub.com/klauspost/compress v1.19.0 h1:sXLILfc9jV2QYWkzFOPWStmcUVH2RHEB1JCdY2oVvCQ=\ngithub.com/klauspost/compress v1.19.0/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=\ngithub.com/kr/pretty v0.2.1/go.mod h1:ipq/a2n7PKx3OHsz4KJII5eveXtPO4qwEXGdVfWzfnI=\ngithub.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=\ngithub.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=\ngithub.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=\ngithub.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=\ngithub.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=\ngithub.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=\ngithub.com/mattn/go-colorable v0.1.9/go.mod h1:u6P/XSegPjTcexA+o6vUJrdnUu04hMope9wVRipJSqc=\ngithub.com/mattn/go-colorable v0.1.12/go.mod h1:u5H1YNBxpqRaxsYJYSkiCWKzEfiAb1Gb520KVy5xxl4=\ngithub.com/mattn/go-colorable v0.1.15 h1:+u9SLTRGnXv73cEsnsmoZBom+dMU88B2M0aDcWy0/jY=\ngithub.com/mattn/go-colorable v0.1.15/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=\ngithub.com/mattn/go-isatty v0.0.12/go.mod h1:cbi8OIDigv2wuxKPP5vlRcQ1OAZbq2CE4Kysco4FUpU=\ngithub.com/mattn/go-isatty v0.0.14/go.mod h1:7GGIvUiUoEMVVmxf/4nioHXj79iQHKdU27kJ6hsGG94=\ngithub.com/mattn/go-isatty v0.0.22 h1:j8l17JJ9i6VGPUFUYoTUKPSgKe/83EYU2zBC7YNKMw4=\ngithub.com/mattn/go-isatty v0.0.22/go.mod h1:ZXfXG4SQHsB/w3ZeOYbR0PrPwLy+n6xiMrJlRFqopa4=\ngithub.com/mitchellh/go-homedir v1.1.0 h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG+4E0Y=\ngithub.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=\ngithub.com/mitchellh/go-testing-interface v1.14.1 h1:jrgshOhYAUVNMAJiKbEu7EqAwgJJ2JqpQmpLJOu07cU=\ngithub.com/mitchellh/go-testing-interface v1.14.1/go.mod h1:gfgS7OtZj6MA4U1UrDRp04twqAjfvlZyCfX3sDjEym8=\ngithub.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=\ngithub.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=\ngithub.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=\ngithub.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w8PVh93nsPXa1VrQ6jlwL5oN8l14QlcNfg=\ngithub.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=\ngithub.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=\ngithub.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee h1:W5t00kpgFdJifH4BDsTlE89Zl93FEloxaWZfGcifgq8=\ngithub.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=\ngithub.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=\ngithub.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=\ngithub.com/nats-io/nats.go v1.52.0 h1:n3avV4VBsCgsdwh71TppsTwtv+QdPs7ntSKM8qJLGsc=\ngithub.com/nats-io/nats.go v1.52.0/go.mod h1:26HypzazeOkyO3/mqd1zZd53STJN0EjCYF9Uy2ZOBno=\ngithub.com/nats-io/nkeys v0.4.16 h1:rd5oAuLOb8mnAycB0xleuEBNS1pVVnN0fv/FF34Eypg=\ngithub.com/nats-io/nkeys v0.4.16/go.mod h1:llLgWoI0o4z/Q57q2R1kHfmocyhGV6VG/U18Glg1Afs=\ngithub.com/nats-io/nuid v1.0.1 h1:5iA8DT8V7q8WK2EScv2padNa/rTESc1KdnPw4TC2paw=\ngithub.com/nats-io/nuid v1.0.1/go.mod h1:19wcPz3Ph3q0Jbyiqsd0kePYG7A95tJPxeL+1OSON2c=\ngithub.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=\ngithub.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=\ngithub.com/oklog/run v1.2.0 h1:O8x3yXwah4A73hJdlrwo/2X6J62gE5qTMusH0dvz60E=\ngithub.com/oklog/run v1.2.0/go.mod h1:mgDbKRSwPhJfesJ4PntqFUbKQRZ50NgmZTSPlFA0YFk=\ngithub.com/pierrec/lz4/v4 v4.1.27 h1:+PhzhWDrjRj89TH2sw43nE3+4+W8lSxIuQadEHZyjUk=\ngithub.com/pierrec/lz4/v4 v4.1.27/go.mod h1:EoQMVJgeeEOMsCqCzqFm2O0cJvljX2nGZjcRIPL34O4=\ngithub.com/pkg/diff v0.0.0-20210226163009-20ebb0f2a09e/go.mod h1:pJLUxLENpZxwdsKMEsNbx1VGcRFpLqf3715MtcvvzbA=\ngithub.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=\ngithub.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=\ngithub.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=\ngithub.com/prometheus/client_golang v1.23.2 h1:Je96obch5RDVy3FDMndoUsjAhG5Edi49h0RJWRi/o0o=\ngithub.com/prometheus/client_golang v1.23.2/go.mod h1:Tb1a6LWHB3/SPIzCoaDXI4I8UHKeFTEQ1YCr+0Gyqmg=\ngithub.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=\ngithub.com/prometheus/client_model v0.6.2/go.mod h1:y3m2F6Gdpfy6Ut/GBsUqTWZqCUvMVzSfMLjcu6wAwpE=\ngithub.com/prometheus/common v0.67.5 h1:pIgK94WWlQt1WLwAC5j2ynLaBRDiinoAb86HZHTUGI4=\ngithub.com/prometheus/common v0.67.5/go.mod h1:SjE/0MzDEEAyrdr5Gqc6G+sXI67maCxzaT3A2+HqjUw=\ngithub.com/prometheus/procfs v0.20.1 h1:XwbrGOIplXW/AU3YhIhLODXMJYyC1isLFfYCsTEycfc=\ngithub.com/prometheus/procfs v0.20.1/go.mod h1:o9EMBZGRyvDrSPH1RqdxhojkuXstoe4UlK79eF5TGGo=\ngithub.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 h1:bsUq1dX0N8AOIL7EB/X911+m4EHsnWEHeJ0c+3TTBrg=\ngithub.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=\ngithub.com/redis/go-redis/v9 v9.21.0 h1:FPBE4hhbAke+TLmcY3WkpbDffJEomdqPn3HYiqAtL9E=\ngithub.com/redis/go-redis/v9 v9.21.0/go.mod h1:v/M13XI1PVCDcm01VtPFOADfZtHf8YW3baQf57KlIkA=\ngithub.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=\ngithub.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=\ngithub.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=\ngithub.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=\ngithub.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=\ngithub.com/ryanuber/go-glob v1.0.0 h1:iQh3xXAumdQ+4Ufa5b25cRpC5TYKlno6hsv6Cb3pkBk=\ngithub.com/ryanuber/go-glob v1.0.0/go.mod h1:807d1WSdnB0XRJzKNil9Om6lcp/3a0v4qIHxIXzX/Yc=\ngithub.com/santhosh-tekuri/jsonschema/v6 v6.0.2 h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=\ngithub.com/santhosh-tekuri/jsonschema/v6 v6.0.2/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=\ngithub.com/spf13/pflag v1.0.10 h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=\ngithub.com/spf13/pflag v1.0.10/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=\ngithub.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=\ngithub.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=\ngithub.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=\ngithub.com/stretchr/objx v0.5.2 h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=\ngithub.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=\ngithub.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=\ngithub.com/stretchr/testify v1.7.2/go.mod h1:R6va5+xMeoiuVRoj+gSkQ7d3FALtqAAGI1FQKckRals=\ngithub.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=\ngithub.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=\ngithub.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=\ngithub.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=\ngithub.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=\ngithub.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=\ngithub.com/xdg-go/pbkdf2 v1.0.0 h1:Su7DPu48wXMwC3bs7MCNG+z4FhcyEuz5dlvchbq0B0c=\ngithub.com/xdg-go/pbkdf2 v1.0.0/go.mod h1:jrpuAogTd400dnrH08LKmI/xc1MbPOebTwRqcT5RDeI=\ngithub.com/xdg-go/scram v1.2.0 h1:bYKF2AEwG5rqd1BumT4gAnvwU/M9nBp2pTSxeZw7Wvs=\ngithub.com/xdg-go/scram v1.2.0/go.mod h1:3dlrS0iBaWKYVt2ZfA4cj48umJZ+cAEbR6/SjLA88I8=\ngithub.com/xdg-go/stringprep v1.0.4 h1:XLI/Ng3O1Atzq0oBs3TWm+5ZVgkq2aqdlvP9JtoZ6c8=\ngithub.com/xdg-go/stringprep v1.0.4/go.mod h1:mPGuuIYwz7CmR2bT9j4GbQqutWS1zV24gijq1dTyGkM=\ngithub.com/zalando/go-keyring v0.2.8 h1:6sD/Ucpl7jNq10rM2pgqTs0sZ9V3qMrqfIIy5YPccHs=\ngithub.com/zalando/go-keyring v0.2.8/go.mod h1:tsMo+VpRq5NGyKfxoBVjCuMrG47yj8cmakZDO5QGii0=\ngo.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=\ngo.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=\ngo.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 h1:8tvICD4vSTOOsNrsI4Ljf6C+6UKvpTEH5XY3JMoyPoo=\ngo.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0/go.mod h1:z9+yiacE0IHRqM4qFfkbt/JYlmYXgss8GY/jXoNuPJI=\ngo.opentelemetry.io/otel v1.44.0 h1:JjwHmHpA4iZ3wBxluu2fbbE7j4kqlE8jXyAyPXH7HqU=\ngo.opentelemetry.io/otel v1.44.0/go.mod h1:BMgjTHL9WPRlRjL2oZCBTL4whCGtXch2H4BhOPIAyYc=\ngo.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 h1:88Y4s2C8oTui1LGM6bTWkw0ICGcOLCAI5l6zsD1j20k=\ngo.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0/go.mod h1:Vl1/iaggsuRlrHf/hfPJPvVag77kKyvrLeD10kpMl+A=\ngo.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0 h1:3iZJKlCZufyRzPzlQhUIWVmfltrXuGyfjREgGP3UUjc=\ngo.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0/go.mod h1:/G+nUPfhq2e+qiXMGxMwumDrP5jtzU+mWN7/sjT2rak=\ngo.opentelemetry.io/otel/metric v1.44.0 h1:1w0gILTcHdr3YI+ixLyjemwrVnsMURbTZFrSYCdDdmc=\ngo.opentelemetry.io/otel/metric v1.44.0/go.mod h1:8O7hanEPBNgEMmybD3s2VBKcgWOCsA6tzHBPODAiquo=\ngo.opentelemetry.io/otel/sdk v1.44.0 h1:nHYwb9lK+fJPU/dnT6s7W7Z8itMWyqrnVfbheVYrZ58=\ngo.opentelemetry.io/otel/sdk v1.44.0/go.mod h1:Osuydd3Se74nqjAKxid74N5eC+jfEqfTegHRnq58oK0=\ngo.opentelemetry.io/otel/sdk/metric v1.44.0 h1:3LlKgI+VjbVsjNRFZJZAJ30WjXC5VkNRks6si09iEfI=\ngo.opentelemetry.io/otel/sdk/metric v1.44.0/go.mod h1:5B5pMARnXxKhltooO4xUuCBorl65a4EpnTalObqOigA=\ngo.opentelemetry.io/otel/trace v1.44.0 h1:jxF5CsGYCe74MCRx2X4g7WsY/VBKRqqpNvXlX/6gtIk=\ngo.opentelemetry.io/otel/trace v1.44.0/go.mod h1:oLl1jrMQAVo6v3GAggN+1VH9VIz9iUSvW53sW1Q8PIE=\ngo.opentelemetry.io/proto/otlp v1.10.0 h1:IQRWgT5srOCYfiWnpqUYz9CVmbO8bFmKcwYxpuCSL2g=\ngo.opentelemetry.io/proto/otlp v1.10.0/go.mod h1:/CV4QoCR/S9yaPj8utp3lvQPoqMtxXdzn7ozvvozVqk=\ngo.uber.org/atomic v1.11.0 h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=\ngo.uber.org/atomic v1.11.0/go.mod h1:LUxbIzbOniOlMKjJjyPfpl4v+PKK2cNJn91OQbhoJI0=\ngo.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=\ngo.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=\ngo.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=\ngo.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN80Y=\ngo.uber.org/zap v1.28.0 h1:IZzaP1Fv73/T/pBMLk4VutPl36uNC+OSUh3JLG3FIjo=\ngo.uber.org/zap v1.28.0/go.mod h1:rDLpOi171uODNm/mxFcuYWxDsqWSAVkFdX4XojSKg/Q=\ngo.yaml.in/yaml/v2 v2.4.4 h1:tuyd0P+2Ont/d6e2rl3be67goVK4R6deVxCUX5vyPaQ=\ngo.yaml.in/yaml/v2 v2.4.4/go.mod h1:gMZqIpDtDqOfM0uNfy0SkpRhvUryYH0Z6wdMYcacYXQ=\ngo.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=\ngo.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=\ngolang.org/x/crypto v0.57.0 h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=\ngolang.org/x/crypto v0.57.0/go.mod h1:Fdz0i5U6CoizGwLda9DttjSk6qlZo25zYNtR+ycvuZA=\ngolang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=\ngolang.org/x/mod v0.41.0/go.mod h1:Ek9pY8RKWXwsWvd3rQiHYtMqkjSUV+s1Rj7j4H5Ur6o=\ngolang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=\ngolang.org/x/net v0.58.0/go.mod h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU=\ngolang.org/x/oauth2 v0.36.0 h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs=\ngolang.org/x/oauth2 v0.36.0/go.mod h1:YDBUJMTkDnJS+A4BP4eZBjCqtokkg1hODuPjwiGPO7Q=\ngolang.org/x/sync v0.23.0 h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=\ngolang.org/x/sync v0.23.0/go.mod h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=\ngolang.org/x/sys v0.0.0-20200116001909-b77594299b42/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=\ngolang.org/x/sys v0.0.0-20200223170610-d5e6a3e2c0ae/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=\ngolang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=\ngolang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=\ngolang.org/x/sys v0.0.0-20220503163025-988cb79eb6c6/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=\ngolang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=\ngolang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=\ngolang.org/x/text v0.42.0 h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=\ngolang.org/x/text v0.42.0/go.mod h1:ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=\ngolang.org/x/time v0.15.0 h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U=\ngolang.org/x/time v0.15.0/go.mod h1:Y4YMaQmXwGQZoFaVFk4YpCt4FLQMYKZe9oeV/f4MSno=\ngolang.org/x/tools v0.49.0 h1:3NI7VXzL9+1WZD52Dx2ttoPwD5DWrFGpl9mFZDlmisI=\ngolang.org/x/tools v0.49.0/go.mod h1:SJNXV9DBKT0UbdttsQjbfJlAE/q+y36++zo3uL3N0Oo=\ngonum.org/v1/gonum v0.17.0 h1:VbpOemQlsSMrYmn7T2OUvQ4dqxQXU+ouZFQsZOx50z4=\ngonum.org/v1/gonum v0.17.0/go.mod h1:El3tOrEuMpv2UdMrbNlKEh9vd86bmQ6vqIcDwxEOc1E=\ngoogle.golang.org/genproto/googleapis/api v0.0.0-20260630182238-925bb5da69e7 h1:jQ9p21COKWjP3VwuFrNRiiOTMh3mPpN45R7SLrH/HUU=\ngoogle.golang.org/genproto/googleapis/api v0.0.0-20260630182238-925bb5da69e7/go.mod h1:KqHwBx2upmfa1XSi1WuRvC+2VGCLtooKkfmyvRbUmqA=\ngoogle.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 h1:eM/YSd5bBFagF51o1E745Ta7RwzpW0h+z+QDNZOgmQ8=\ngoogle.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7/go.mod h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=\ngoogle.golang.org/grpc v1.83.2 h1:EManeRomTObA0BU7I8vXgg/78uE5MJ9M8B39EX2WscU=\ngoogle.golang.org/grpc v1.83.2/go.mod h1:YPI1hK3kDked6iHvgX3tR0y+nX/qpMFKhPgFsokw1S8=\ngoogle.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af h1:+5/Sw3GsDNlEmu7TfklWKPdQ0Ykja5VEmq2i817+jbI=\ngoogle.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=\ngopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=\ngopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=\ngopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=\ngopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=\ngopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=\ngopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=\nmodernc.org/cc/v4 v4.28.4 h1:Hd/4Es+MBj+/7hSdZaisNyu6bv3V0Dp2MdllyfqaH+c=\nmodernc.org/cc/v4 v4.28.4/go.mod h1:OnovgIhbbMXMu1aISnJ0wvVD1KnW+cAUJkIrAWh+kVI=\nmodernc.org/ccgo/v4 v4.34.4 h1:OVnSOWQjVKOYkFxoHYB+qQmSHK5gqMqARM+K9DpR/Ws=\nmodernc.org/ccgo/v4 v4.34.4/go.mod h1:qdKqE8FNIYyysougB1RX9MxCzp5oJOcQXSobANJ4TuE=\nmodernc.org/fileutil v1.4.0 h1:j6ZzNTftVS054gi281TyLjHPp6CPHr2KCxEXjEbD6SM=\nmodernc.org/fileutil v1.4.0/go.mod h1:EqdKFDxiByqxLk8ozOxObDSfcVOv/54xDs/DUHdvCUU=\nmodernc.org/gc/v2 v2.6.5 h1:nyqdV8q46KvTpZlsw66kWqwXRHdjIlJOhG6kxiV/9xI=\nmodernc.org/gc/v2 v2.6.5/go.mod h1:YgIahr1ypgfe7chRuJi2gD7DBQiKSLMPgBQe9oIiito=\nmodernc.org/gc/v3 v3.1.3 h1:6QAplYyVO+KdPW3pGnqmJDUxtkec8ooEWvks/hhU3lc=\nmodernc.org/gc/v3 v3.1.3/go.mod h1:HFK/6AGESC7Ex+EZJhJ2Gni6cTaYpSMmU/cT9RmlfYY=\nmodernc.org/goabi0 v0.2.0 h1:HvEowk7LxcPd0eq6mVOAEMai46V+i7Jrj13t4AzuNks=\nmodernc.org/goabi0 v0.2.0/go.mod h1:CEFRnnJhKvWT1c1JTI3Avm+tgOWbkOu5oPA8eH8LnMI=\nmodernc.org/libc v1.73.4 h1:+ra4Ui8ngyt8HDcO1FTDPWlkAh6yOdaO2yAoh8MddQA=\nmodernc.org/libc v1.73.4/go.mod h1:DXZ3eO8qMCNn2SnmTNCiC71nJ9Rcq3PsnpU6Vc4rWK8=\nmodernc.org/mathutil v1.7.1 h1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=\nmodernc.org/mathutil v1.7.1/go.mod h1:4p5IwJITfppl0G4sUEDtCr4DthTaT47/N3aT6MhfgJg=\nmodernc.org/memory v1.11.0 h1:o4QC8aMQzmcwCK3t3Ux/ZHmwFPzE6hf2Y5LbkRs+hbI=\nmodernc.org/memory v1.11.0/go.mod h1:/JP4VbVC+K5sU2wZi9bHoq2MAkCnrt2r98UGeSK7Mjw=\nmodernc.org/opt v0.2.0 h1:tGyef5ApycA7FSEOMraay9SaTk5zmbx7Tu+cJs4QKZg=\nmodernc.org/opt v0.2.0/go.mod h1:03fq9lsNfvkYSfxrfUhZCWPk1lm4cq4N+Bh//bEtgns=\nmodernc.org/sortutil v1.2.1 h1:+xyoGf15mM3NMlPDnFqrteY07klSFxLElE2PVuWIJ7w=\nmodernc.org/sortutil v1.2.1/go.mod h1:7ZI3a3REbai7gzCLcotuw9AC4VZVpYMjDzETGsSMqJE=\nmodernc.org/sqlite v1.53.0 h1:20WG8N9q4ji/dEqGk4uiI0c6OPjSeLTNYGFCc3+7c1M=\nmodernc.org/sqlite v1.53.0/go.mod h1:xoEpOIpGrgT48H5iiyt/YXPCZPEzlfmfFwtk8Lklw8s=\nmodernc.org/strutil v1.2.1 h1:UneZBkQA+DX2Rp35KcM69cSsNES9ly8mQWD71HKlOA0=\nmodernc.org/strutil v1.2.1/go.mod h1:EHkiggD70koQxjVdSBM3JKM7k6L0FbGE5eymy9i3B9A=\nmodernc.org/token v1.1.0 h1:Xl7Ap9dKaEs5kLoOQeQmPWevfnk/DM5qcLcYlA8ys6Y=\nmodernc.org/token v1.1.0/go.mod h1:UGzOrNV1mAFSEB63lOFHIpNRUVMvYTc6yu1SMY/XTDM=\n"
+    },
+    "prior_failed_handoff_sha256": "ed89430e897661b36171d664995d1dfdbaa9ad1ebc09e9c052cfe6581ddfca14",
+    "proposal_sha256": "794671b8c5b3d709fc3d8f378eb3c2ac2c3aa29d1d174a3aa941842b8fe98086",
+    "schema": "workflow.finite-baseline-fixture-projection.v1"
+  },
+  "candidate_execution": false,
+  "finding_policy_changed": false,
+  "installation_admitted": false,
   "job": "osv-production-proof",
-  "workflow_ref": "GoCodeAlone/workflow/.github/workflows/copilot-setup-steps.yml@refs/heads/prep/osv-prerequisites-20261011-r1",
+  "normal_event_delivery_proved": false,
+  "phases": [
+    "prepare-differential",
+    "scan-baseline",
+    "scan-candidate",
+    "report-differential",
+    "gate-differential"
+  ],
+  "prepare_seconds": 900,
+  "ref": "refs/heads/prep/osv-prerequisites-20261011-r1",
+  "report_seconds": 240,
+  "repository": "GoCodeAlone/workflow",
+  "scan_seconds": 1800,
+  "schema": "workflow.offline-scanner.finite-production-proof-plan.v1",
   "source_refs": {
     "baseline": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
     "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
   },
-  "phases": ["prepare-differential", "scan-baseline", "scan-candidate", "report-differential", "gate-differential"],
-  "prepare_seconds": 900,
-  "report_seconds": 240,
-  "scan_seconds": 1800,
+  "status": "Finite original baseline plus exact source-authenticated four-file metadata projection; full derived/candidate native proof and independent admission remain required. Pristine original native1 remains adverse evidence.",
   "total_seconds": 5400,
-  "installation_admitted": false,
-  "normal_event_delivery_proved": false,
-  "candidate_execution": false,
-  "finding_policy_changed": false,
-  "status": "Collect raw actual execution and cleanup evidence only; independent admission decisions remain separate."
+  "workflow_ref": "GoCodeAlone/workflow/.github/workflows/copilot-setup-steps.yml@refs/heads/prep/osv-prerequisites-20261011-r1"
 }

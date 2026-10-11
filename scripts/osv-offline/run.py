@@ -44,7 +44,7 @@ TRUSTED_FILES.update({'osv_supplier.py', 'application-metadata-catalog.json'})
 MANUAL_PHASES = {'prepare-differential', 'scan-baseline', 'scan-candidate', 'report-differential', 'gate-differential'}
 CORE_FIELDS = {'trusted_files', 'linux_pins', 'public_preload_inventory_sha256',
     'prepared_source_refs', 'resource_contract', 'reviewed_protocol_binding_sha256',
-    'container_image', 'container_image_config'}
+    'container_image', 'container_image_config', 'finite_baseline_projection_sha256'}
 
 class Refusal(RuntimeError):
     pass
@@ -166,6 +166,8 @@ def supplier_contract(manifest, runtime):
         **{key:runtime[key] for key in ('compiler_root','existing_gopath','existing_module_cache','existing_build_cache')}}
 
 def admission(manifest):
+    if manifest.get('finite_baseline_projection_sha256') is not None:
+        raise Refusal('finite derived baseline cannot supply normal-event admission')
     if platform.system() != 'Linux' or platform.machine() != 'x86_64' or sys.version_info < (3, 11):
         raise Refusal('actual native Linux/amd64 Python>=3.11 required')
     if manifest['permanent_install_authorized'] is not True:
@@ -229,6 +231,7 @@ def manual_admission(manifest, runtime_path):
     # Explicit finite evidence collection only. No accepted normal-event receipt
     # or automatic installation is minted by this path.
     plan = load(HERE / 'manual-proof-plan.json')
+    finite_projection(manifest, manual=True)
     expected = {'GITHUB_REPOSITORY': plan['repository'], 'GITHUB_REF': plan['ref'],
         'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_JOB': plan['job'],
         'GITHUB_WORKFLOW_REF': plan['workflow_ref']}
@@ -250,6 +253,211 @@ def manual_admission(manifest, runtime_path):
         key: os.environ[key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')}:
         raise Refusal('finite proof runtime must remain provisional and exact-run bound')
     return validate_runtime(manifest, runtime)
+
+def git_tree(files):
+    """Compute an exact Git tree identity without creating objects or refs."""
+    root = {}
+    for name, row in files.items():
+        rel = PurePosixPath(name)
+        if (rel.is_absolute() or not rel.parts or rel.as_posix() != name or
+            any(part in {'.', '..'} or '\0' in part for part in rel.parts) or
+            row['git_mode'] not in {'100644', '100755'} or not COMMIT.fullmatch(row['git_blob'])):
+            raise Refusal('invalid projected Git inventory')
+        tree = root
+        for part in rel.parts[:-1]:
+            if part in tree and not isinstance(tree[part], dict):
+                raise Refusal('projected Git file/directory collision')
+            tree = tree.setdefault(part, {})
+        if rel.parts[-1] in tree:
+            raise Refusal('duplicate projected Git path')
+        tree[rel.parts[-1]] = (row['git_mode'], row['git_blob'])
+    def identity(tree):
+        entries = []
+        for name, value in tree.items():
+            directory = isinstance(value, dict)
+            mode, blob = ('40000', identity(value)) if directory else value
+            entries.append(((name + ('/' if directory else '')).encode(),
+                mode.encode() + b' ' + name.encode() + b'\0' + bytes.fromhex(blob)))
+        raw = b''.join(value for _, value in sorted(entries))
+        return hashlib.sha1(b'tree ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+    return identity(root)
+
+def source_hashes(path):
+    # Link both digest algorithms to the same bounded, stable owned source FD.
+    before = regular(path, 32 * 1024 * 1024)
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    if before.st_uid != os.getuid() or before.st_nlink != 1:
+        raise Refusal('source file must remain exclusively owned')
+    sha256 = hashlib.sha256()
+    blob = hashlib.sha1(b'blob ' + str(before.st_size).encode() + b'\0')
+    count = 0
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as stream:
+        if identity(os.fstat(fd)) != identity(before):
+            raise Refusal('source input changed during open')
+        for raw in iter(lambda: stream.read(1024 * 1024), b''):
+            count += len(raw)
+            if count > before.st_size:
+                raise Refusal('source input grew during hashing')
+            sha256.update(raw); blob.update(raw)
+        if (count != before.st_size or identity(os.fstat(fd)) != identity(before) or
+            identity(path.lstat()) != identity(before)):
+            raise Refusal('source input changed during hashing')
+    return sha256.hexdigest(), blob.hexdigest(), stat.S_IMODE(before.st_mode)
+
+def finite_projection(manifest, *, manual):
+    expected = manifest.get('finite_baseline_projection_sha256')
+    if expected is None:
+        return None
+    if not manual:
+        raise Refusal('finite derived baseline is restricted to reviewed manual proof')
+    value = load(HERE / 'manual-proof-plan.json').get('baseline_projection')
+    keys = {'schema', 'accepted', 'manual_only', 'finding_waiver', 'disposition_sha256',
+        'proposal_sha256', 'patch_sha256', 'fixture_proof_sha256', 'prior_failed_handoff_sha256',
+        'original_ref', 'original_tree', 'derived_tree', 'file_count', 'files', 'payloads',
+        'original_fixture_catalog', 'derived_fixture_catalog'}
+    paths = {'cmd/wfctl/testdata/conformance/' + fixture + '/' + filename
+        for fixture in ('iac-pass', 'no-iac') for filename in ('go.mod', 'go.sum')}
+    if (not isinstance(value, dict) or set(value) != keys or
+        value['schema'] != 'workflow.finite-baseline-fixture-projection.v1' or
+        value['accepted'] is not False or value['manual_only'] is not True or value['finding_waiver'] is not False or
+        value['disposition_sha256'] != '9f7422cb51dc4179d52b01467cc26a79be2b6ecc49e13bdff18350f38cc80eff' or
+        value['proposal_sha256'] != '794671b8c5b3d709fc3d8f378eb3c2ac2c3aa29d1d174a3aa941842b8fe98086' or
+        value['patch_sha256'] != '9785b6b5e45876f9306ba505852704316c1c7bd5aee4fb9e10ad81cb187f5dfe' or
+        value['fixture_proof_sha256'] != 'c4b347ed89d5ac2d8f19027499745a5ecdd9ceac425175aab840e72cd9652bec' or
+        value['prior_failed_handoff_sha256'] != 'ed89430e897661b36171d664995d1dfdbaa9ad1ebc09e9c052cfe6581ddfca14' or
+        value['original_ref'] != '2fcb9baf4f03d599efb1fc4c462455a978620ae4' or
+        value['original_ref'] != manifest['prepared_source_refs']['baseline'] or
+        manifest['prepared_source_refs']['candidate'] != '81b9b1df2386f7d44c8464c999a4ea0919813526' or
+        value['original_tree'] != '0a664bef6a3480f9caa6d85a01550135f2103e71' or
+        value['derived_tree'] != 'abcceb1d8098fab0c735e03a149313dc8b645312' or
+        type(value['file_count']) is not int or value['file_count'] != 3525 or set(value['files']) != paths or
+        hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest() != expected):
+        raise Refusal('finite baseline projection differs from exact authorized subject')
+    for name, change in value['files'].items():
+        if set(change) != {'old', 'new'}:
+            raise Refusal('unknown fixture substitution field')
+        for row in change.values():
+            if (set(row) != {'git_mode', 'git_blob', 'sha256', 'bytes'} or row['git_mode'] != '100644' or
+                not COMMIT.fullmatch(row['git_blob']) or not SHA.fullmatch(row['sha256']) or
+                type(row['bytes']) is not int or not 0 < row['bytes'] <= 64 * 1024):
+                raise Refusal('invalid finite fixture metadata identity')
+        raw = value['payloads'][change['new']['sha256']].encode()
+        if (len(raw) != change['new']['bytes'] or hashlib.sha256(raw).hexdigest() != change['new']['sha256'] or
+            hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest() != change['new']['git_blob']):
+            raise Refusal('finite replacement bytes differ from authorized metadata')
+    if set(value['payloads']) != {row['new']['sha256'] for row in value['files'].values()}:
+        raise Refusal('unknown finite fixture payload')
+    manifests = {name for name in paths if name.endswith('go.mod')}
+    if any(set(value[field]) != manifests for field in ('original_fixture_catalog', 'derived_fixture_catalog')):
+        raise Refusal('finite fixture declaration catalogs are incomplete')
+    for name in manifests:
+        for key, kind in [('original_fixture_catalog', 'old'), ('derived_fixture_catalog', 'new')]:
+            if value[key][name]['sha256'] != value['files'][name][kind]['sha256']:
+                raise Refusal('finite declared catalog is not source-authenticated')
+    return value
+
+def projection_summary(value):
+    return {key: item for key, item in value.items()
+        if key not in {'payloads', 'original_fixture_catalog', 'derived_fixture_catalog'}}
+
+def apply_fixture_projection(state, source, value):
+    # export_source has first authenticated the complete pristine archive.
+    if (source['commit'] != value['original_ref'] or len(source['files']) != value['file_count'] or
+        source['tree'] != value['original_tree'] or git_tree(source['files']) != value['original_tree']):
+        raise Refusal('original baseline export differs from authorized pristine source')
+    original = dict(source, files={name: dict(row) for name, row in source['files'].items()})
+    root = state / 'baseline-source'
+    originals = state / 'baseline-original-fixture-metadata'
+    originals.mkdir(mode=0o700)
+    for name, change in value['files'].items():
+        old = {key: change['old'][key] for key in ('git_mode', 'git_blob', 'sha256')}
+        if source['files'].get(name) != old:
+            raise Refusal('original fixture metadata differs from exact old identity')
+        path = root / name
+        before = path.lstat()
+        def identity(info):
+            return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if (not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o644 or
+            before.st_uid != os.getuid() or before.st_nlink != 1 or before.st_size != change['old']['bytes']):
+            raise Refusal('fixture substitution requires exact regular original bytes')
+        fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+        with os.fdopen(fd, 'r+b') as stream:
+            if identity(os.fstat(fd)) != identity(before):
+                raise Refusal('fixture input changed during open')
+            raw = stream.read(64 * 1024 + 1)
+            if (identity(os.fstat(fd)) != identity(before) or identity(path.lstat()) != identity(before) or
+                len(raw) != before.st_size or hashlib.sha256(raw).hexdigest() != old['sha256']):
+                raise Refusal('fixture old bytes changed before substitution')
+            if name.endswith('go.sum'):
+                target = originals / (PurePosixPath(name).parent.name + '.go.sum')
+                with target.open('xb') as preserved:
+                    os.fchmod(preserved.fileno(), 0o600); preserved.write(raw)
+                    preserved.flush(); os.fsync(preserved.fileno())
+            raw = value['payloads'][change['new']['sha256']].encode()
+            stream.seek(0); stream.write(raw); stream.truncate(); stream.flush(); os.fsync(fd)
+            if (identity(path.lstat()) != identity(os.fstat(fd)) or digest(path) != change['new']['sha256']):
+                raise Refusal('fixture substitution changed or rebound')
+        source['files'][name] = {key: change['new'][key] for key in ('git_mode', 'git_blob', 'sha256')}
+    source.update(tree=git_tree(source['files']), original_git_export=original,
+        fixture_projection=projection_summary(value), scan_subject='finite-metadata-derived-baseline',
+        bytes=original['bytes'] + sum(row['new']['bytes'] - row['old']['bytes'] for row in value['files'].values()))
+    if source['tree'] != value['derived_tree']:
+        raise Refusal('finite derived baseline tree differs from exact four-file repair')
+
+def verify_fixture_projection(state, label, source, manifest, *, manual):
+    value = finite_projection(manifest, manual=manual)
+    if label != 'baseline' or value is None:
+        if 'fixture_projection' in source or 'original_git_export' in source:
+            raise Refusal('unexpected derived source projection')
+        return
+    original = source['original_git_export']
+    if (source['fixture_projection'] != projection_summary(value) or source['scan_subject'] != 'finite-metadata-derived-baseline' or
+        original['commit'] != value['original_ref'] or original['tree'] != value['original_tree'] or
+        len(original['files']) != value['file_count'] or git_tree(original['files']) != value['original_tree'] or
+        source['commit'] != original['commit'] or source['archive_sha256'] != original['archive_sha256'] or
+        digest(state / 'baseline.tar') != original['archive_sha256'] or source['manifests'] != original['manifests']):
+        raise Refusal('finite source confused pristine archive with derived scan subject')
+    files = {name: dict(row) for name, row in original['files'].items()}
+    for name, change in value['files'].items():
+        if files.get(name) != {key: change['old'][key] for key in ('git_mode', 'git_blob', 'sha256')}:
+            raise Refusal('pristine fixture inventory changed')
+        files[name] = {key: change['new'][key] for key in ('git_mode', 'git_blob', 'sha256')}
+    if (source['files'] != files or source['tree'] != value['derived_tree'] or git_tree(files) != value['derived_tree'] or
+        source['bytes'] != original['bytes'] + sum(row['new']['bytes'] - row['old']['bytes'] for row in value['files'].values())):
+        raise Refusal('finite source has changes beyond exact four metadata files')
+    from osv_producer import read_owned
+    originals = owned(state / 'baseline-original-fixture-metadata')
+    if {path.name for path in originals.iterdir()} != {'iac-pass.go.sum', 'no-iac.go.sum'}:
+        raise Refusal('original fixture checksum provenance is incomplete')
+    for name, change in value['files'].items():
+        if name.endswith('go.sum'):
+            raw = read_owned(originals / (PurePosixPath(name).parent.name + '.go.sum'), 64 * 1024)
+            if len(raw) != change['old']['bytes'] or hashlib.sha256(raw).hexdigest() != change['old']['sha256']:
+                raise Refusal('original fixture checksum provenance changed')
+
+def source_subject(source):
+    return {'original_commit': source['commit'], 'scan_tree': source['tree'],
+        'kind': source.get('scan_subject', 'pristine-git-export'),
+        'fixture_projection': source.get('fixture_projection')}
+
+def finite_catalogs(source, manifests, manifest):
+    if 'fixture_projection' not in source:
+        return None
+    value = finite_projection(manifest, manual=True)
+    if (set(manifests) != set(source['manifests']) or
+        any(row.get('sha256') != source['files'][name]['sha256'] for name, row in manifests.items()) or
+        any(manifests.get(name) != row for name, row in value['derived_fixture_catalog'].items())):
+        raise Refusal('actual derived declaration catalog differs from authenticated source')
+    original = dict(manifests, **value['original_fixture_catalog'])
+    if any(row.get('sha256') != source['original_git_export']['files'][name]['sha256'] for name, row in original.items()):
+        raise Refusal('original declaration provenance differs from pristine source')
+    return {'derived_native_manifest_catalog': manifests, 'original_declared_manifest_inventory': original,
+        'original_fixture_catalog_basis': 'source-authenticated frozen declarations; no pristine native PASS inferred',
+        'original_native_root2_failure_preserved': True}
 
 def state_path():
     parent = Path(os.environ['RUNNER_TEMP'])
@@ -338,7 +546,7 @@ def export_source(ref, label, state, child_env, bounded_run, Budget, prepare_bud
         raise Refusal('export omitted Git-tracked source')
     discovered = {str(path.relative_to(root)) for path in root.rglob('*')
                   if path.is_file() and path.name in {'go.mod', 'package-lock.json'}}
-    return root, {'commit': ref, 'archive_sha256': digest(archive), 'files': seen,
+    return root, {'commit': ref, 'tree': git_tree(seen), 'archive_sha256': digest(archive), 'files': seen,
                   'manifests': sorted(discovered), 'bytes': total}
 
 class FixedRedirect(urllib.request.HTTPRedirectHandler):
@@ -393,6 +601,9 @@ def supplier(state, manifest, runtime):
     return tools, go
 
 def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, manual=False):
+    projection = finite_projection(manifest, manual=manual)
+    if projection is not None and phase != 'prepare-differential':
+        raise Refusal('finite derived baseline requires complete differential proof')
     job = 'scan-pr' if phase == 'prepare-differential' else 'scan-scheduled'
     prepare_budget = Budget(load(HERE / 'manual-proof-plan.json')['prepare_seconds'] if manual else
         load(HERE / 'hosted-job-timing-acceptance.json')['jobs'][job]['prepare_total_seconds'])
@@ -426,6 +637,8 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, ma
     sources = {}
     for label, ref in refs.items():
         _, sources[label] = export_source(ref, label, state, child_env, bounded_run, Budget, prepare_budget)
+        if label == 'baseline' and projection is not None:
+            apply_fixture_projection(state, sources[label], projection)
         prepare_budget.left()
         if set(sources[label]['manifests']) != set(profile['inputs']):
             raise Refusal('source manifest set differs from complete reviewed profile')
@@ -444,7 +657,11 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, ma
                 path = source / name
                 if path.exists():
                     regular(path)
-                    if digest(path) not in allowed.get(name, set()):
+                    exact_derived = (projection is not None and manual and label == 'baseline' and
+                        name in projection['files'] and sources[label]['files'][name]['sha256'] ==
+                        projection['files'][name]['new']['sha256'])
+                    if digest(path) not in allowed.get(name, set()) and not (
+                        exact_derived and digest(path) == projection['files'][name]['new']['sha256']):
                         raise Refusal('dependency declaration is outside exact reviewed public inventory')
                 elif filename == 'go.mod' or name in allowed:
                     raise Refusal('required source module declaration is missing')
@@ -487,10 +704,16 @@ def application_metadata_rows(state, sources, profile, receiver):
     required = {}; declarations = {}
     for label, source in sources.items():
         root = state / (label + '-source')
-        for name in sorted({str(PurePosixPath(p).with_name('go.sum')) for p in profile['inputs'] if p.endswith('go.mod')}):
-            if name not in source['files']:continue
-            path = root / name;regular(path)
-            if digest(path) != source['files'][name]['sha256']:
+        sums = sorted({str(PurePosixPath(p).with_name('go.sum')) for p in profile['inputs'] if p.endswith('go.mod')})
+        inputs = [(name, root / name, source['files'].get(name)) for name in sums]
+        if 'fixture_projection' in source:
+            inputs += [('pristine-original/' + name, state / 'baseline-original-fixture-metadata' /
+                (PurePosixPath(name).parent.name + '.go.sum'), source['original_git_export']['files'][name])
+                for name in source['fixture_projection']['files'] if name.endswith('go.sum')]
+        for name, path, identity in inputs:
+            if identity is None:continue
+            regular(path)
+            if digest(path) != identity['sha256']:
                 raise Refusal('application metadata source sum changed')
             declarations[label + '/' + name] = digest(path)
             for line in path.read_text().splitlines():
@@ -517,6 +740,7 @@ def preload_application_metadata(state, sources, profile, runtime, budget):
         'catalog_sha256':digest(HERE / 'application-metadata-catalog.json'),
         'catalog_count':576, 'selected_count':len(rows), 'source_sums':declarations,
         'source_refs':{label:source['commit'] for label,source in sources.items()},
+        'source_subjects':{label:source_subject(source) for label,source in sources.items()},
         'metadata_only':True, 'extra_zip_acquisition':False}
     path = state / 'application-metadata-receipt.json'
     try:
@@ -534,7 +758,8 @@ def verify_application_metadata(state, prepared, runtime, budget):
         receipt.get('complete') is not True or receipt.get('accepted') is not False or
         receipt.get('conserved') is not True or receipt.get('metadata_only') is not True or
         receipt.get('extra_zip_acquisition') is not False or
-        receipt.get('catalog_sha256') != digest(HERE / 'application-metadata-catalog.json')):
+        receipt.get('catalog_sha256') != digest(HERE / 'application-metadata-catalog.json') or
+        receipt.get('source_subjects') != {label:source_subject(source) for label,source in prepared['sources'].items()}):
         raise Refusal('application metadata receipt is incomplete or changed')
     application_metadata_supplier().conserve_metadata(receipt['records'],
         Path(runtime['existing_module_cache']), budget)
@@ -792,14 +1017,18 @@ def verify_prepared_inputs(state, manifest, runtime):
         if archive.stat().st_size != row['bytes'] or digest(archive) != row['sha256']:
             raise Refusal('prepared database archive changed')
     for label, source in prepared['sources'].items():
+        verify_fixture_projection(state, label, source, manifest,
+            manual=prepared.get('event') == 'workflow_dispatch' and prepared.get('automatic_admission') is False)
         root = state / (label + '-source')
         paths = {str(path.relative_to(root)): path for path in root.rglob('*') if not path.is_dir()}
         if set(paths) != set(source['files']):
             raise Refusal('exact source file set changed')
         for name, row in source['files'].items():
-            path = paths[name];info = regular(path, 32 * 1024 * 1024)
-            if digest(path) != row['sha256'] or stat.S_IMODE(info.st_mode) != (0o755 if row['git_mode']=='100755' else 0o644):
+            sha256, blob, mode = source_hashes(paths[name])
+            if sha256 != row['sha256'] or blob != row['git_blob'] or mode != (0o755 if row['git_mode']=='100755' else 0o644):
                 raise Refusal('exact source mode or bytes changed')
+        if git_tree(source['files']) != source['tree']:
+            raise Refusal('prepared scan tree identity changed')
     return digest(state / 'prepared.json')
 
 def boundary(phase, state, manifest, runtime, bounded_run, Budget):
@@ -851,7 +1080,14 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
         proof = Path(result['proof'])
         if proof.parent != state / 'runs' or proof.is_symlink():
             raise Refusal('worker proof outside managed output')
-        result.update(report_sha256=digest(proof / 'results.json'), receipt_sha256=digest(proof / 'receipt.json'))
+        producer_receipt=load(proof / 'receipt.json')
+        report_sha256=digest(proof / 'results.json')
+        if producer_receipt.get('report_sha256')!=report_sha256:
+            raise Refusal('published report differs from authenticated native buffer')
+        result.update(report_sha256=report_sha256, receipt_sha256=digest(proof / 'receipt.json'))
+        source = load(state / 'prepared.json')['sources'][result['label']]
+        result.update(source_subject=source_subject(source),
+            declared_catalogs=finite_catalogs(source, producer_receipt['manifests'], manifest))
     else:
         sarif = Path(result['sarif'])
         if sarif != private / 'reporter.sarif' or digest(sarif) != result['sarif_sha256']:
@@ -891,7 +1127,8 @@ def worker(request_path, manifest, profile):
     if phase.startswith('scan-'):
         out, blocking = run_one(state / (label + '-source'), profile['inputs'], tools, go,
             state / 'public-db', load(state / 'public-database-receipts.json'), datetime.now(timezone.utc), state / 'runs', child_env,
-            admitted_supplier=supplier_contract(manifest, runtime), cgroup_witness=observed)
+            admitted_supplier=supplier_contract(manifest, runtime), cgroup_witness=observed,
+            core_contract_sha256=manifest['core_contract_sha256'])
         write(private / 'worker-result.json', {'complete': True, 'proof': str(out),
             'blocking': sorted(blocking), 'label': label, 'exit': 1 if blocking else 0,
             'socket_denial': 'EPERM', 'kernel_limits': observed['kernel_limits']})
@@ -960,6 +1197,12 @@ def complete_result(state, label, manifest, worker_token=None):
                        for name, row in prepared['sources'][label]['files'].items()}
     if receipt['source'] != expected_source or receipt['compiler'] != 'go version go1.27.2 linux/amd64':
         raise Refusal('completed source/compiler differs from exact admitted Git export')
+    source = prepared['sources'][label]
+    verify_fixture_projection(state, label, source, manifest,
+        manual=prepared.get('event') == 'workflow_dispatch' and prepared.get('automatic_admission') is False)
+    if (result.get('source_subject') != source_subject(source) or
+        result.get('declared_catalogs') != finite_catalogs(source, receipt['manifests'], manifest)):
+        raise Refusal('completed result conflates original and derived source/catalogs')
     if receipt['databases'] != {key: row['sha256'] for key, row in prepared['databases'].items()} or receipt['supplier_pins'] != {k:v for k,v in prepared['supplier_pins'].items() if k != 'osv-reporter'}:
         raise Refusal('scan database/supplier identity differs')
     return result, proof
@@ -995,7 +1238,7 @@ def evidence(state, manifest):
         output = destination / label; output.mkdir(mode=0o700)
         write(output / 'result.json', result)
         for source in proof.iterdir():
-            if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.(?:stdout|stderr|rc)|receipt\.json|results\.json|root13-govulncheck\.memory-(?:before|after)\.json', source.name):
+            if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|receipt\.json|results\.json|database-validation\.json', source.name):
                 continue
             info = regular(source); total += info.st_size
             if total > 128 * 1024 * 1024:
@@ -1040,6 +1283,9 @@ def gate(phase, state, manifest):
 def main():
     phase = sys.argv[1] if len(sys.argv) > 1 else ''
     manifest, profile, bounded_run, Budget = trusted()
+    if phase == '--database-worker' and len(sys.argv) == 3:
+        from osv_producer import database_worker
+        return database_worker(Path(sys.argv[2]),manifest['core_contract_sha256'])
     if phase == '--worker' and len(sys.argv) == 3:
         return worker(Path(sys.argv[2]), manifest, profile)
     manual = phase == '--manual-proof' and len(sys.argv) == 4
@@ -1142,7 +1388,7 @@ def preserve_incomplete_protocols(phase, destination):
         target = output / proof.name
         target.mkdir(mode=0o700)
         for source in sorted(proof.iterdir()):
-            if re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.(?:stdout|stderr|rc)|receipt\.json|results\.json|root13-govulncheck\.memory-(?:before|after)\.json', source.name):
+            if re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|receipt\.json|results\.json|database-validation\.json', source.name):
                 copy(source, target / source.name)
     write(output / 'incomplete-publication.json', {'complete': False, 'phase': phase,
         'scope': 'unaccepted retained producer outputs; source slot and completeness cannot be inferred without a verified manager completion receipt',

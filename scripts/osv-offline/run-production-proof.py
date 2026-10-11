@@ -61,6 +61,8 @@ def run(output, supplier_root, compiler_root, gopath, module_cache, build_cache)
         'bootstrap_manifest_sha256': m.digest(HERE/'bootstrap-manifest.json'),
         'runtime_sha256': m.digest(output/'runtime.json'), 'plan_sha256': m.digest(HERE/'manual-proof-plan.json'),
         'source_refs': plan['source_refs'], 'phases': [], 'complete': False}
+    projection = m.finite_projection(manifest, manual=True)
+    result['baseline_projection'] = m.projection_summary(projection) if projection is not None else None
     child_env = {key: os.environ[key] for key in (*IDENTITY,'GITHUB_REF','GITHUB_EVENT_NAME','GITHUB_WORKFLOW_REF',
         'RUNNER_ENVIRONMENT','RUNNER_TEMP','GITHUB_OUTPUT')}
     child_env.update(PATH='/usr/bin:/bin',LANG='C',LC_ALL='C',HOME='/nonexistent')

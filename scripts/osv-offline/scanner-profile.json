@@ -1,33 +1,40 @@
 {
-  "status": "LOCAL AUTHORITATIVE-SYMBOL BOUNDARY SUCCESSOR; EXACT INDEPENDENT REVIEW PENDING; NO AUTOMATIC INSTALLATION AUTHORITY",
-  "supplier": "github.com/google/osv-scanner/v2@v2.6.0",
-  "origin_commit": "e840a6e8adb14b7777c78e26cfbf6e2abc1d1fc6",
-  "module_h1": "hqtNLANWaKcqOC6znJX8J/23PtzV82RX23oMS9/ab4I=",
-  "go_mod_h1": "3XUKJWYB7D2fWvFDMTZg9OBrlCEf/WBGZVc4IFjTljs=",
-  "patch": [
-    "go 1.27.2",
-    "golang.org/x/net v0.60.0; append authenticated two sum rows; retain all original rows"
+  "activation_gates": [
+    "Explicit permission for exact Workflow head/base profile and public module preload/DB acquisition/data destinations",
+    "Trusted hosted producer/bootstrap plus lawful protected scanner transition and unchanged genuine required checks",
+    "Complete effective protection/nonrequired fixture attestation",
+    "Current source CI, inspected released fixed Linux wfctl and Compute quiet-window/identity/runtime attestations"
   ],
-  "linux_amd64_pins": {
-    "osv-scanner": "c810df66004c75f734eb4502ea5ff44115e4e3444e18d8b38bd87ff33094d69d",
-    "osv-reporter": "d148474ac6f4a407a369544e18a96f2d900e6c0a8309b5255cd3b4b4c2a198eb",
-    "govulncheck": "55425f57ab2501c257efd0fe4abe361974849fab3e54dd0e8f04d4d3c57a2d65"
-  },
+  "actual_candidate_disposition": "Native OUT6 candidate full process completed rc0. Actual GO-2026-5932 reported for golang.org/x/crypto0.57.0 in go.mod and example/go.mod, with no function symbols; strict advisory-only block and native-rc contradiction refusal remain mandatory. No clean/accepted gate claim. No baseline-existing or called:false waiver. Fresh exact successor candidate/baseline full source executions remain required.",
+  "actual_proof": "163 controls PASS/25.240s/exit0, including real aggregate/perprocess deadline killing only the owned unreaped child; metadata and finding controls unchanged. Actual prior candidate completed all14 Go protocols rc0/parser accepted, then hit overall600s during native full scanner. All3545 exact Git sourcefiles unchanged at closeout. Fresh complete candidate/baseline scans with finite1800s aggregate and720s native scanner pending; no clean verdict.",
+  "base": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
+  "capture": "Producer captures bounded JSON stdout into fresh out-of-root results.json; no supplier-controlled report file writer.",
+  "classification_evidence": "OUT6 candidate81b9b1df completed all14 independent Go analyses and full native scanner rc0 across16 inputs, then predecessor checker rejected missing GHSA-92cp-5422-2mw7. Raw record has no Go symbols and an ECOSYSTEM-only slice; pinned x/vuln Affects interprets that slice as every version and absent symbols as all functions, producing777 example/798 main function traces. Authenticated native package-version evaluator reports no Redis advisory at9.21.0. Canonical GO-2025-3540 raw symbol metadata and boundaries remain independent. Successor controls replay complete streams/report only as test evidence; fresh actual head/base full producer executions remain required.",
   "compiler": "actual Go1.27.2 first PATH; GOTOOLCHAIN=local; default Linux/amd64 source selection; CGO disabled; no application execution",
-  "scanner_args": [
-    "scan",
-    "source",
-    "--offline",
-    "--no-resolve",
-    "--local-db-path=<trusted base>",
-    "--all-packages",
-    "--call-analysis=go",
-    "--config=<producer-owned explicit override>",
-    "--format=json",
-    "-L <each exact lockfile>"
-  ],
   "configuration": "ScanGoModVersion = true\nGoVersionOverride = \"1.27.2\"\n",
+  "database_acquisition": [
+    {
+      "actual_loader_path": "<base>/osv-scalibr/Go/all.zip",
+      "max_receipt_age_seconds": 86400,
+      "payload": "Fixed ecosystem/archive path only; no project identity, package list, version, hash, source, credential or commit payload",
+      "provenance": "TLS/GCS generation and SHA256 frozen by trusted acquisition; not a signature",
+      "url": "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip"
+    },
+    {
+      "actual_loader_path": "<base>/osv-scalibr/npm/all.zip",
+      "max_receipt_age_seconds": 86400,
+      "payload": "Fixed ecosystem/archive path only; no project identity, package list, version, hash, source, credential or commit payload",
+      "provenance": "TLS/GCS generation and SHA256 frozen by trusted acquisition; not a signature",
+      "url": "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip"
+    }
+  ],
+  "database_schema": "Known OSV1.0\u20131.9; retain mixed ecosystems, Git-only and withdrawn records. Active requested package without explicit versions or usable SEMVER/ECOSYSTEM ranges is recorded unknown; a matching scanned name or wildcard refuses before analysis/scanner execution. Supplemental package-less Git entries and named Git entries with package-version evidence remain retained.",
+  "database_status": "Actual fixed Go/npm archives acquired under approved public fixed URLs with exact generation/ETag/SHA256 receipts. Both fully validated under isolated compatibility source. Active versionless faker.js advisory retained; zero matching package names in frozen head inventory. Freshness/hosted/source/head-base full acceptance remains mandatory.",
+  "failure_disposition": "Incomplete/missing/malformed/stale/unsupported/partial/no-analysis/cancelled/exit mismatch -> fail. Any complete candidate called Go finding or npm/advisory-only finding -> fail even if baseline contains it. Only explicitly symbol-aware Go called:false with independent completed matching evidence may clear; retain it in raw JSON.",
+  "finite_baseline_subject": "Manual validation only: pristine baseline2fcb archive plus exact four fixture metadata replacement patch9785/derivedtreeABC. Original/derived declared inventories remain distinct; original root2native1 adverse evidence retained. All14Go+2npm native symbol/full source analysis and candidatefinding policy remain mandatory; no normal-event or release admission.",
+  "go_mod_h1": "3XUKJWYB7D2fWvFDMTZg9OBrlCEf/WBGZVc4IFjTljs=",
   "go_override_reason": "Bind standard-library vulnerability identity to the actual selected compiler, not the go.mod minimum; independently verify actual protocol/version. No ignores or version waivers.",
+  "head": "81b9b1df2386f7d44c8464c999a4ea0919813526",
   "inputs": [
     ".github/workflows/policytool/go.mod",
     "cmd/wfctl/testdata/conformance/iac-hang/go.mod",
@@ -46,80 +53,76 @@
     "go.mod",
     "ui/package-lock.json"
   ],
-  "head": "81b9b1df2386f7d44c8464c999a4ea0919813526",
-  "base": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
+  "linux_amd64_pins": {
+    "govulncheck": "55425f57ab2501c257efd0fe4abe361974849fab3e54dd0e8f04d4d3c57a2d65",
+    "osv-reporter": "d148474ac6f4a407a369544e18a96f2d900e6c0a8309b5255cd3b4b4c2a198eb",
+    "osv-scanner": "c810df66004c75f734eb4502ea5ff44115e4e3444e18d8b38bd87ff33094d69d"
+  },
+  "memory_lifetime_contract": "Complete authenticated Go/npm database validation and full Go export in a bounded trusted Python child; successful owned reap before any native source analysis. Parent retains small exact source contracts/owned hashed captures, never complete Go dictionary or npm ID index during govulncheck/full OSV children. Deferred strict source/SBOM/protocol/raw metadata/finding joins after all native children; no partial completion or advisory waiver. Existing quotas, Go flags, roots, symbol level, deadlines and database/stream limits unchanged.",
+  "memory_measurement_contract": "Bounded O_NOFOLLOW reads under exact owned private cgroup witness: memory.current, memory.peak, selected memory.stat bytes, manager VmRSS/RssAnon, raw counter/hash joins before/after database/native/final validation phases. Child validation receipt records actual counts, explicitly shallow dictionary/key sizes and observed memory. accepted:false; aggregate OOM increments cannot identify kernel victim PID. Source controls use explicit mocks and do not supply hosted statistics or acceptance.",
+  "module_h1": "hqtNLANWaKcqOC6znJX8J/23PtzV82RX23oMS9/ab4I=",
   "network_during_scanning": "No API queries/resolution/download fallback. GOPROXY=off GOSUMDB=off GOENV=off GOWORK=off GOTOOLCHAIN=local GOVCS=*:off GOPRIVATE=empty GONOPROXY=none GONOSUMDB=none GOFLAGS=-mod=readonly. Trusted runner must enforce no outbound network; flags alone are not an OS firewall proof.",
-  "database_acquisition": [
-    {
-      "url": "https://osv-vulnerabilities.storage.googleapis.com/Go/all.zip",
-      "payload": "Fixed ecosystem/archive path only; no project identity, package list, version, hash, source, credential or commit payload",
-      "provenance": "TLS/GCS generation and SHA256 frozen by trusted acquisition; not a signature",
-      "max_receipt_age_seconds": 86400,
-      "actual_loader_path": "<base>/osv-scalibr/Go/all.zip"
-    },
-    {
-      "url": "https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip",
-      "payload": "Fixed ecosystem/archive path only; no project identity, package list, version, hash, source, credential or commit payload",
-      "provenance": "TLS/GCS generation and SHA256 frozen by trusted acquisition; not a signature",
-      "max_receipt_age_seconds": 86400,
-      "actual_loader_path": "<base>/osv-scalibr/npm/all.zip"
-    }
+  "origin_commit": "e840a6e8adb14b7777c78e26cfbf6e2abc1d1fc6",
+  "outputs": "Raw baseline/candidate JSON, independent protocol/stdout/stderr/exits, input/database/supplier/source hash receipts, full-candidate finding gate, differential SARIF presentation. GitHub artifacts retain 5 days; code scanning has separate lifecycle; no source files or credentials uploaded.",
+  "patch": [
+    "go 1.27.2",
+    "golang.org/x/net v0.60.0; append authenticated two sum rows; retain all original rows"
   ],
-  "database_status": "Actual fixed Go/npm archives acquired under approved public fixed URLs with exact generation/ETag/SHA256 receipts. Both fully validated under isolated compatibility source. Active versionless faker.js advisory retained; zero matching package names in frozen head inventory. Freshness/hosted/source/head-base full acceptance remains mandatory.",
+  "producer_python": "Python >=3.11; actual local 3.14.6; compatible RFC3339 submicrosecond parsing; hosted actual version admission required",
+  "protocol_projection": {
+    "authoritative_called_boundary": "Independent function traces become authoritative called findings only after exact trusted module/SBOM inventory and emitted-to-complete-raw typed metadata joins, for the exact Go ecosystem/module/advisory ID having nonempty supported raw imports symbols anywhere across every same-module slice. Unsupported symbol semantics remain strict before classification. No-symbol traces are retained as unverified diagnostic observations with module, advisory ID and count; they do not establish package-version applicability or an uncalled/clean result. Every advisory-only finding actually reported by the authenticated native OSV engine still blocks, including called:false and baseline-existing findings. No new SemVer evaluator, advisory ID allowlist, alias waiver or metadata normalization.",
+    "contextual_custom_ranges": "Only recognized, shape-validated ECOSYSTEM custom_ranges omitted by pinned Go Entry can be dropped from the typed expected serialization for an exact absent Go module identity. Trusted producer forms a conservative union of scanned manifest names, every original and effective manifest/replacement identity, every original and effective source module identity, and validated source/SBOM names after exact Counter join. Default comparator/parser without trusted context rejects. No /v9 stripping, prefix matching, import-path inference, SemVer waiver or raw scanner metadata normalization. Unsupported symbol semantics remain strict across all Go slices.",
+    "invariants": "Full raw metadata retained. Missing/contradictory supported Go typed fields reject. Timestamp comparison uses exact ASCII RFC3339/nanosecond identity. Unsupported version/range semantics reject on any Go package with symbols anywhere in the full raw advisory, across slice order/OS/architecture. Known typed omissions on wholly advisory-only Go and foreign slices cannot clear any Go finding; unknown fields reject. Every reported Go advisory must match full raw DB before classification. No baseline finding waiver.",
+    "purpose": "Only parse_analysis compares actual Go typed serialization; full OSV raw advisory comparison remains strict.",
+    "source_sha256": "21c84d472d9fd70b4642f968bf86c8470980a232071908103a9eda0f307f2b77",
+    "supplier": "golang.org/x/vuln@v1.6.0/internal/osv/osv.go",
+    "trust_limit": "The authenticated pinned OSV engine remains the package-version applicability evaluator. Independent Go protocol is not an advisory-only presence oracle; raw metadata joins validate reported advisories, and missing-advisory control proves independently called finding conservation."
+  },
+  "public_project_preload": "Separately approved trusted public Go module path/version list bound to head/base go.mod/go.sum; authenticate checksums through official proxy/sumdb, forbid direct VCS/private fallback; then close network. No npm install or npm registry request required for lockfile inventory.",
   "public_supplier_acquisition": [
     "proxy.golang.org: exact supplier/toolchain/dependency module paths and versions",
     "sum.golang.org: public module checksum records",
     "storage.googleapis.com: official public Go proxy blob redirect",
     "go.dev/dl.golang.org: exact official Go1.27.2 compiler asset if existing setup-go needs it"
   ],
-  "public_project_preload": "Separately approved trusted public Go module path/version list bound to head/base go.mod/go.sum; authenticate checksums through official proxy/sumdb, forbid direct VCS/private fallback; then close network. No npm install or npm registry request required for lockfile inventory.",
-  "outputs": "Raw baseline/candidate JSON, independent protocol/stdout/stderr/exits, input/database/supplier/source hash receipts, full-candidate finding gate, differential SARIF presentation. GitHub artifacts retain 5 days; code scanning has separate lifecycle; no source files or credentials uploaded.",
-  "failure_disposition": "Incomplete/missing/malformed/stale/unsupported/partial/no-analysis/cancelled/exit mismatch -> fail. Any complete candidate called Go finding or npm/advisory-only finding -> fail even if baseline contains it. Only explicitly symbol-aware Go called:false with independent completed matching evidence may clear; retain it in raw JSON.",
-  "actual_proof": "163 controls PASS/25.240s/exit0, including real aggregate/perprocess deadline killing only the owned unreaped child; metadata and finding controls unchanged. Actual prior candidate completed all14 Go protocols rc0/parser accepted, then hit overall600s during native full scanner. All3545 exact Git sourcefiles unchanged at closeout. Fresh complete candidate/baseline scans with finite1800s aggregate and720s native scanner pending; no clean verdict.",
-  "activation_gates": [
-    "Explicit permission for exact Workflow head/base profile and public module preload/DB acquisition/data destinations",
-    "Trusted hosted producer/bootstrap plus lawful protected scanner transition and unchanged genuine required checks",
-    "Complete effective protection/nonrequired fixture attestation",
-    "Current source CI, inspected released fixed Linux wfctl and Compute quiet-window/identity/runtime attestations"
-  ],
-  "capture": "Producer captures bounded JSON stdout into fresh out-of-root results.json; no supplier-controlled report file writer.",
+  "resource_adjustment_evidence": "Actual candidate81b9b1df at OUT5 completed all14 independent Go analyses, including real Redis custom-range compatibility and main root, then hit overall600s during pinned native full scanner. Pinned source pkg/osvscanner/vulnerability_result.go:172 serially calls sourceanalysis for grouped Go sources. Raise finite aggregate budget1800s and only native full-scanner subprocess720s; individual source analysis240s, manifest30s, CPU2/GOMEMLIMIT768MiB and all byte/database/source/network/identity/finding limits unchanged. No original proof reuse; fresh head/base source runs required.",
   "resource_envelope": {
-    "total_seconds": 1800,
-    "per_process_seconds": 240,
-    "manifest_parse_seconds": 30,
-    "stdout_bytes": 16777216,
-    "stderr_bytes": 4194304,
     "aggregate_output_bytes": 134217728,
-    "source_regular_files": 10000,
-    "source_entries": 20000,
-    "source_total_bytes": 1073741824,
-    "source_per_file_bytes": 33554432,
+    "cleanup": "Track successful reap immediately; never signal or wait again after reap. Kill only the producer-owned unreaped child group on failure. Check the shared deadline after final receipt write/mode before completion return. Hosted OS memory/network boundary remains a separate admission gate.",
     "database_archive_bytes": {
       "Go": 134217728,
       "npm": 268435456
     },
+    "database_decoded_Go_bytes": 67108864,
+    "database_decoded_npm_bytes": 536870912,
+    "database_member_bytes": 2097152,
     "database_members": {
       "Go": 200000,
       "npm": 262144
     },
-    "database_member_bytes": 2097152,
-    "database_decoded_Go_bytes": 67108864,
-    "database_decoded_npm_bytes": 536870912,
-    "cleanup": "Track successful reap immediately; never signal or wait again after reap. Kill only the producer-owned unreaped child group on failure. Check the shared deadline after final receipt write/mode before completion return. Hosted OS memory/network boundary remains a separate admission gate.",
-    "native_full_scanner_seconds": 720
+    "manifest_parse_seconds": 30,
+    "native_full_scanner_seconds": 720,
+    "per_process_seconds": 240,
+    "source_entries": 20000,
+    "source_per_file_bytes": 33554432,
+    "source_regular_files": 10000,
+    "source_total_bytes": 1073741824,
+    "stderr_bytes": 4194304,
+    "stdout_bytes": 16777216,
+    "total_seconds": 1800
   },
-  "producer_python": "Python >=3.11; actual local 3.14.6; compatible RFC3339 submicrosecond parsing; hosted actual version admission required",
-  "database_schema": "Known OSV1.0\u20131.9; retain mixed ecosystems, Git-only and withdrawn records. Active requested package without explicit versions or usable SEMVER/ECOSYSTEM ranges is recorded unknown; a matching scanned name or wildcard refuses before analysis/scanner execution. Supplemental package-less Git entries and named Git entries with package-version evidence remain retained.",
-  "protocol_projection": {
-    "supplier": "golang.org/x/vuln@v1.6.0/internal/osv/osv.go",
-    "source_sha256": "21c84d472d9fd70b4642f968bf86c8470980a232071908103a9eda0f307f2b77",
-    "purpose": "Only parse_analysis compares actual Go typed serialization; full OSV raw advisory comparison remains strict.",
-    "invariants": "Full raw metadata retained. Missing/contradictory supported Go typed fields reject. Timestamp comparison uses exact ASCII RFC3339/nanosecond identity. Unsupported version/range semantics reject on any Go package with symbols anywhere in the full raw advisory, across slice order/OS/architecture. Known typed omissions on wholly advisory-only Go and foreign slices cannot clear any Go finding; unknown fields reject. Every reported Go advisory must match full raw DB before classification. No baseline finding waiver.",
-    "trust_limit": "The authenticated pinned OSV engine remains the package-version applicability evaluator. Independent Go protocol is not an advisory-only presence oracle; raw metadata joins validate reported advisories, and missing-advisory control proves independently called finding conservation.",
-    "contextual_custom_ranges": "Only recognized, shape-validated ECOSYSTEM custom_ranges omitted by pinned Go Entry can be dropped from the typed expected serialization for an exact absent Go module identity. Trusted producer forms a conservative union of scanned manifest names, every original and effective manifest/replacement identity, every original and effective source module identity, and validated source/SBOM names after exact Counter join. Default comparator/parser without trusted context rejects. No /v9 stripping, prefix matching, import-path inference, SemVer waiver or raw scanner metadata normalization. Unsupported symbol semantics remain strict across all Go slices.",
-    "authoritative_called_boundary": "Independent function traces become authoritative called findings only after exact trusted module/SBOM inventory and emitted-to-complete-raw typed metadata joins, for the exact Go ecosystem/module/advisory ID having nonempty supported raw imports symbols anywhere across every same-module slice. Unsupported symbol semantics remain strict before classification. No-symbol traces are retained as unverified diagnostic observations with module, advisory ID and count; they do not establish package-version applicability or an uncalled/clean result. Every advisory-only finding actually reported by the authenticated native OSV engine still blocks, including called:false and baseline-existing findings. No new SemVer evaluator, advisory ID allowlist, alias waiver or metadata normalization."
-  },
-  "resource_adjustment_evidence": "Actual candidate81b9b1df at OUT5 completed all14 independent Go analyses, including real Redis custom-range compatibility and main root, then hit overall600s during pinned native full scanner. Pinned source pkg/osvscanner/vulnerability_result.go:172 serially calls sourceanalysis for grouped Go sources. Raise finite aggregate budget1800s and only native full-scanner subprocess720s; individual source analysis240s, manifest30s, CPU2/GOMEMLIMIT768MiB and all byte/database/source/network/identity/finding limits unchanged. No original proof reuse; fresh head/base source runs required.",
-  "classification_evidence": "OUT6 candidate81b9b1df completed all14 independent Go analyses and full native scanner rc0 across16 inputs, then predecessor checker rejected missing GHSA-92cp-5422-2mw7. Raw record has no Go symbols and an ECOSYSTEM-only slice; pinned x/vuln Affects interprets that slice as every version and absent symbols as all functions, producing777 example/798 main function traces. Authenticated native package-version evaluator reports no Redis advisory at9.21.0. Canonical GO-2025-3540 raw symbol metadata and boundaries remain independent. Successor controls replay complete streams/report only as test evidence; fresh actual head/base full producer executions remain required.",
-  "actual_candidate_disposition": "Native OUT6 candidate full process completed rc0. Actual GO-2026-5932 reported for golang.org/x/crypto0.57.0 in go.mod and example/go.mod, with no function symbols; strict advisory-only block and native-rc contradiction refusal remain mandatory. No clean/accepted gate claim. No baseline-existing or called:false waiver. Fresh exact successor candidate/baseline full source executions remain required."
+  "scanner_args": [
+    "scan",
+    "source",
+    "--offline",
+    "--no-resolve",
+    "--local-db-path=<trusted base>",
+    "--all-packages",
+    "--call-analysis=go",
+    "--config=<producer-owned explicit override>",
+    "--format=json",
+    "-L <each exact lockfile>"
+  ],
+  "status": "LOCAL AUTHORITATIVE-SYMBOL BOUNDARY SUCCESSOR; EXACT INDEPENDENT REVIEW PENDING; NO AUTOMATIC INSTALLATION AUTHORITY",
+  "supplier": "github.com/google/osv-scanner/v2@v2.6.0"
 }

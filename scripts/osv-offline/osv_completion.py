@@ -291,12 +291,20 @@ def _object(pairs):
     return out
 
 
-def read_report(path):
+def parse_report_text(text):
+    """Parse the exact authenticated native buffer with unchanged strict hooks."""
     try:
-        return json.loads(Path(path).read_text(), object_pairs_hook=_object,
+        return json.loads(text, object_pairs_hook=_object,
                           parse_constant=lambda value: (_ for _ in ()).throw(
                               IncompleteScan('invalid JSON constant: ' + value)))
-    except (OSError, json.JSONDecodeError) as error:
+    except json.JSONDecodeError as error:
+        raise IncompleteScan('missing or malformed scanner report') from error
+
+
+def read_report(path):
+    try:
+        return parse_report_text(Path(path).read_text())
+    except OSError as error:
         raise IncompleteScan('missing or malformed scanner report') from error
 
 
