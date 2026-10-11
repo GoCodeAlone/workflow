@@ -18,8 +18,8 @@ for helper in run.py bootstrap-manifest.json; do
     exit 2
   fi
 done
-runner_sha256='aaddbfd9e20cfe705da50fc7d6d343298a7f1eff5611b6d6d1ebf87a7781f911'
-manifest_sha256='bd66229470c06e769a56b48106bf552e0cbc783c4779fc19c54cae86934ed209'
+runner_sha256='d6092005254efe9dd7c7bbace1a3e9718eff5f8dea4c8f850ccac1a48af1196d'
+manifest_sha256='afe0c122f518ec12c2b713e001765ec8d9c7535b8b394c0186675dab57be6390'
 if [[ ! "$runner_sha256" =~ ^[0-9a-f]{64}$ || ! "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]]; then
   echo "offline scanner installation is unapproved and preparation hashes are unresolved" >&2
   exit 2

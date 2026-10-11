@@ -4,6 +4,12 @@ name: "Copilot Setup Steps"
 # allow manual testing through the repository's "Actions" tab
 on:
   workflow_dispatch:
+    inputs:
+      osv_privileged_proof:
+        description: 'Run the separately authorized ephemeral systemd prerequisite proof'
+        type: boolean
+        required: false
+        default: false
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
@@ -69,7 +75,7 @@ jobs:
   # Temporary, separately reviewed prerequisite-only execution on an owned ref.
   # Main workflows, required checks and the legacy OSV workflow are unchanged.
   osv-runtime-prerequisite:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+    if: github.event_name == 'workflow_dispatch' && inputs.osv_privileged_proof == true && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -87,7 +93,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/supply-bubblewrap.py)"
-          test "${actual%% *}" = f9c73572a789eb4aaee7051281bbf594392ace2a5914026cd868866378326f80
+          test "${actual%% *}" = 72d3b656c61ba966c13bae1c5ff09405f88f378bbe2e64116a49c87832592183
           supplier_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-ubuntu-bubblewrap-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-supplier-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$supplier_dir" >> "$GITHUB_OUTPUT"
@@ -100,7 +106,7 @@ jobs:
             ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
             scripts/osv-offline/supply-bubblewrap.py "$supplier_dir"
-      - name: Probe exact R4 Linux facilities with the authenticated temporary tool
+      - name: Probe the reviewed boundary in one bounded delegated transient service
         if: steps.supplier.outcome == 'success'
         id: proof
         continue-on-error: true
@@ -109,20 +115,21 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          actual="$(/usr/bin/sha256sum scripts/osv-offline/prove-runtime.py)"
-          test "${actual%% *}" = 7c81e5ada833caa4fe46abfb38bc3aadc6ff04077bd44b1349ea3ae5a7a69cb4
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/run-systemd-proof.py)"
+          test "${actual%% *}" = 4ea996697b23c8ae63eeb13251f401c344ae4694b17221e8388866cae788c2d9
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-prerequisite-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
-          /usr/bin/timeout --signal=TERM --kill-after=10s 150s /usr/bin/env -i \
+          /usr/bin/timeout --signal=TERM --kill-after=10s 240s /usr/bin/env -i \
             PATH=/usr/bin:/bin LANG=C LC_ALL=C RUNNER_TEMP="$RUNNER_TEMP" \
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" \
+            GITHUB_REF="$GITHUB_REF" \
             GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
             GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_JOB="$GITHUB_JOB" \
             RUNNER_OS="$RUNNER_OS" RUNNER_ARCH="$RUNNER_ARCH" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
             ImageOS="${ImageOS-}" ImageVersion="${ImageVersion-}" \
             /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
-            scripts/osv-offline/prove-runtime.py "$proof_dir" \
+            scripts/osv-offline/run-systemd-proof.py "$proof_dir" --execute \
             --bubblewrap "$BUBBLEWRAP_SUPPLIER_DIR/bwrap" \
             --supplier-receipt "$BUBBLEWRAP_SUPPLIER_DIR/bubblewrap-supplier-receipt.json"
       - name: Retain bounded official-package prerequisite evidence

@@ -96,12 +96,12 @@ def trusted():
     if manifest.get('version') != 1:
         raise Refusal('unsupported bootstrap manifest')
     for name, expected in manifest['trusted_files'].items():
-        if name not in {'osv_producer.py', 'osv_trusted.py', 'osv_completion.py', 'osv_io.py', 'scanner-profile.json'}:
+        if name not in {'osv_producer.py', 'osv_trusted.py', 'osv_completion.py', 'osv_io.py', 'osv_cgroup.py', 'scanner-profile.json'}:
             raise Refusal('unknown trusted source path')
         regular(HERE / name)
         if not SHA.fullmatch(expected) or digest(HERE / name) != expected:
             raise Refusal('reviewed source/profile hash mismatch')
-    if set(manifest['trusted_files']) != {'osv_producer.py', 'osv_trusted.py', 'osv_completion.py', 'osv_io.py', 'scanner-profile.json'}:
+    if set(manifest['trusted_files']) != {'osv_producer.py', 'osv_trusted.py', 'osv_completion.py', 'osv_io.py', 'osv_cgroup.py', 'scanner-profile.json'}:
         raise Refusal('incomplete trusted source inventory')
     inventory = HERE / 'public-module-preload-inventory.json'
     if digest(inventory) != manifest['public_preload_inventory_sha256']:
@@ -514,13 +514,45 @@ def step_scan_identity(label):
         raise Refusal('actual current scan step did not finish successfully')
     return token
 
-def release_group(group, parent):
+def cgroup_helpers():
+    trusted()  # The new topology helper is pinned before any import/query.
+    import osv_cgroup
+    return osv_cgroup
+
+def close_input():
+    # Bind fd0 before any child spawn. This also closes the input forwarded by
+    # systemd-run --pipe and the stdin inherited by the namespace worker.
+    before = os.lstat('/dev/null')
+    fd = os.open('/dev/null', os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(fd)
+        identity = lambda info: (info.st_dev, info.st_ino, info.st_rdev, info.st_uid)
+        if (not stat.S_ISCHR(before.st_mode) or not stat.S_ISCHR(opened.st_mode) or
+                before.st_uid != 0 or identity(before) != identity(opened) or
+                (platform.system() == 'Linux' and opened.st_rdev != os.makedev(1, 3))):
+            raise Refusal('canonical null input device identity changed')
+        os.dup2(fd, 0, inheritable=True)
+        if identity(os.fstat(0)) != identity(opened):
+            raise Refusal('null input descriptor binding failed')
+    finally:
+        if fd != 0:
+            os.close(fd)
+
+def release_group(group, supervisor):
     # This group was exclusively created by this manager; workers cannot mount
     # its writable controls or move themselves elsewhere. Do not signal a reaped
     # PID/process group. The owned cgroup covers every remaining descendant.
-    (parent / 'cgroup.procs').write_text(str(os.getpid()))
-    if str(os.getpid()) not in (parent / 'cgroup.procs').read_text().splitlines():
+    if (supervisor.name != 'supervisor' or group.parent != supervisor.parent or
+            group.name != 'wf-osv-' + str(os.getpid()) or
+            group.is_symlink() or supervisor.is_symlink()):
+        raise Refusal('unbound owned cgroup cleanup')
+    # The controller-distributing root must stay empty. Restore the trusted
+    # manager to its recorded supervisor leaf, never to that root.
+    (supervisor / 'cgroup.procs').write_text(str(os.getpid()))
+    if str(os.getpid()) not in (supervisor / 'cgroup.procs').read_text().splitlines():
         raise Refusal('manager cgroup restoration failed')
+    if (group.parent / 'cgroup.procs').read_text().splitlines():
+        raise Refusal('delegated cgroup root became populated')
     descendants = bool((group / 'cgroup.procs').read_text().splitlines())
     if descendants:
         (group / 'cgroup.kill').write_text('1')
@@ -536,14 +568,25 @@ def release_group(group, parent):
 def enter_group(runtime):
     # Acceptance is hash-pinned by the reviewed trusted manifest, then each actual
     # worker must additionally witness kernel limits/namespace/socket denial.
-    cgroup_parent = Path(runtime['delegated_cgroup_parent'])
-    if str(cgroup_parent).startswith('/sys/fs/cgroup/') is False or cgroup_parent.is_symlink():
-        raise Refusal('unbound delegated kernel cgroup')
+    binding = cgroup_helpers().attest_unit()
+    cgroup_parent, supervisor = Path(binding['root']), Path(binding['supervisor'])
+    if (runtime.get('delegated_cgroup_parent') != str(cgroup_parent) or
+            runtime.get('delegated_supervisor') != str(supervisor)):
+        raise Refusal('runtime differs from the actual systemd root/supervisor binding')
+    if (cgroup_parent / 'cgroup.procs').read_text().splitlines():
+        raise Refusal('delegated cgroup root must remain empty')
+    if str(os.getpid()) not in (supervisor / 'cgroup.procs').read_text().splitlines():
+        raise Refusal('manager is outside the witnessed supervisor leaf')
+    if not {'memory', 'pids'} <= set((cgroup_parent / 'cgroup.controllers').read_text().split()):
+        raise Refusal('delegated root lacks approved controllers')
+    # This is the sole explicit controller activation, inside the attested NEW
+    # owned empty unit root. No ancestor or existing service is modified.
+    (cgroup_parent / 'cgroup.subtree_control').write_text('+memory +pids')
+    if set((cgroup_parent / 'cgroup.subtree_control').read_text().split()) != {'memory', 'pids'}:
+        raise Refusal('delegated controller activation readback differs')
     group = cgroup_parent / ('wf-osv-' + str(os.getpid()))
-    if str(os.getpid()) not in (cgroup_parent / 'cgroup.procs').read_text().splitlines():
-        raise Refusal('manager is outside the witnessed delegated parent cgroup')
     group.mkdir()
-    return group, cgroup_parent
+    return group, supervisor
 
 def worker_mounts(state, private, group, runtime):
     mounts = [(Path('/usr'), False), (Path('/lib'), False), (Path('/lib64'), False),

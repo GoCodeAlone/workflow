@@ -15,8 +15,8 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
-MANAGER_SHA = 'aaddbfd9e20cfe705da50fc7d6d343298a7f1eff5611b6d6d1ebf87a7781f911'
-MANIFEST_SHA = 'bd66229470c06e769a56b48106bf552e0cbc783c4779fc19c54cae86934ed209'
+MANAGER_SHA = 'd6092005254efe9dd7c7bbace1a3e9718eff5f8dea4c8f850ccac1a48af1196d'
+MANIFEST_SHA = 'afe0c122f518ec12c2b713e001765ec8d9c7535b8b394c0186675dab57be6390'
 PROFILE_SHA = '2deb233b43cf4fdc5babfe481c88bafe1bc8413062ea1e93041039e01b4c9997'
 IDENTITY = ('GITHUB_REPOSITORY', 'GITHUB_SHA', 'GITHUB_RUN_ID',
             'GITHUB_RUN_ATTEMPT', 'GITHUB_EVENT_NAME', 'GITHUB_JOB',
@@ -57,7 +57,7 @@ def manager():
     for name, expected in [('run.py', MANAGER_SHA), ('bootstrap-manifest.json', MANIFEST_SHA)]:
         p = HERE / name
         if not stat.S_ISREG(p.lstat().st_mode) or sha(p) != expected:
-            raise RuntimeError('frozen R4 source binding changed: ' + name)
+            raise RuntimeError('reviewed runtime source binding changed: ' + name)
     spec = importlib.util.spec_from_file_location('reviewed_runtime_boundary', HERE / 'run.py')
     result = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(result)
@@ -158,7 +158,7 @@ def supplied_bubblewrap(binary, receipt, manager):
 
 
 def prove(output, bubblewrap=None, supplier_receipt=None):
-    record = {'schema': 'workflow.offline-scanner.runtime-prerequisite-proof.v1',
+    record = {'schema': 'workflow.offline-scanner.runtime-prerequisite-proof.v2',
               'accepted': False, 'profile_sha256': PROFILE_SHA,
               'candidate_execution': False, 'scanner_execution': False,
               'runtime_boundary_pass': False, 'installation_admitted': False,
@@ -167,14 +167,17 @@ def prove(output, bubblewrap=None, supplier_receipt=None):
     started = time.monotonic()
     group = parent = None
     m = None
+    budget = None
+    cleanup_attempted = False
     stage = 'platform'
     tools = {}
     code = 2
     try:
         if platform.system() != 'Linux' or platform.machine() != 'x86_64' or sys.version_info < (3, 11):
             raise RuntimeError('actual Linux/x86_64 Python>=3.11 required')
-        stage = 'frozen-source-verification'
+        stage = 'reviewed-source-verification'
         m = manager()
+        m.close_input()
         _, _, _, Budget = m.trusted()
         budget = Budget(120)
         record['manager_sha256'] = MANAGER_SHA
@@ -198,16 +201,20 @@ def prove(output, bubblewrap=None, supplier_receipt=None):
                 raise RuntimeError('existing tool is not a regular file: ' + str(path))
             tools[name] = {'path': str(path), 'resolved_path': str(actual), 'sha256': sha(actual)}
         record['tools'] = tools
-        stage = 'existing-cgroup-delegation'
-        rows = Path('/proc/self/cgroup').read_text().splitlines()
-        unified = [line[3:] for line in rows if line.startswith('0::/')]
-        if len(unified) != 1 or '..' in Path(unified[0]).parts:
-            raise RuntimeError('one existing cgroup-v2 membership required')
-        current = Path('/sys/fs/cgroup') / unified[0].lstrip('/')
-        record['requested_delegated_parent'] = str(current)
-        # Uses exactly R4's existing-parent admission; no sudo, controller
-        # activation, chmod, parent migration, installation or fallback.
-        group, parent = m.enter_group({'delegated_cgroup_parent': str(current)})
+        stage = 'attested-systemd-delegation'
+        binding = m.cgroup_helpers().attest_unit()
+        record['delegation'] = binding
+        write(output / 'unit-attestation.json', {'schema': 'workflow.offline-scanner.unit-attestation.v1',
+              'identity': record['identity'], 'github_ref': os.environ.get('GITHUB_REF', ''),
+              'manager_sha256': MANAGER_SHA, 'launcher_sha256': record['launcher_sha256'],
+              'delegation': binding})
+        record['requested_delegated_parent'] = binding['root']
+        record['manager_supervisor'] = binding['supervisor']
+        # The outer launcher may create only the separately approved transient
+        # unit. This unprivileged manager activates controllers only within its
+        # attested empty root; membership/restoration uses the supervisor leaf.
+        group, parent = m.enter_group({'delegated_cgroup_parent': binding['root'],
+                                     'delegated_supervisor': binding['supervisor']})
         stage = 'kernel-quotas'
         limits = {'memory.max': '2147483648', 'memory.swap.max': '0', 'pids.max': '256'}
         for name, value in limits.items():
@@ -257,7 +264,13 @@ def prove(output, bubblewrap=None, supplier_receipt=None):
             raise RuntimeError('actual R4 kernel boundary probe failed; inspect bounded stderr')
         record['worker'] = json.loads((writable / 'child-proof.json').read_text())
         stage = 'owned-cleanup-and-recheck'
+        cleanup_attempted = True
         m.release_group(group, parent)
+        record['owned_worker_removed'] = not group.exists()
+        record['manager_restored_to_supervisor'] = str(os.getpid()) in (parent / 'cgroup.procs').read_text().splitlines()
+        record['delegated_root_empty'] = not (parent.parent / 'cgroup.procs').read_text().splitlines()
+        if not all(record[key] for key in ('owned_worker_removed', 'manager_restored_to_supervisor', 'delegated_root_empty')):
+            raise RuntimeError('owned cgroup cleanup readback differs')
         group = None
         m.trusted()
         for row in tools.values():
@@ -274,7 +287,7 @@ def prove(output, bubblewrap=None, supplier_receipt=None):
         record['failure'] = {'stage': stage, 'type': type(e).__name__,
                              'message': str(e)[:2048], 'errno': getattr(e, 'errno', None)}
     finally:
-        if group is not None:
+        if group is not None and not cleanup_attempted:
             try:
                 m.release_group(group, parent)
             except Exception as e:
@@ -285,6 +298,13 @@ def prove(output, bubblewrap=None, supplier_receipt=None):
         # A kernel proof is only one prerequisite. It deliberately cannot pass
         # R4's five-receipt installation admission, even if every probe passed.
         write(output / 'runtime-prerequisite-proof.json', record)
+        # A receipt remains provisional until the actual current service exits
+        # successfully. Closing/fsyncing this file cannot bypass its deadline.
+        if budget is not None:
+            try:
+                budget.left()
+            except Exception:
+                code = 2
     return code
 
 

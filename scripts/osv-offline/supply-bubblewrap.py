@@ -18,7 +18,7 @@ import tempfile
 from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
-PROOF_SHA = '7c81e5ada833caa4fe46abfb38bc3aadc6ff04077bd44b1349ea3ae5a7a69cb4'
+PROOF_SHA = '9ce3a0db7df0a6df5010ccde48208e1b1f6a852f0666203706973dc9205cbcd3'
 SHA = re.compile(r'^[0-9a-f]{64}$')
 VERSION = re.compile(r'^[0-9][0-9A-Za-z.+~:-]{0,100}$')
 

@@ -10,7 +10,7 @@
   "linux_tools": {
     "bubblewrap_path": "/usr/bin/bwrap",
     "bubblewrap_sha256": null,
-    "cgroup_parent": "runner-provided delegated cgroup2 required; exact admission pending",
+    "cgroup_parent": "One separately authorized ephemeral systemd unit with empty delegated root and supervisor leaf; exact admission pending",
     "python_path": "/usr/bin/python3",
     "python_sha256": null
   },
@@ -23,9 +23,10 @@
   "resource_contract": "Exact M profile inherits reviewed standalone L total1800/native720/source240/manifest30 envelope. Actual hosted job timing/OS/supplier admission remains separate and unbound; no production timeout approval transfers.",
   "reviewed_protocol_binding_sha256": "4197aa92770c04bbf8e349cc3672b02fae157ebbf28da816773414861dbb888f",
   "source_object_delivery_acceptance_sha256": null,
-  "status": "LOCAL R3 BUGFIX PREPARATION; HOSTED/SUPPLIER/OBJECT DELIVERY/INSTALL ACCEPTANCE HOLD",
+  "status": "LOCAL SYSTEMD PREREQUISITE SOURCE PREPARATION; HOSTED/OBJECT DELIVERY/INSTALL ACCEPTANCE HOLD",
   "supplier_delivery_receipt_sha256": null,
   "trusted_files": {
+    "osv_cgroup.py": "cadedf04046ddeda7b190994d625f303fe97bfec8866ff364b73b5f648f865ba",
     "osv_completion.py": "ed53e247af358c187058c73f4052f181bb41864ec3b4a6fb2643cc5ec60aa937",
     "osv_io.py": "10fe83ba3608e73d198509ec7002c2db330a3b091964d6f1a752e835ec07b96b",
     "osv_producer.py": "055df30c58d14d780fe4b5e5869480bea2cfea6728985e81d70f22fed273f7f1",
