@@ -126,7 +126,7 @@ def run(output, supplier_root, compiler_root, gopath, module_cache, build_cache)
                     source = private/name
                     if source.exists():
                         m.regular(source);shutil.copyfile(source,target/name);(target/name).chmod(0o600)
-            for name in ('prepared.json','public-database-receipts.json','public-module-preload-receipt.json'):
+            for name in ('prepared.json','public-database-receipts.json','public-module-preload-receipt.json','application-metadata-receipt.json'):
                 source = state/name
                 if source.exists():
                     m.regular(source);shutil.copyfile(source,output/name);(output/name).chmod(0o600)

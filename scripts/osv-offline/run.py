@@ -40,7 +40,7 @@ MAX_JSON = 16 * 1024 * 1024
 TRUSTED_FILES = {'run.py', 'osv_producer.py', 'osv_trusted.py', 'osv_completion.py',
     'osv_io.py', 'scanner-profile.json', 'osv_container.py', 'container-worker.py',
     'container-seccomp.json', 'manual-proof-plan.json', 'run-production-proof.py', 'prepare-supplier.py'}
-TRUSTED_FILES.add('osv_supplier.py')
+TRUSTED_FILES.update({'osv_supplier.py', 'application-metadata-catalog.json'})
 MANUAL_PHASES = {'prepare-differential', 'scan-baseline', 'scan-candidate', 'report-differential', 'gate-differential'}
 CORE_FIELDS = {'trusted_files', 'linux_pins', 'public_preload_inventory_sha256',
     'prepared_source_refs', 'resource_contract', 'reviewed_protocol_binding_sha256',
@@ -449,13 +449,95 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, ma
                 elif filename == 'go.mod' or name in allowed:
                     raise Refusal('required source module declaration is missing')
     preload_public_modules(inventory, go, state, env(go, state, runtime, online=True), bounded_run, prepare_budget)
+    metadata_sha = preload_application_metadata(state, sources, profile, runtime, prepare_budget)
     db = databases(state, profile, prepare_budget)
     write_completion(state / 'prepared.json', {'complete': True, 'sources': sources, 'databases': db,
+        'application_metadata_receipt_sha256': metadata_sha,
         'profile_sha256': manifest['trusted_files']['scanner-profile.json'],
         'supplier_pins': runtime['supplier_pins'], 'compiler_sha256': runtime['compiler_sha256'],
         'event': event, 'automatic_admission': not manual,
         'bootstrap_manifest_sha256': digest(HERE / 'bootstrap-manifest.json'),
         'created_at': datetime.now(timezone.utc).isoformat()}, prepare_budget)
+
+
+def application_metadata_supplier():
+    # Already hash-bound by trusted(); import only the existing approved supplier
+    # receiver primitives, never its CLI/build/download orchestration.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('application_mod_receiver', HERE / 'prepare-supplier.py')
+    module = importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    return module
+
+def application_metadata_rows(state, sources, profile, receiver):
+    catalog_path = HERE / 'application-metadata-catalog.json'
+    if digest(catalog_path) != '13a73207ad91ef10c6279cf714cbb758c75116261b345c599275789dacef0ee5':
+        raise Refusal('application metadata catalog changed')
+    rows = load(catalog_path); catalog = {}
+    if not isinstance(rows, list) or len(rows) != 576:
+        raise Refusal('application metadata catalog count differs')
+    for row in rows:
+        if (not isinstance(row, dict) or set(row) != {'module','version','go_mod_h1'} or
+            not receiver.MODULE.fullmatch(row['module']) or not receiver.VERSION.fullmatch(row['version']) or
+            not receiver.H1.fullmatch(row['go_mod_h1']) or
+            not all(p and p not in {'.','..'} for p in row['module'].split('/'))):
+            raise Refusal('application metadata identity differs')
+        identity = row['module'], row['version']
+        if identity in catalog:raise Refusal('duplicate application metadata identity')
+        catalog[identity] = row['go_mod_h1']
+    required = {}; declarations = {}
+    for label, source in sources.items():
+        root = state / (label + '-source')
+        for name in sorted({str(PurePosixPath(p).with_name('go.sum')) for p in profile['inputs'] if p.endswith('go.mod')}):
+            if name not in source['files']:continue
+            path = root / name;regular(path)
+            if digest(path) != source['files'][name]['sha256']:
+                raise Refusal('application metadata source sum changed')
+            declarations[label + '/' + name] = digest(path)
+            for line in path.read_text().splitlines():
+                pieces = line.split()
+                if len(pieces) != 3:raise Refusal('invalid application checksum row')
+                module, version, h1 = pieces
+                if not version.endswith('/go.mod'):continue
+                identity = module, version[:-7]
+                if catalog.get(identity) != h1 or identity in required and required[identity] != h1:
+                    raise Refusal('application metadata is outside reviewed exact source sums')
+                required[identity] = h1
+    if not required or set(sources) == {'baseline','candidate'} and required != catalog:
+        raise Refusal('application metadata complete source union differs')
+    return [[module, version, h1] for (module, version), h1 in sorted(required.items())], declarations
+
+def preload_application_metadata(state, sources, profile, runtime, budget):
+    receiver = application_metadata_supplier()
+    rows, declarations = application_metadata_rows(state, sources, profile, receiver)
+    # Same standard allocated cache, fixed .mod-only TLS receiver and source H1.
+    # Existing MAX_JSON bounds the extra aggregate bytes; shared deadline unchanged.
+    cache = receiver.canonical(Path(runtime['existing_module_cache']), True)
+    result = {'schema':'workflow.offline-scanner.application-metadata.v1',
+        'complete':False, 'accepted':False, 'conserved':False, 'records':[],
+        'catalog_sha256':digest(HERE / 'application-metadata-catalog.json'),
+        'catalog_count':576, 'selected_count':len(rows), 'source_sums':declarations,
+        'source_refs':{label:source['commit'] for label,source in sources.items()},
+        'metadata_only':True, 'extra_zip_acquisition':False}
+    path = state / 'application-metadata-receipt.json'
+    try:
+        result['bytes'] = receiver.preload_metadata(rows, cache, budget, result['records'], maximum=MAX_JSON)
+        receiver.conserve_metadata(result['records'], cache, budget)
+        result.update(conserved=True, complete=True)
+    finally:
+        write_completion(path, result, budget)
+    return digest(path)
+
+def verify_application_metadata(state, prepared, runtime, budget):
+    path = state / 'application-metadata-receipt.json'
+    receipt = load(path)
+    if (digest(path) != prepared['application_metadata_receipt_sha256'] or
+        receipt.get('complete') is not True or receipt.get('accepted') is not False or
+        receipt.get('conserved') is not True or receipt.get('metadata_only') is not True or
+        receipt.get('extra_zip_acquisition') is not False or
+        receipt.get('catalog_sha256') != digest(HERE / 'application-metadata-catalog.json')):
+        raise Refusal('application metadata receipt is incomplete or changed')
+    application_metadata_supplier().conserve_metadata(receipt['records'],
+        Path(runtime['existing_module_cache']), budget)
 
 def preload_public_modules(inventory, go, state, online, bounded_run, budget):
     items = inventory['items']
@@ -700,6 +782,8 @@ def verify_prepared_inputs(state, manifest, runtime):
         prepared['supplier_pins'] != runtime['supplier_pins']):
         raise Refusal('prepared immutable inputs changed')
     supplier(state, manifest, runtime)
+    from osv_io import Budget
+    verify_application_metadata(state, prepared, runtime, Budget(30))
     if load(state / 'public-database-receipts.json') != prepared['databases']:
         raise Refusal('prepared database identity changed')
     for ecosystem, row in prepared['databases'].items():
@@ -807,7 +891,7 @@ def worker(request_path, manifest, profile):
     if phase.startswith('scan-'):
         out, blocking = run_one(state / (label + '-source'), profile['inputs'], tools, go,
             state / 'public-db', load(state / 'public-database-receipts.json'), datetime.now(timezone.utc), state / 'runs', child_env,
-            admitted_supplier=supplier_contract(manifest, runtime))
+            admitted_supplier=supplier_contract(manifest, runtime), cgroup_witness=observed)
         write(private / 'worker-result.json', {'complete': True, 'proof': str(out),
             'blocking': sorted(blocking), 'label': label, 'exit': 1 if blocking else 0,
             'socket_denial': 'EPERM', 'kernel_limits': observed['kernel_limits']})
@@ -903,7 +987,7 @@ def evidence(state, manifest):
     else:
         destination.mkdir(mode=0o700)
     total = 0
-    for name in ['prepared.json', 'public-database-receipts.json']:
+    for name in ['prepared.json', 'public-database-receipts.json', 'application-metadata-receipt.json']:
         source = state / name; regular(source)
         shutil.copyfile(source, destination / name); (destination / name).chmod(0o600)
     for label in load(state / 'prepared.json')['sources']:
@@ -911,7 +995,7 @@ def evidence(state, manifest):
         output = destination / label; output.mkdir(mode=0o700)
         write(output / 'result.json', result)
         for source in proof.iterdir():
-            if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.(?:stdout|stderr|rc)|receipt\.json|results\.json', source.name):
+            if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.(?:stdout|stderr|rc)|receipt\.json|results\.json|root13-govulncheck\.memory-(?:before|after)\.json', source.name):
                 continue
             info = regular(source); total += info.st_size
             if total > 128 * 1024 * 1024:
@@ -1041,7 +1125,7 @@ def preserve_incomplete_protocols(phase, destination):
         if digest(source) != before or digest(target) != before:
             raise Refusal('incomplete producer output changed during capture')
         rows.append({'path': str(target.relative_to(output)), 'sha256': before, 'bytes': info.st_size})
-    for name in ['prepared.json', 'public-database-receipts.json']:
+    for name in ['prepared.json', 'public-database-receipts.json', 'application-metadata-receipt.json']:
         source = state / name
         if source.exists():
             copy(source, output / name)
@@ -1058,7 +1142,7 @@ def preserve_incomplete_protocols(phase, destination):
         target = output / proof.name
         target.mkdir(mode=0o700)
         for source in sorted(proof.iterdir()):
-            if re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.(?:stdout|stderr|rc)|receipt\.json|results\.json', source.name):
+            if re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.(?:stdout|stderr|rc)|receipt\.json|results\.json|root13-govulncheck\.memory-(?:before|after)\.json', source.name):
                 copy(source, target / source.name)
     write(output / 'incomplete-publication.json', {'complete': False, 'phase': phase,
         'scope': 'unaccepted retained producer outputs; source slot and completeness cannot be inferred without a verified manager completion receipt',

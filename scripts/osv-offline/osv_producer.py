@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import stat
 import subprocess
 import sys
@@ -58,15 +59,97 @@ def protocol(text):
     return result
 
 
-def execute(argv, cwd, env, out, label, timeout=240, budget=None):
+
+CGROUP_ROOT = Path('/sys/fs/cgroup')
+PROC_CGROUP = Path('/proc/self/cgroup')
+
+def memory_event_snapshot(witness, budget):
+    """Readonly evidence in the existing witnessed private aggregate group."""
+    if (witness.get('manager_pid') != os.getpid() or
+        witness.get('kernel_limits') != {'memory.max':'2147483648','memory.swap.max':'0','pids.max':'256'}):
+        raise IncompleteScan('memory diagnostic lacks exact owned container witness')
+    info = CGROUP_ROOT.lstat()
+    if not stat.S_ISDIR(info.st_mode) or CGROUP_ROOT.resolve(strict=True) != CGROUP_ROOT:
+        raise IncompleteScan('memory diagnostic cgroup path differs')
+    def read(path):
+        budget.left()
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as f:
+            opened = os.fstat(f.fileno())
+            if not stat.S_ISREG(opened.st_mode):raise IncompleteScan('nonregular cgroup diagnostic')
+            raw = f.read(16385)
+            if len(raw) > 16384:raise IncompleteScan('cgroup diagnostic size limit')
+        budget.left()
+        return raw.decode('ascii')
+    group = read(PROC_CGROUP)
+    if group != '0::/\n' or group != witness['child']['group']:
+        raise IncompleteScan('memory diagnostic escaped witnessed private cgroup')
+    if str(os.getpid()) not in read(CGROUP_ROOT / 'cgroup.procs').split():
+        raise IncompleteScan('memory diagnostic manager outside owned group')
+    limits = {name:read(CGROUP_ROOT / name).strip() for name in witness['kernel_limits']}
+    if limits != witness['kernel_limits']:raise IncompleteScan('memory diagnostic quota changed')
+    raw = read(CGROUP_ROOT / 'memory.events');counters = {}
+    for line in raw.splitlines():
+        pieces = line.split()
+        if (len(pieces) != 2 or not re.fullmatch('[a-z_]{1,64}', pieces[0]) or
+            not re.fullmatch('[0-9]{1,20}', pieces[1]) or pieces[0] in counters):
+            raise IncompleteScan('malformed cgroup memory.events')
+        counters[pieces[0]] = int(pieces[1])
+    if not {'oom','oom_kill'} <= counters.keys():
+        raise IncompleteScan('cgroup memory.events OOM counters absent')
+    return {'group':group, 'cgroup_identity':[info.st_dev,info.st_ino],
+        'manager_pid':os.getpid(), 'limits':limits, 'raw':raw,
+        'raw_sha256':hashlib.sha256(raw.encode()).hexdigest(), 'counters':counters}
+
+def write_memory_evidence(out, name, value, budget):
+    raw = (json.dumps(value,sort_keys=True,indent=2)+'\n').encode()
+    if len(raw) > 65536:raise IncompleteScan('memory evidence size limit')
+    budget.charge(len(raw));budget.left()
+    with (out / name).open('xb') as f:
+        os.fchmod(f.fileno(),0o600);f.write(raw);f.flush();os.fsync(f.fileno())
+    budget.left()
+
+def execute(argv, cwd, env, out, label, timeout=240, budget=None, *, memory_witness=None):
     """Fresh producer-owned stdout/stderr/rc, never candidate supplied files."""
+    before = None;run = None;failed = True
+    if memory_witness is not None:
+        if label != 'root13-govulncheck' or budget is None:
+            raise IncompleteScan('unreviewed memory diagnostic label/budget')
+        before = memory_event_snapshot(memory_witness, budget)
+        write_memory_evidence(out, label+'.memory-before.json',
+            {'schema':'workflow.offline-scanner.memory-before.v1', 'complete':False,
+             'label':label, 'argv':argv, 'snapshot':before}, budget)
     try:
-        run=bounded_run(argv,cwd,env,timeout,budget)
-    except (OSError,subprocess.TimeoutExpired) as error:
-        raise IncompleteScan('producer process unavailable or timed out') from error
-    for suffix,text in [('stdout',run.stdout),('stderr',run.stderr),('rc',str(run.returncode)+'\n')]:
-        path=out/(label+'.'+suffix);path.write_text(text);path.chmod(0o600)
-    return run
+        try:
+            run=bounded_run(argv,cwd,env,timeout,budget)
+        except (OSError,subprocess.TimeoutExpired) as error:
+            raise IncompleteScan('producer process unavailable or timed out') from error
+        for suffix,text in [('stdout',run.stdout),('stderr',run.stderr),('rc',str(run.returncode)+'\n')]:
+            path=out/(label+'.'+suffix);path.write_text(text);path.chmod(0o600)
+        failed = False
+        return run
+    finally:
+        if before is not None:
+            result={'schema':'workflow.offline-scanner.memory-after.v1', 'complete':False,
+                'accepted':False, 'label':label, 'native_exit':None if run is None else run.returncode,
+                'native_capture_complete':not failed,
+                'before_sha256':hashlib.sha256((out/(label+'.memory-before.json')).read_bytes()).hexdigest(),
+                'scope':'aggregate container counters; a specific killed PID is not established'}
+            try:
+                after = memory_event_snapshot(memory_witness, budget)
+                if (after['cgroup_identity'] != before['cgroup_identity'] or
+                    after['group'] != before['group'] or after['limits'] != before['limits'] or
+                    set(after['counters']) != set(before['counters'])):
+                    raise IncompleteScan('memory diagnostic group/counter set changed')
+                delta={key:after['counters'][key]-value for key,value in before['counters'].items()}
+                if any(value<0 for value in delta.values()):
+                    raise IncompleteScan('memory diagnostic counter decreased')
+                result.update(snapshot=after, delta=delta, complete=True)
+                result['observed_oom_kill_increment'] = delta['oom_kill'] > 0
+            except Exception as error:
+                result['diagnostic_error_type'] = type(error).__name__
+                raise
+            finally:
+                write_memory_evidence(out,label+'.memory-after.json',result,budget)
 
 
 def source_contract(root, go_binary, env, out, label, budget):
@@ -97,7 +180,7 @@ def source_contract(root, go_binary, env, out, label, budget):
     return roots,versions,set(modules)
 
 
-def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent, env, *, admitted_supplier=None):
+def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent, env, *, admitted_supplier=None, cgroup_witness=None):
     """Execute only after the caller verifies authority for this exact source root.
 
     No command-line entrypoint intentionally: the approved profile supplies the
@@ -147,8 +230,11 @@ def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent
         roots,versions,source_names=source_contract(source,go_binary,env,out,'root'+str(n),budget)
         manifest=manifests[str(Path(path).relative_to(root))]
         identity_names=source_names | set(manifest['module_names']) | {name for ecosystem,name,version in packages if ecosystem=='Go'}
+        if n==13 and cgroup_witness is not None and str(Path(path).relative_to(root))!='example/go.mod':
+            raise IncompleteScan('memory diagnostic root13 manifest identity changed')
         independent=execute([str(tools/'govulncheck'),'-db',flat.as_uri(),'-C',str(source),'-json','./...'],
-                            source,env,out,'root'+str(n)+'-govulncheck',budget=budget)
+                            source,env,out,'root'+str(n)+'-govulncheck',budget=budget,
+                            memory_witness=cgroup_witness if n==13 else None)
         analysis[path]=parse_analysis(independent.stdout,independent.returncode,independent.stderr,
             source,module,GO_VERSION,flat.as_uri(),advisories['Go'],versions,roots,identity_names)
     report=out/'results.json'
@@ -179,4 +265,3 @@ def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent
     path=out/'receipt.json';path.write_text(encoded);path.chmod(0o600)
     budget.left()
     return out,blocking
-
