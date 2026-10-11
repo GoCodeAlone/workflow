@@ -3,2339 +3,3904 @@
     {
       "h1": "h1:7r55WzBxpo/R3z98hGmY7KKPd3ET6vsf0Fb9sDHOV60=",
       "module": "charm.land/bubbles/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56790364,
+        "lookup_response_sha256": "15720e7f5dc85a16cbf15c925bec793b3c9095b3feed5e1d213a0bbaa4e001a4"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.1.1"
     },
     {
       "h1": "h1:SxTJMhCAI3lbPmy4SgX5LWZ24AdINr4I6UEqzZvYJuY=",
       "module": "charm.land/bubbletea/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56696077,
+        "lookup_response_sha256": "1e6948e74ea75f350e71fb063e95a67eaed7179f5d65c7caa8103f9b192a9b8f"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.8"
     },
     {
       "h1": "h1:kbNxgeeUOYv5J0YdpxFjfvf3dFvqH8Aci4zB6xqFtrY=",
       "module": "charm.land/lipgloss/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56696313,
+        "lookup_response_sha256": "9092d9ff1d6c311a1f39ca9e7a0f5f859f7ab33f7a679599cba140e68a7f31cd"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.5"
     },
     {
       "h1": "h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=",
       "module": "dario.cat/mergo",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 36956610,
+        "lookup_response_sha256": "d113d3496c17f090c7c4290fbd2b5abc2e1a7374731fe66694976afe4cd9e463"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.2"
     },
     {
       "h1": "h1:udKWzYgxTojEKWjV8V+WSxDXJ4NFATAsZjh8iIbsQIg=",
       "module": "github.com/Azure/go-ansiterm",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 33201072,
+        "lookup_response_sha256": "3e4b077656cbdaac0928a67ef5d9ea2e924b87ddd8a5dc676942af039fbf181f"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20250102033503-faa5f7b0171c"
     },
     {
       "h1": "h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=",
       "module": "github.com/BurntSushi/toml",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48288060,
+        "lookup_response_sha256": "2f2cc06f07dc167a1b9b1d41000104647aa4930b35384afbd38e6338b445cb67"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.6.0"
     },
     {
       "h1": "h1:s58CUJ9s8lezjhTNJO/SxkPBv2qZjS3ktpRSqGF5n0s=",
       "module": "github.com/DataDog/datadog-go/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49495539,
+        "lookup_response_sha256": "5917ba7e365f210e33df71885f1e413925f80daba8d61e9d2177e5e929b0b6d0"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.8.3"
     },
     {
       "h1": "h1:EwnhqPlXiNmp85S+MXnKKvm3YlfA6O4NzBb4+GSlEVY=",
       "module": "github.com/GoCodeAlone/go-plugin",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51489613,
+        "lookup_response_sha256": "ad24568da3e1f1c71c0db9aea5a1fc773bca1dbd97723337925afa8ebf438351"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.7.0"
     },
     {
       "h1": "h1:Q+AR3MMAQJctvPJzlRSmTywArbrsXiMM3gzyJN8reBs=",
       "module": "github.com/GoCodeAlone/modular",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56805347,
+        "lookup_response_sha256": "0ea89521c3f7c8c2b3d006995d9d2c218bf89180f128783f1122987d46a81d69"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.13.5"
     },
     {
       "h1": "h1:AIdfdR/KTPHX8T5KJBXUHMokliutUHjl6jRfkqdh/7Q=",
       "module": "github.com/GoCodeAlone/modular",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56949717,
+        "lookup_response_sha256": "5535403b96660b00952f0291a0f807d981f6b1b69bbf72842e28f20398b4c2e0"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.13.6"
     },
     {
       "h1": "h1:GbKG6s/2qe6N9YZ8vtvYsNon56MLWECncPxWvAsazSc=",
       "module": "github.com/GoCodeAlone/modular/modules/auth",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54865455,
+        "lookup_response_sha256": "c6a6d66ca750a8831c3793e65b27d4f9d9d55a5f0675adef519328ba7a90354d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.17.0"
     },
     {
       "h1": "h1:ughD47BqEAhg7+3trucwcs5KzEpq9gIS/6jY4nkeGtA=",
       "module": "github.com/GoCodeAlone/modular/modules/auth",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56996029,
+        "lookup_response_sha256": "e901f349203e0c22223b7051b3ce61c061f76a5bfc6afea4ef021c37b6b8c689"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.19.0"
     },
     {
       "h1": "h1:s+3aFI7wncV0NhbPrJheFyVYr1WXwLJXOvSAP9RRaYU=",
       "module": "github.com/GoCodeAlone/modular/modules/cache",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56996030,
+        "lookup_response_sha256": "1ecb25ac4f7b1ef315c788604f6c5bf367d437c0c17613cc0c4ce2184a01a71e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.19.0"
     },
     {
       "h1": "h1:2ljVafd/1LYchF47WrnA1+ji8mcmVXMJ4F5qDrhZZi4=",
       "module": "github.com/GoCodeAlone/modular/modules/eventbus/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54865460,
+        "lookup_response_sha256": "a7824df1eafee85eb797f3964354e5ba7a48e19f83a20ca08b16095e862e343a"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.10.0"
     },
     {
       "h1": "h1:zoWioqUvuNNDfnjHA1sHixdlHfBreJdGhnnEBtxkzI8=",
       "module": "github.com/GoCodeAlone/modular/modules/jsonschema",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54865454,
+        "lookup_response_sha256": "2f678f012fab792c88b62779d52613e5be69a8c532679317bfbf3cec5a9b688e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.17.0"
     },
     {
       "h1": "h1:+2M/ecyCxDiXfJM4ibcERuu/BBeIbLTQNcVgRsllR64=",
       "module": "github.com/GoCodeAlone/modular/modules/reverseproxy/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54865458,
+        "lookup_response_sha256": "42908f0fdbdb9b2a4e8ebf4e04dc2a2e5e0da0f67c3a95955c73e7071b2e5045"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.10.0"
     },
     {
       "h1": "h1:XtogtQXVBING2iu5jQGzfubi9rOes/erVWH5uwiPsok=",
       "module": "github.com/GoCodeAlone/workflow-plugin-control-plane",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55595072,
+        "lookup_response_sha256": "8f16a7e2e8cd414f3abcad7f049d3b90399bcd9aba7cdee71f465cd6f356b0c6"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.0"
     },
     {
       "h1": "h1:WK6Y6e0t1a6U7r+S2dN3CGWW1PizYD3zO0zneToZPxM=",
       "module": "github.com/GoCodeAlone/yaegi",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51530717,
+        "lookup_response_sha256": "0ca3f997f7fdcb9bf5a032e6907bbdbaf0055dd20840741bbece253025df7cf2"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.17.2"
     },
     {
       "h1": "h1:zpY2iZYmt+z+0Bo3aYF+cD48OBt2hIgiDPZUuZKTXcc=",
       "module": "github.com/IBM/sarama",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55704592,
+        "lookup_response_sha256": "0e1bfc803ba53a5e7e5954776497e8a48ee51bd3ca3da19f9aab12c44b582848"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.50.3"
     },
     {
       "h1": "h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=",
       "module": "github.com/Microsoft/go-winio",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 25247311,
+        "lookup_response_sha256": "5c4a05049d34cecbef8805a20def319219953cd00a81d3948b004a68411df729"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.6.2"
     },
     {
       "h1": "h1:yhEIoH4YezLYT04s1nHehNO64EKFTop/wBhxv2QzDdQ=",
       "module": "github.com/RoaringBitmap/roaring",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 26576877,
+        "lookup_response_sha256": "049d771998ab0ba23b865de6febf6c5ac0aff312fcd5b03d26c517ea6baa2ed6"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.9.4"
     },
     {
       "h1": "h1:q5RXlAeKm3zDpZTbYXwdMb1gN9RtGSvOCtPXGJJL6Cs=",
       "module": "github.com/Workiva/go-datastructures",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 45783430,
+        "lookup_response_sha256": "45bd0d1933d08c7f180442ee779a82c36b9f06fd2c2e9dd6abb82d54300a0e0a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.7"
     },
     {
       "h1": "h1:nZAzCR+Lj+Vxk4ZXzm2NuKq2O33RXj1XxJ2e2uP9jiw=",
       "module": "github.com/alicebob/miniredis/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53973720,
+        "lookup_response_sha256": "0981723b4610f41c8521f475b73ef57213eef45427248660c4d98e173f84db30"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.38.0"
     },
     {
       "h1": "h1:HzTuoo2ErYQqf5qvcJInB8uvqSVxRttzkFexPWtnceM=",
       "module": "github.com/andybalholm/brotli",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56484013,
+        "lookup_response_sha256": "2b1e258d3da8ef6cefb3a191be52c56a7adf294d7bb013c5f94a79ae15c895ce"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.2"
     },
     {
       "h1": "h1:oEEedg1Xgi8drRjqB0f9tfjhLoInE0IYZfZ6zAhQUbY=",
       "module": "github.com/antithesishq/antithesis-sdk-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56155525,
+        "lookup_response_sha256": "ae8d7d9d59936cfe7d0cc2470a131ee8e7c95a8596216be09738fbe7a12ea50d"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.7.2"
     },
     {
       "h1": "h1:hR91U9KYmb6bLBYLQjyM+3j+rcd/UhE+G78SFnF8gJA=",
       "module": "github.com/armon/go-metrics",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 12228402,
+        "lookup_response_sha256": "52d0ddbd3fc77331a712d947514b62faecbd8073b8acaf84bdf3e44ebd584c66"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.1"
     },
     {
       "h1": "h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=",
       "module": "github.com/atotto/clipboard",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3038296,
+        "lookup_response_sha256": "7df90611c91538de038b8a6d85d31bd01823211843c68ba80fb300fb54de5932"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.4"
     },
     {
       "h1": "h1:1AX0AthnBQzMx1vbmir3Y4WsnJgiydmnJjiLu+LvXOg=",
       "module": "github.com/aws/aws-sdk-go-v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605564,
+        "lookup_response_sha256": "96fb82fc5349de78d4b4a9fc9c2687ebd41b5f688ab4f8f4ce1de397abb7ec33"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.41.6"
     },
     {
       "h1": "h1:eBMB84YGghSocM7PsjmmPffTa+1FBUeNvGvFou6V/4o=",
       "module": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51559378,
+        "lookup_response_sha256": "350a0b4df0bdf9950feea8af2a79c069297c9ddb693ceb343296404ea3d5e895"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.7.8"
     },
     {
       "h1": "h1:Q0iQ7quUgJP0F/SCRTieScnaMdXr9h/2+wze1u3cNeM=",
       "module": "github.com/aws/aws-sdk-go-v2/config",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605526,
+        "lookup_response_sha256": "263b692a75e92a9c75d902dd4c8dcc475e5b0741a85d43b57b6573ca0bf253f4"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.32.16"
     },
     {
       "h1": "h1:fyvgWTszojq8hEnMi8PPBTvZdTtEVmAVyo+NFLHBhH4=",
       "module": "github.com/aws/aws-sdk-go-v2/credentials",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605578,
+        "lookup_response_sha256": "0f3ec3d4cb58efd35f5259c8dde1e823b68b291eac183d1074764da9c014a400"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.19.15"
     },
     {
       "h1": "h1:IOGsJ1xVWhsi+ZO7/NW8OuZZBtMJLZbk4P5HDjJO0jQ=",
       "module": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605534,
+        "lookup_response_sha256": "0ee7b59ecd88b2480eeba9e051ecd3f8d05420719f63cbb47448e91f3ee59e9d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.18.22"
     },
     {
       "h1": "h1:GmLa5Kw1ESqtFpXsx5MmC84QWa/ZrLZvlJGa2y+4kcQ=",
       "module": "github.com/aws/aws-sdk-go-v2/internal/configsources",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605577,
+        "lookup_response_sha256": "205280f12529e1da30dce7a82d2ee2e59a255319c9b416022beb502605f6c77a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.4.22"
     },
     {
       "h1": "h1:dY4kWZiSaXIzxnKlj17nHnBcXXBfac6UlsAx2qL6XrU=",
       "module": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605583,
+        "lookup_response_sha256": "55ba85f46c53067b02de06f4e6a9240b6a7e80f46a169f957901ef7b582d19fb"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.7.22"
     },
     {
       "h1": "h1:FPXsW9+gMuIeKmz7j6ENWcWtBGTe1kH8r9thNt5Uxx4=",
       "module": "github.com/aws/aws-sdk-go-v2/internal/v4a",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605585,
+        "lookup_response_sha256": "bb2ad05da0e07e45acdc0befdd7f03fc275cc700f125403b79d8346f6d16b67b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.4.23"
     },
     {
       "h1": "h1:HtOTYcbVcGABLOVuPYaIihj6IlkqubBwFj10K5fxRek=",
       "module": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605575,
+        "lookup_response_sha256": "3798c816c594ee5cfff361cefe51bfc75810310e765fc3b60e15b649b84b6d3a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.13.8"
     },
     {
       "h1": "h1:PUmZeJU6Y1Lbvt9WFuJ0ugUK2xn6hIWUBBbKuOWF30s=",
       "module": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605574,
+        "lookup_response_sha256": "b378a7a5e926ea21743ab585cdd294e1d2111252ae3e3e9fb7ed9cb49861cd36"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.13.22"
     },
     {
       "h1": "h1:LxgRVyuY+5DEPSX7kmin/V7toE8MWZ9U8n2dqRtX+RE=",
       "module": "github.com/aws/aws-sdk-go-v2/service/kinesis",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51686497,
+        "lookup_response_sha256": "7309b33f93e4acddcd48fa61596e961d348fab89c4d855efdfdbaec80739119d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.43.5"
     },
     {
       "h1": "h1:a1Fq/KXn75wSzoJaPQTgZO0wHGqE9mjFnylnqEPTchA=",
       "module": "github.com/aws/aws-sdk-go-v2/service/signin",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605587,
+        "lookup_response_sha256": "ee2e334340ed1209b6095e5fd52540b67fc4a3c60d06c57f0c0eaccd74a3e354"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.10"
     },
     {
       "h1": "h1:x6bKbmDhsgSZwv6q19wY/u3rLk/3FGjJWyqKcIRufpE=",
       "module": "github.com/aws/aws-sdk-go-v2/service/sso",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605584,
+        "lookup_response_sha256": "9bd3383bda7eb61a0fa0baa83a8ed353e601a2e018dda8c5114ec09f649ad256"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.30.16"
     },
     {
       "h1": "h1:oK/njaL8GtyEihkWMD4k3VgHCT64RQKkZwh0DG5j8ak=",
       "module": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605582,
+        "lookup_response_sha256": "e491e04dd92cab1bf22ac2495f2d182c487782f9dd7639328240da8f90428d5a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.35.20"
     },
     {
       "h1": "h1:ks8KBcZPh3PYISr5dAiXCM5/Thcuxk8l+PG4+A0exds=",
       "module": "github.com/aws/aws-sdk-go-v2/service/sts",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52605536,
+        "lookup_response_sha256": "3c8fac57b7b33cd1d9310f556e6ca87beaeff62b02ebc543f878d6b70f206164"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.42.0"
     },
     {
       "h1": "h1:Sz/XJ64rwuiKtB6j98nDIPyYrV1nVNJ4YU74gttcl5U=",
       "module": "github.com/aws/smithy-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52505401,
+        "lookup_response_sha256": "7ef330508d78222267fadbf7342a8d20ca234e1433d8ef821b7cacbb2ddfc694"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.25.0"
     },
     {
       "h1": "h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=",
       "module": "github.com/aymanbagabas/go-osc52/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 16206084,
+        "lookup_response_sha256": "1f3429adac8a1517811259bf8cf1c58ec69987d8943adb1473e87a27f49d1429"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.1"
     },
     {
       "h1": "h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ12Gv5o=",
       "module": "github.com/aymanbagabas/go-udiff",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50918966,
+        "lookup_response_sha256": "1bd2ac7b1f516216e9d2f7bfc4c347541948a3100a9a2fe666656aaf65773429"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.1"
     },
     {
       "h1": "h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=",
       "module": "github.com/beorn7/perks",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 125929,
+        "lookup_response_sha256": "70c3b1fd72dd549b3b5d1cf032272fd553b21fc1d1ed272a38135d0f1d287dce"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.1"
     },
     {
       "h1": "h1:654xBVHc23gJMAgOTkPNoCVfiRxuIOAUnAZFtopqJ4w=",
       "module": "github.com/bits-and-blooms/bitset",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55186831,
+        "lookup_response_sha256": "9b3e7ef8e9011881ad91fb500da235a29eae525f4f7864fb69080b19a874d2b6"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.24.5"
     },
     {
       "h1": "h1:zU9WiOla1YA122oLM6i4EXvGW62DvKZVxIe6TYWexEs=",
       "module": "github.com/bmatcuk/doublestar/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49278108,
+        "lookup_response_sha256": "3faf76292ae968989c1d96299ed5f86e17e6d978c231fb7aa1e5e278824e3e4d"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.10.0"
     },
     {
       "h1": "h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=",
       "module": "github.com/bsm/ginkgo/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 19347337,
+        "lookup_response_sha256": "ce008c9d88b345a3f227aa5072fe154407b14bb667a9d3e2ac9372972a34817c"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.12.0"
     },
     {
       "h1": "h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=",
       "module": "github.com/bsm/gomega",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 19347505,
+        "lookup_response_sha256": "77bb2e623baef49bd27756b630d75458db55a126278a6a52071831a1c5c93eae"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.27.10"
     },
     {
       "h1": "h1:+jW/wnLMLxaCEG8AX9lD0bQ5v9h1RUiMKOBOT5ll9dM=",
       "module": "github.com/bufbuild/protocompile",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 25028391,
+        "lookup_response_sha256": "8d354342b86bd3fbb0a774bea67527a186cca2045d5a367ef7cfeb5219b1048d"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.10.0"
     },
     {
       "h1": "h1:oZnQwnX82KAIWb7033bEwtxvTqXcYMxDBaQxo5JJHWM=",
       "module": "github.com/bytedance/gopkg",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51299399,
+        "lookup_response_sha256": "382fc390515b287b21a3b7dbdbd123cf669b51fa13dbce92ed1de47999f81c11"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.4"
     },
     {
       "h1": "h1:90H+rcF/FwLXwfB1cudOLq/je83n683Utf4Cbp0xHCo=",
       "module": "github.com/bytedance/sonic",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55117880,
+        "lookup_response_sha256": "ac462a1cae95f31a05c19617b0d52c1b9e5d7220933312d01d08bfe8f1a06f22"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.15.2"
     },
     {
       "h1": "h1:Ygpfa9zwRCCKSlrp5bBP/b/Xzc3VxsAW+5NIYXrOOpI=",
       "module": "github.com/bytedance/sonic/loader",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51706949,
+        "lookup_response_sha256": "adeb610ed590941e9eaaa8ed0e70e169f8ce35e47e4e0c13f704ebdb2b934e83"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.1"
     },
     {
       "h1": "h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=",
       "module": "github.com/cenkalti/backoff/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 24383475,
+        "lookup_response_sha256": "e2f47d5f220c41fb1cf88532056121c9604e1966d0d3fdddd061bb8869e3805a"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.3.0"
     },
     {
       "h1": "h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=",
       "module": "github.com/cenkalti/backoff/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41131147,
+        "lookup_response_sha256": "0fdcb6380015d340d360710ece39d706488127d8657dbb21cc2eb423bd4c9855"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.0.3"
     },
     {
       "h1": "h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=",
       "module": "github.com/cespare/xxhash/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 24962514,
+        "lookup_response_sha256": "b83cfb2aac88920b68f8a5e2b33f712306f2f744d8ea113113b5df99c5f33256"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.3.0"
     },
     {
       "h1": "h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=",
       "module": "github.com/charmbracelet/colorprofile",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50983668,
+        "lookup_response_sha256": "720fb6172f700dc679b0f80ce299db975575c0565f826fd2c551dffada84806a"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.3"
     },
     {
       "h1": "h1:3FmWoGNWK4STvqg0O0Aeav2T7rodWJAPeF0QpH+8gFw=",
       "module": "github.com/charmbracelet/ultraviolet",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56695056,
+        "lookup_response_sha256": "188ab98b6bfbfac0dd70c409a27bfb5a0eb4da41738ab96845921e110fb011fa"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260703014108-f5a850f9c2b7"
     },
     {
       "h1": "h1:kzv1kJvjg2S3r9KHo8hDdHFQLEqn4RBCb39dAYC84jI=",
       "module": "github.com/charmbracelet/x/ansi",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52407904,
+        "lookup_response_sha256": "b37054b72f3dbd0ea9275abb0ef576fc8e7eb1067d353318199c625caad40a4c"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.11.7"
     },
     {
       "h1": "h1:pk6gmGpCE7F3FcjaOEKYriCvpmIN4+6OS/RD0vm4uIA=",
       "module": "github.com/charmbracelet/x/exp/golden",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41694093,
+        "lookup_response_sha256": "cd5d36522d55c5bbc6337f01d73b77ccf8bea70cfcc91e5e64e41158305ae573"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20250806222409-83e3a29d542f"
     },
     {
       "h1": "h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=",
       "module": "github.com/charmbracelet/x/term",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 45790699,
+        "lookup_response_sha256": "40378ab2415f5a7368bbb8941d7f40c85faa302f19602a61635c90d8f0e6bbae"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.2"
     },
     {
       "h1": "h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=",
       "module": "github.com/charmbracelet/x/termios",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 34300588,
+        "lookup_response_sha256": "2ce50e33c402d676a62495ab93c5bf5726bbc7982efd7892f3eb8488be403bd2"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.1"
     },
     {
       "h1": "h1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=",
       "module": "github.com/charmbracelet/x/windows",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41693647,
+        "lookup_response_sha256": "ce5123c03eeeb817ec624e8f34ca219df1dfe24ef9271097763791effeb40056"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.2"
     },
     {
       "h1": "h1:lBc6kY44VFw+TDx4I8opi/EtL9m20WSEFgwIwO+UVM8=",
       "module": "github.com/clipperhouse/displaywidth",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50423061,
+        "lookup_response_sha256": "f29d5693030966b3cc908fa5185f37d464e93b9465bb4fcaed4e428aa1991685"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.11.0"
     },
     {
       "h1": "h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=",
       "module": "github.com/clipperhouse/uax29/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50180369,
+        "lookup_response_sha256": "551541636be3271916017793dd088aad0a54cefa74b7c1d26dd0d2cede131e62"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.7.0"
     },
     {
       "h1": "h1:ZYDFrYke4FD+jM8TZTJJO6JhKHzOQl2oqpFK1D+NnQM=",
       "module": "github.com/cloudevents/sdk-go/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43926506,
+        "lookup_response_sha256": "eed02ca9607691acdbd33c6f4323afc6b9d0d25d4d1158eda3542e009400c3fb"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.16.2"
     },
     {
       "h1": "h1:NppS+Fgzg5ovhn4NkUXaDT3x9jldgH5ToMCqzBSi2zI=",
       "module": "github.com/cloudwego/base64x",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53233039,
+        "lookup_response_sha256": "422c210834334d804fb706d36e2e70eba6e90f7f3aea1e38074aebfd65342a59"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.7"
     },
     {
       "h1": "h1:tg5yIfIlQIrxYtu9ajqY42W3lpS19XqdxRQeEwYG8PI=",
       "module": "github.com/containerd/errdefs",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 31364507,
+        "lookup_response_sha256": "7efaf8349e7d67036e2be5ad02b8949e69c92aba84cb6114b9e799d153b82170"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:9IKJ06FvyNlexW690DXuQNx2KA2cUJXx151Xdx3ZPPE=",
       "module": "github.com/containerd/errdefs/pkg",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 30784039,
+        "lookup_response_sha256": "6221598db30dda2db5ba7803bfcd09f3ff262d4e4c49e0aada2b00f849ceadba"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.0"
     },
     {
       "h1": "h1:TCJt7ioM2cr/tfR8GPbGf9/VRAX8D2B4PjzCpfX540I=",
       "module": "github.com/containerd/log",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 19538849,
+        "lookup_response_sha256": "c519caab170b6460f70423c91338462f91d10892d077f2ef934276694865f2d8"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.0"
     },
     {
       "h1": "h1:zvwtM3rz2YHPQsF2CHYM8+KtB5dvhISiXh5ZpSBQv6A=",
       "module": "github.com/containerd/platforms",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 26897341,
+        "lookup_response_sha256": "400ccc97d83497b39b050b338c64a4355de96da42bdd675bea3134af47bdc37a"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.1"
     },
     {
       "h1": "h1:yi21YpKnrx1gt5R+la8n5WgS0kCrsPp33dmEyHReZr4=",
       "module": "github.com/coreos/go-semver",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15247559,
+        "lookup_response_sha256": "3f2f585f4fb315c143be78f520973af5d496efea66e6dfc891e59176300a6331"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.1"
     },
     {
       "h1": "h1:iW4rZ826su+pqaw19uhpSCzhj44qo35pNgKFGqzDKkU=",
       "module": "github.com/coreos/go-systemd",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 455919,
+        "lookup_response_sha256": "81fb59cc889ef7ff6f80f7c234dfd35b4fc0523e5261ae2c6cb8f817a15f22f8"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20191104093116-d3cd4ed1dbcf"
     },
     {
       "h1": "h1:LAEzFkke61DFROc7zNLX/WA2i5J8gYqe0rSj9KI28KA=",
       "module": "github.com/coreos/go-systemd/v22",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49349420,
+        "lookup_response_sha256": "abdf5f6923dc85dd9fb461e7bcedafb6f61f70ef1ea3cef7a86b7cc347918c8a"
+      },
+      "public_identity_reviewed": true,
       "version": "v22.7.0"
     },
     {
       "h1": "h1:DlJTyZGBDlXqUZ2Dk2Q3xHs/FtnooJJVaad2S9GKorA=",
       "module": "github.com/cpuguy83/dockercfg",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 30224505,
+        "lookup_response_sha256": "20f7de6f95a124485d7f2a8670f87b9392101ea3c8c9582a69bb5e43377e06e5"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.2"
     },
     {
       "h1": "h1:EgIjePLWiPeslwIWmNQ3XHcypPsWAHoMCz/YEBKP4GI=",
       "module": "github.com/cucumber/gherkin/go/v26",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 16955167,
+        "lookup_response_sha256": "5104c3b0ccf156d716557a47338376f80b91b1d23cf67eafec99bfc07c8c5783"
+      },
+      "public_identity_reviewed": true,
       "version": "v26.2.0"
     },
     {
       "h1": "h1:rb/6oHDdvVZKS66hrhpjFQFHjthFSrQBCOI1LwshNTI=",
       "module": "github.com/cucumber/godog",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 40887498,
+        "lookup_response_sha256": "33abb7a097fec35f5e4cce62126a77bed9526441a7d271322b7db32bf47561f4"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.15.1"
     },
     {
       "h1": "h1:wzA0LxwjlWQYZd32VTlAVDTkW6inOFmSM+RuOwHZiMI=",
       "module": "github.com/cucumber/messages/go/v21",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 14411576,
+        "lookup_response_sha256": "570c0c25ef63957018ea754b9bc62eea2b523b72e929096d66086a89176240b9"
+      },
+      "public_identity_reviewed": true,
       "version": "v21.0.1"
     },
     {
       "h1": "h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=",
       "module": "github.com/danieljoos/wincred",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 44495009,
+        "lookup_response_sha256": "ea991fc7e503a2ac4367a91f7cc586c4e3f5097bc3d130f4f4cd8e41a048f03b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.3"
     },
     {
       "h1": "h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=",
       "module": "github.com/davecgh/go-spew",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 13742,
+        "lookup_response_sha256": "3698b9305bc65a2defb1124a348d79c38dfb6c925209c9aa4773c6a572098536"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.2-0.20180830191138-d8f796af33cc"
     },
     {
       "h1": "h1:prva4eP9UysWagLyKrtn074ughi0NnkIf0A4M5yOCKI=",
       "module": "github.com/deckarep/golang-set/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52730459,
+        "lookup_response_sha256": "def304c8235161cbb04ac14196284d2e42dc0a728a94554e4d439321b7ab0f93"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.9.0"
     },
     {
       "h1": "h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5QvfrDyIgxBk=",
       "module": "github.com/distribution/reference",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 24510847,
+        "lookup_response_sha256": "3ae9084745a0fc976c8864c624f24c0b4cc87e99bc907a520ef372a17310359f"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.6.0"
     },
     {
       "h1": "h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=",
       "module": "github.com/dlclark/regexp2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 23069006,
+        "lookup_response_sha256": "6a674fbb9721e85cc6cce4c0ff73eb029da7f9d859fa8fee16cf9843e7289529"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.11.0"
     },
     {
       "h1": "h1:6SsRfJddP22WMrCkj19x9WKjEDTB+ahsdiGYf0mN39c=",
       "module": "github.com/docker/go-connections",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52515092,
+        "lookup_response_sha256": "df62635a9fc6e55a51654dfb7a566a7a9aff4baaac7a35ac840485b4a305e311"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.7.0"
     },
     {
       "h1": "h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=",
       "module": "github.com/docker/go-units",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 12121492,
+        "lookup_response_sha256": "0c6505be5df033fb4031fc1513d5934a80da1c549a1d414da35a6ac4c0a9732c"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.0"
     },
     {
       "h1": "h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=",
       "module": "github.com/dustin/go-humanize",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15135559,
+        "lookup_response_sha256": "3004355719891454e3c0d4eadc2cac4dd87675779c466395b2313de595f02bbf"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.1"
     },
     {
       "h1": "h1:n3NRTnBn5N0Cbi/IeOHuQn9s2UwVUH7Ga0ZWcP+9JTA=",
       "module": "github.com/eapache/go-resiliency",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 28465478,
+        "lookup_response_sha256": "f8b9810119a775b24c7a02c126210e0edb9a5af1de2f1f4d2f7c15fd1d423c2b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.7.0"
     },
     {
       "h1": "h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=",
       "module": "github.com/ebitengine/purego",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54734949,
+        "lookup_response_sha256": "83127407e9b838ef8f5e31973f8214ca116cfa11048396b5d5ab6d5187f8a497"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.10.1"
     },
     {
       "h1": "h1:C4Bl2xDndpU6nJ4bc1jXd+uTmYPVUwkD6bFY/oTyCes=",
       "module": "github.com/emicklei/go-restful/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 42054146,
+        "lookup_response_sha256": "e294e940388ebe725fd13b68d59aec8edd93e3be30878b9e0a662a3644441ba0"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.13.0"
     },
     {
       "h1": "h1:W1loDTT+0PQf5YteHSTpju2qfUfNoBt4yw9+wOEU9VM=",
       "module": "github.com/expr-lang/expr",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50112770,
+        "lookup_response_sha256": "7d8cb714b4a125f97da63831479a25478fe00057a3886ba611ffd89c0b0b445d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.17.8"
     },
     {
       "h1": "h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=",
       "module": "github.com/fatih/color",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51441162,
+        "lookup_response_sha256": "aa043b8de31d1d609e761bff4209cecfe8b4fa342ad857d43b0970dd08d26ae7"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.19.0"
     },
     {
       "h1": "h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=",
       "module": "github.com/felixge/httpsnoop",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55545086,
+        "lookup_response_sha256": "7106d032589759ce5effd8787db28205e07092f3676f1854ad140f3f112da0aa"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:qDhlw6RNufXz6RGr+IiYimFpMMkt77SUSHY5tgFaUCU=",
       "module": "github.com/flowchartsman/retry",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 2181459,
+        "lookup_response_sha256": "38def77b178960a38185bab245226855586fa6967fb4c1662629294ac45ec8cc"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.0"
     },
     {
       "h1": "h1:7Xjx+VpznH+oBnejlPUj8oUpdxnVs4f8XU8WnHkI4W8=",
       "module": "github.com/frankban/quicktest",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 18805737,
+        "lookup_response_sha256": "5829486d1798c78865631f6fdded121919ba15e630daca90cadc60b89e79a82c"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.14.6"
     },
     {
       "h1": "h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx59Ho=",
       "module": "github.com/fsnotify/fsnotify",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53500391,
+        "lookup_response_sha256": "dcd980e4df83264474c3a420fdf4c4f8ac9989be4be20a69f9749ce71943029e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.10.1"
     },
     {
       "h1": "h1:X4Ksno9+x3cz0TZv69ec1hxP/+tymuR8PXQJyDwfh78=",
       "module": "github.com/fxamacker/cbor/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53504286,
+        "lookup_response_sha256": "099997dbd22946594456ff9ad3a67f2577acc46e519e80c559a582990f5cfa94"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.9.2"
     },
     {
       "h1": "h1:LPMpoJzUTfrPbr/5e7s5QKvi66PMmREnbZ9kRxPe6ls=",
       "module": "github.com/github/copilot-sdk/go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52898684,
+        "lookup_response_sha256": "78ec4169fc186882df35fca41a2dc91d8bbb8597ff36f9bff5c4469eecd56f0a"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.0"
     },
     {
       "h1": "h1:3j4HZLGZQ3JpMCrPJF/Jl3mYJfWLKBfNJ6quurUGCf8=",
       "module": "github.com/go-chi/chi/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56879975,
+        "lookup_response_sha256": "57338ea2d418d3e8c886844a78d5f0c5f91b1a57f8a1ca8b3285c588d5e20b63"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.3.1"
     },
     {
       "h1": "h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=",
       "module": "github.com/go-jose/go-jose/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51876581,
+        "lookup_response_sha256": "53790e2292bee4641fe078a4b9c9a66039d540b116b022cc033b50c9dc516e8f"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.1.4"
     },
     {
       "h1": "h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=",
       "module": "github.com/go-logr/logr",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 38037872,
+        "lookup_response_sha256": "65520eb7d51f06dbf0d3fc1bd55468fcb2432f554f354d673082528fdb2c0892"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.4.3"
     },
     {
       "h1": "h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=",
       "module": "github.com/go-logr/logr",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 57725636,
+        "lookup_response_sha256": "bf928c8970b321b51d93dc2e6be69b6f0d23a60e93b4f13468d793283c7addc1"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.4.4"
     },
     {
       "h1": "h1:hSWxHoqTgW2S2qGc0LTAI563KZ5YKYRhT3MFKZMbjag=",
       "module": "github.com/go-logr/stdr",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 8402985,
+        "lookup_response_sha256": "994f64be215af16a5a3194ce415b22eacdf93fca8f028ecafd1edd59075a0850"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.2"
     },
     {
       "h1": "h1:Dt6ye7+vXGIKZ7Xtk4s6/xVdGDQynvom7xCFEdWr6uE=",
       "module": "github.com/go-ole/go-ole",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 19057266,
+        "lookup_response_sha256": "d54a083e67dd15afce8aa90343f7657848391b2687f851f964e0a1ad2e75aa06"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.0"
     },
     {
       "h1": "h1:AA6mCjHYHmZ+1RU2Js089EaOK/iwXXNwQsTgnsTha2M=",
       "module": "github.com/go-openapi/jsonpointer",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56481958,
+        "lookup_response_sha256": "e1fdbd552b086c7d388db5f057fcf401efb09e4f6d900f07f72a772696c6a8fa"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.24.0"
     },
     {
       "h1": "h1:NZ5nGfnaM1n4I43Xjm1e5/M2GjOwQwndQz22uhxwD+Y=",
       "module": "github.com/go-openapi/jsonreference",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54963426,
+        "lookup_response_sha256": "bf6921cf0ba29cb3e15b40ba356c1f1889a00cf04e307b8ae65f3c6aa26e5a5e"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.21.6"
     },
     {
       "h1": "h1:8ecSuZlh4NXc3GsmAOqECIYqDTApCWaMe3gO4gjJNEE=",
       "module": "github.com/go-openapi/swag",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483192,
+        "lookup_response_sha256": "a22664303065a1cce60cc290fa77bd75480d8c7804a987db77272c127a1e6cd7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:aIKiqhB29AaP+7xm8/CPg3uOpeHx2SUp6TvMpu/a31Y=",
       "module": "github.com/go-openapi/swag/cmdutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483200,
+        "lookup_response_sha256": "48f1090c2d9780333eff4100697a8d014bda0388a06397b38cf27c0f10c2dcd7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:EKOH4feXrvdo8DbSsXSAqRT8fz1epEnS5O2IfXUOzE8=",
       "module": "github.com/go-openapi/swag/conv",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483193,
+        "lookup_response_sha256": "972daa0e23e1ca823c6c478f2b79cc6398f9fcee6fbe4513d650550ddd95aeb0"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:ib5jMUqGq5tY1EyO4inlrabsaeDAleFU+XD1FXQcgp8=",
       "module": "github.com/go-openapi/swag/fileutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483205,
+        "lookup_response_sha256": "89f4ce893da00d72984fa45ddd17b4a4e66defaaa6caa761f7d6f245678669ae"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:VYtd9jEQYeU4j8q5vdn5KWotF4vKywhGdMBrALtAsfE=",
       "module": "github.com/go-openapi/swag/jsonutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483194,
+        "lookup_response_sha256": "cbe56d35cb072811d98d777179aa5104c029778abbf96700e900a958a88e3bb7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:+d7C7Ur/SsGg/UZ9G0JEovnfRqtMNZCJQGKc2h/ojoE=",
       "module": "github.com/go-openapi/swag/jsonutils/fixtures_test",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483206,
+        "lookup_response_sha256": "a5ba1b0a65241bd1e348ee8a427da4cb533e69dac065e6db941cf6553f3907dd"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:s8DA9aPEdFH6OluHUYUn3DnIuoTdyWs9RwffXBUfyeI=",
       "module": "github.com/go-openapi/swag/loading",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483203,
+        "lookup_response_sha256": "cdcaca141cab4be9a10ee1c4b3a1053b3d3182e29e0699abcb6b547ffbc72afe"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:rpPJuqQHa6z2pDiP3iIpXOyNXlSs9cQCxnJSAxzdfOc=",
       "module": "github.com/go-openapi/swag/mangling",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483198,
+        "lookup_response_sha256": "0eb313926c225db85e6a4c4c6654494c6a6a6eae5d7887190b654c81a7b45f64"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:lEUG+hHvPvLggB3A8snFk0IRKNf9uC0YKc+7WYqvAF8=",
       "module": "github.com/go-openapi/swag/netutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483201,
+        "lookup_response_sha256": "d1ed8d401bbf1546cd50cd05f7dba8bd67bdd8291aec02f7cde79b60479f6dc3"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:Of7w/HljWsNZvuxsUAnw3n+hCOyI6HLJOxW2kQRAxio=",
       "module": "github.com/go-openapi/swag/stringutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483204,
+        "lookup_response_sha256": "27aa458581c14668d75f07d7e412be95f8a30a6f5a7c01ee9552cbbd604f6c78"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:aCf4MSGo8NLwZP8Q6t32DWLJSvl/WwNqgmEG+xJ6v2o=",
       "module": "github.com/go-openapi/swag/typeutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483199,
+        "lookup_response_sha256": "586ba79ae38aebdd1ea91986d57cd54d24738da57527b99a258f6d560e068d70"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:bQ6eAMil5X9tdcf7dMn4t15alzG6jddnrKPuKa/zxKM=",
       "module": "github.com/go-openapi/swag/yamlutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56483197,
+        "lookup_response_sha256": "90b605ae812b54945fa71ac077fcb257efff45a0bf9e5e9a2725d68fc33281a5"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.27.0"
     },
     {
       "h1": "h1:gGHwAJ0R/5jU8BEGDbfRNR3hL68dAVi84WuOApp29B0=",
       "module": "github.com/go-openapi/testify/enable/yaml/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56191241,
+        "lookup_response_sha256": "d164303565f2c52fcc37d8eefd72d2be602cb04a37423e5d293a92cff0e4a27a"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.6.0"
     },
     {
       "h1": "h1:5PKH2HE7YJ/LuRPQGvSxBRlFXNQhSetBLlGAgUEu3ug=",
       "module": "github.com/go-openapi/testify/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56191225,
+        "lookup_response_sha256": "76bbc9a13d71424ae4f7194fdafb0df6826e8301484773159629b95cf29a33e5"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.6.0"
     },
     {
       "h1": "h1:O1K29Txy5P2OK0dGo59b7b0LR6wKfIhttaAhHUyn7eI=",
       "module": "github.com/go-quicktest/qt",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 18861686,
+        "lookup_response_sha256": "1195b5cc0cc1fe92b07d244b6d9611fb00ce865482400de03fb935f1733d7ecd"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.101.0"
     },
     {
       "h1": "h1:0r/53hagsehfO4bzD2Pgr/+RgHqhmf+k1Bpse2cTu1U=",
       "module": "github.com/go-test/deep",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 27617339,
+        "lookup_response_sha256": "0c016bd580d1e5e97e3ce4939c4bd338cf87bb9f7e6aee0005c4374203db0b78"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.1"
     },
     {
       "h1": "h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPEgAXnvj1Ro=",
       "module": "github.com/go-viper/mapstructure/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48904759,
+        "lookup_response_sha256": "3c5fd5eac4edc0f60f5df435afc96f5f284b78600311c7f130cbaa0731bb0fcd"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.5.0"
     },
     {
       "h1": "h1:A4xDbljILXROh+kObIiy5kIaPYD8e96x1tgBhUI5J+Y=",
       "module": "github.com/gobwas/glob",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 626,
+        "lookup_response_sha256": "f8ba8e65f98f052243278fa1d7e1d280fccbc46d0c45e77c8f1e44381dae97cc"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.3"
     },
     {
       "h1": "h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=",
       "module": "github.com/godbus/dbus/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48562435,
+        "lookup_response_sha256": "07a2ed1677ba31eb9db7bd8e95486177aaf3cd5c92b628611728ff0a9abc6f89"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.2.2"
     },
     {
       "h1": "h1:3qXRTX8/NbyulANqlc0lchS1gqAVxRgsuW1YrTJupqA=",
       "module": "github.com/gofrs/uuid",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15311835,
+        "lookup_response_sha256": "b6c829aedc38d13b136db3a7fa1f6caf61d06e5a3b74c6fda80436fd0e094ab9"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.4.0+incompatible"
     },
     {
       "h1": "h1:Ov1cvc58UF3b5XjBnZv7+opcTcQFZebYjWzi34vdm4Q=",
       "module": "github.com/gogo/protobuf",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 2451746,
+        "lookup_response_sha256": "198dcb663a507eb9391ced3dac461800a40363fc2a0f05bdff285bd97559887e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.2"
     },
     {
       "h1": "h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=",
       "module": "github.com/golang-jwt/jwt/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49375228,
+        "lookup_response_sha256": "8bfe69d61a2c93e19dfa719f206fe9f82871460c1b06b710542f560023243848"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.3.1"
     },
     {
       "h1": "h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=",
       "module": "github.com/golang/protobuf",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 23395798,
+        "lookup_response_sha256": "442d5a0de958530d6dfdd0a6c4510d195bed298cb32617e7e7f32a94db4ac3ff"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.5.4"
     },
     {
       "h1": "h1:s2Lawb9RMz7YyYf8IrfMQY4IFmA1R/lgfmj97Vc6fig=",
       "module": "github.com/golobby/cast",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 14688281,
+        "lookup_response_sha256": "8a050ce7c8d290b9eb43a7512c403e81cbe7e318aaf4da71599a45c341e242ae"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.3"
     },
     {
       "h1": "h1:CVpQJjYgC4VbzxeGVHfvZrv1ctoYCAI8vbl07Fcxlyg=",
       "module": "github.com/google/btree",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 29173511,
+        "lookup_response_sha256": "12eef8acc5a205da8a431b6d2954ec3bdb2ccb434f3339c014d1b9e8f2baa9cf"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.3"
     },
     {
       "h1": "h1:SisTfuFKJSKM5CPZkffwi6coztzzeYUhc3v4yxLWH8c=",
       "module": "github.com/google/gnostic-models",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 46601463,
+        "lookup_response_sha256": "3f0b295d5b601c3edf830e48d37af635177e6879c0721b89ce1b84f5906302b5"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.7.1"
     },
     {
       "h1": "h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=",
       "module": "github.com/google/go-cmp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 34799171,
+        "lookup_response_sha256": "ff0da1a44f827930ae850f0ece8459c81ce2e8792dfdf054910e6a1af1a7b99a"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.7.0"
     },
     {
       "h1": "h1:slArAR9Ft+1ybZu0lBwpSmpwhRXaa85hWtMinMyRAWo=",
       "module": "github.com/google/go-tpm",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48563729,
+        "lookup_response_sha256": "bbd73af63b75b90cfe8de68fd2c5b3b87fe5e82b8d7d7846102d95d07f18a6cf"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.9.8"
     },
     {
       "h1": "h1:tmrUohrwoLZZS/P3x7ex0WAVknEkBZM46iALbcqoRA8=",
       "module": "github.com/google/jsonschema-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48343719,
+        "lookup_response_sha256": "c88e1c562d10d1869db8f965d98dbdc2c0d5fe33c1ac6a25efb3a2448443d0f0"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.2"
     },
     {
       "h1": "h1:ijClszYn+mADRFY17kjQEVQ1XRhq2/JR1M3sGqeJoxs=",
       "module": "github.com/google/pprof",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35344745,
+        "lookup_response_sha256": "2b14974b90b41dc6ae48bd5ad41bc30f411a98e776e96075651aecc5a60d800b"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20250317173921-a4b03ec1a45e"
     },
     {
       "h1": "h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=",
       "module": "github.com/google/uuid",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 22152757,
+        "lookup_response_sha256": "e717e5abc4e43a44ff05e245fefd49da8b4d94532a405dfca4be2512f7140742"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.6.0"
     },
     {
       "h1": "h1:JeSE6pjso5THxAzdVpqr6/geYxZytqFMBCOtn/ujyeo=",
       "module": "github.com/gorilla/websocket",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35395609,
+        "lookup_response_sha256": "3f32d9d1c118a326ad672b3fca8f4de935ef1baaa79bcb999a33854bf75c17d3"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.5.4-0.20250319132907-e064f32e3674"
     },
     {
       "h1": "h1:+ngKgrYPPJrOjhax5N+uePQ0Fh1Z7PheYoUI/0nzkPA=",
       "module": "github.com/gregjones/httpcache",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 26417,
+        "lookup_response_sha256": "fc55230c55dfc87c60ae45b908471f17ac58c433f2de88a3148c30990e9aaec8"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20190611155906-901d90724c79"
     },
     {
       "h1": "h1:5VipnvEpbqr2gA2VbM+nYVbkIF28c5ZQfqCBQ5g2xfk=",
       "module": "github.com/grpc-ecosystem/grpc-gateway/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52514445,
+        "lookup_response_sha256": "08ee35b6923580a50dd222da14badc5ca18e30e6074389488c9f8f9ee98773cf"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.29.0"
     },
     {
       "h1": "h1:FBzxiwnP8kJoHL2ByDUSvaItbc7jF7LxZLTnHtO75wA=",
       "module": "github.com/hashicorp/consul/api/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54424723,
+        "lookup_response_sha256": "e6591307ccc29644f517c554e24087953c69f5d475114d6f8ffe191aae7d7ce2"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.0"
     },
     {
       "h1": "h1:OxrOeh75EUXMY8TBjag2fzXGZ40LB6IKw45YeGUDY2I=",
       "module": "github.com/hashicorp/errwrap",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1681191,
+        "lookup_response_sha256": "e65107c27a53f07126cf8974afb7a79358f66cb3dda1b80ef388a8e0077ab39b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:035FKYIWjmULyFRBKPs8TBQoi0x6d9G4xc9neXJWAZQ=",
       "module": "github.com/hashicorp/go-cleanhttp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 2691964,
+        "lookup_response_sha256": "a27b560e852f64ae6c237f2a9a7f66268aac5037ffe15aa990d2823c4890aa85"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.2"
     },
     {
       "h1": "h1:Qr2kF+eVWjTiYmU7Y31tYlP1h0q/X3Nl3tPGdaB11/k=",
       "module": "github.com/hashicorp/go-hclog",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 24883214,
+        "lookup_response_sha256": "f2aa134157e03aa3b17ccc7197614f3540cd5faf8e3c5f9c5b75bf1b358bc774"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.6.3"
     },
     {
       "h1": "h1:DKHmCUm2hRBK510BaiZlwvpD40f8bJFeZnpfm2KLowc=",
       "module": "github.com/hashicorp/go-immutable-radix",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 5807708,
+        "lookup_response_sha256": "ab224aa72e3ba15d9491376eeeb4ba2fce83ad513878d22b258db603707eab6d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.1"
     },
     {
       "h1": "h1:b3taDMxCBCBVgyRrS1AZVHO14ubMYZB++QpNhBg+Nyo=",
       "module": "github.com/hashicorp/go-memdb",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 34928883,
+        "lookup_response_sha256": "95c661f32cc329c48ed72fd644117050e32365f8cee8f7cd22d870f420c0ae73"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.5"
     },
     {
       "h1": "h1:+kjWqHRH2HxAocneVfB/BI6EeWUUHyPhyQZozMT8Ed4=",
       "module": "github.com/hashicorp/go-metrics",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56141903,
+        "lookup_response_sha256": "75aabd47b256b21069f045151edbbf17c99c20e76f967ebf455484e807c24b2c"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.6.0"
     },
     {
       "h1": "h1:Ue879bPnutj/hXfmUk6s/jtIK90XxgiUIcXRl656T44=",
       "module": "github.com/hashicorp/go-msgpack/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 44031578,
+        "lookup_response_sha256": "961f72ceabecb13ee6c6be2ad17bda1c0f0934c61124201312732d5e88505cf0"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.1.5"
     },
     {
       "h1": "h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=",
       "module": "github.com/hashicorp/go-multierror",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3266080,
+        "lookup_response_sha256": "6d8422f6537b2dc08fd8ac6f5be5401e958ebda1edd935b480df9fa234bff49a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.1"
     },
     {
       "h1": "h1:ylXZWnqa7Lhqpk0L1P1LzDtGcCR0rPVUrx/c8Unxc48=",
       "module": "github.com/hashicorp/go-retryablehttp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 39029171,
+        "lookup_response_sha256": "662c62a9c7e0a70c40dc230b0668f96da72ea4a228ae383d409dccd7e8e89ed0"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.7.8"
     },
     {
       "h1": "h1:jzhAVGtqPKbwpyCPELlgNWhE1znq+qwJtW5Oi2viEzc=",
       "module": "github.com/hashicorp/go-rootcerts",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 528773,
+        "lookup_response_sha256": "3a3852ce6626e606e18f517ac33fa3dbe1d9c3193fe3ad3ef17e09c86b4e36d8"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.2"
     },
     {
       "h1": "h1:U+kC2dOhMFQctRfhK0gRctKAPTloZdMU5ZJxaesJ/VM=",
       "module": "github.com/hashicorp/go-secure-stdlib/parseutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35100380,
+        "lookup_response_sha256": "16698862323fa7cd6ff6e55989af6d0059f06be2fe3e767b6605b8630dc7acb8"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.0"
     },
     {
       "h1": "h1:kes8mmyCpxJsI7FTwtzRqEy9CdjCtrXrXGuOpxEA7Ts=",
       "module": "github.com/hashicorp/go-secure-stdlib/strutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 8063584,
+        "lookup_response_sha256": "5d608f0380b70d5ee8d1064a96d0dec8e3ec42df06756fa7040949c173b779ed"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.2"
     },
     {
       "h1": "h1:G+pTkSO01HpR5qCxg7lxfsFEZaG+C0VssTy/9dbT+Fw=",
       "module": "github.com/hashicorp/go-sockaddr",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 30248475,
+        "lookup_response_sha256": "30060fd107c7fa50ada9216957759d9a8ab61d43f4591d435b53831ca673fcf9"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.7"
     },
     {
       "h1": "h1:2gKiV6YVmrJ1i2CKKa9obLvRieoRGviZFL26PcT/Co8=",
       "module": "github.com/hashicorp/go-uuid",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 10018907,
+        "lookup_response_sha256": "b41b7d0b22deddd0fa130565c23a4ab81becc33a36d6b1ba8bd11f8c26d1f5b5"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.3"
     },
     {
       "h1": "h1:dV3g9Z/unq5DpblPpw+Oqcv4dU/1omnb4Ok8iPY6p1c=",
       "module": "github.com/hashicorp/golang-lru",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 18935519,
+        "lookup_response_sha256": "938006926e684a0dad4d6043e0cb0200389730432169b68fcdf5ae1542d47a91"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.2"
     },
     {
       "h1": "h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=",
       "module": "github.com/hashicorp/golang-lru/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 19827499,
+        "lookup_response_sha256": "d02bce8ec2dd83177f14a8e7191ea4932538e1c536f1a36fb8a57e92ebd1716a"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.7"
     },
     {
       "h1": "h1:ag5OxFVy3QYTFTJODRzTKVZ6xvdfLLCA1cy/Y6xGI0I=",
       "module": "github.com/hashicorp/hcl",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 31491841,
+        "lookup_response_sha256": "a99e85138981cc458dd320eec39e1d446df8111c8c7af4b04cf589f009ed9812"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.1-vault-7"
     },
     {
       "h1": "h1:dLEQVugN8vlakKOUE3ihGLTZJRB4j+M2cdTm/ORI65Y=",
       "module": "github.com/hashicorp/logutils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 700,
+        "lookup_response_sha256": "2b782753583921a1c7ea16fd249107936a49ead8720a7e0c7ba6dffacd41e66b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:40YY+3qq2tAUhZIMEK8kqusKZBBjdwJ3NUjvYkcxh74=",
       "module": "github.com/hashicorp/memberlist",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48179438,
+        "lookup_response_sha256": "f4017d05cb65b97ce520b1f46155f5cff02e717d91591e1b609d2968bad249cb"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.4"
     },
     {
       "h1": "h1:m5IORhuNSjaxeljg5DeQVDlQyVkhRIjJDimbkCa8aAc=",
       "module": "github.com/hashicorp/serf",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 33890625,
+        "lookup_response_sha256": "731055d52e8bdc5628d67ca2db82c67da0160bdfa3687f2c23b043b4a4817066"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.10.2"
     },
     {
       "h1": "h1:gXgluBsSECfRWTSW9niY2jwg2e9mMJc4WoHNv4g3h6A=",
       "module": "github.com/hashicorp/vault/api",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51560539,
+        "lookup_response_sha256": "1eaaef72d3627a8c0d0ad3fe166ac55078c3942671af3dc2c0ae666744f06ccc"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.23.0"
     },
     {
       "h1": "h1:XtB8kyFOyHXYVFnwT5C3+Bdo8gArse7j2AQ0DA0Uey8=",
       "module": "github.com/hashicorp/yamux",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 30171566,
+        "lookup_response_sha256": "61bce3dc08ac9c2ebc932ae2b95e93ea75bf1bfb88fd5a924cd28ebc8367773b"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.2"
     },
     {
       "h1": "h1:nTXanmYxhfFAMjZL34Ov6gkzEsSJZ5DbhxWjvSASxEI=",
       "module": "github.com/iancoleman/strcase",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 18462954,
+        "lookup_response_sha256": "53909a0f1f73296cd9945e30e92d92dfcf1bdb2131ec8632618ffd0c290e13c1"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.0"
     },
     {
       "h1": "h1:ttXA0XCLEMoaLOz5lSeFOZ6u6Q3QxmG46vfgI4O0DEs=",
       "module": "github.com/itchyny/gojq",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51900350,
+        "lookup_response_sha256": "438e633b6e8f7f2050c51379d3647d288708758700f5a5e00468b78a0e3c2fad"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.12.19"
     },
     {
       "h1": "h1:1YEo1JvfXeAHKdjelbYr/uCuhkybaHCeTkH8Bo791OI=",
       "module": "github.com/itchyny/timefmt-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51890233,
+        "lookup_response_sha256": "fdf430c58e8c31383b806cc9fe3e499166aa98000295989ed54a2de1493a6ec1"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.8"
     },
     {
       "h1": "h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=",
       "module": "github.com/jackc/pgpassfile",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 13788,
+        "lookup_response_sha256": "f15d45b0e41987475342777fe342b285109d020709955e9e91080298f839d704"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=",
       "module": "github.com/jackc/pgservicefile",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 26651622,
+        "lookup_response_sha256": "941516d2f6f19b344bf865eae695c5b2ab5727f2edaf42961dba63f720f7b2b6"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20240606120523-5a60cdf6a761"
     },
     {
       "h1": "h1:VhSvgU2jSli8o3AqIEOTJr7rZwAEUVo4E4XhR94Zfr0=",
       "module": "github.com/jackc/pgx/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55060044,
+        "lookup_response_sha256": "f1f41bb21f26014bc4509f18fbb00354ecf4349a09b5784187d0d4d28924bbe0"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.10.0"
     },
     {
       "h1": "h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=",
       "module": "github.com/jackc/puddle/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 29670643,
+        "lookup_response_sha256": "0c775911a69ad2f51d33435beb4fad8a2ed6ba70d15be8d967894e13551b6836"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.2.2"
     },
     {
       "h1": "h1:9YKLH6ey7H4eDBXW8khjYslgyqG2xZikXP0EQFKrle8=",
       "module": "github.com/jcmturner/aescts/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 759705,
+        "lookup_response_sha256": "dbfca46318d7cc939fcb61be3d06c39852bfeb397ee7bda91eca065e11e7cf6a"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.0"
     },
     {
       "h1": "h1:lltnkeZGL0wILNvrNiVCR6Ro5PGU/SeBvVO/8c/iPbo=",
       "module": "github.com/jcmturner/dnsutils/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 759653,
+        "lookup_response_sha256": "c3c6d646118fd0e0f8cf672c0885ca7b9f4ac9a45b58408414d790985bfce342"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.0"
     },
     {
       "h1": "h1:QH0l3hzAU1tfT3rZCnW5zXl+orbkNMMRGJfdJjHVETg=",
       "module": "github.com/jcmturner/gofork",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 11602394,
+        "lookup_response_sha256": "dc426db650e66fb5e3a269df217c6b81e24397cbc2f294309d9b6d8b6f96f7dc"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.7.6"
     },
     {
       "h1": "h1:VKnZd2oEIMorCTsFBnJWbExfNN7yZr3EhJAxwOkZg6o=",
       "module": "github.com/jcmturner/goidentity/v6",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 718308,
+        "lookup_response_sha256": "5b799d0e0351e758a8d26e3fd2f8bff54302411d63bb219c5b94bf0aa89bc5e0"
+      },
+      "public_identity_reviewed": true,
       "version": "v6.0.1"
     },
     {
       "h1": "h1:x1Sv4HaTpepFkXbt2IkL29DXRf8sOfZXo8eRKh687T8=",
       "module": "github.com/jcmturner/gokrb5/v8",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15965114,
+        "lookup_response_sha256": "d6e1169f3da84e691fc8b969fd0f05c02d3ba6318583aa7ac9ca24b18d440b92"
+      },
+      "public_identity_reviewed": true,
       "version": "v8.4.4"
     },
     {
       "h1": "h1:7FXXj8Ti1IaVFpSAziCZWNzbNuZmnvw/i6CqLNdWfZY=",
       "module": "github.com/jcmturner/rpc/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1826950,
+        "lookup_response_sha256": "abde5cb960bd304ce042736bd35e77b97ff3c58fd54004558064cbb81f32e240"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.3"
     },
     {
       "h1": "h1:54fZg+49widqXYQ0b+usAFHbMkBGR4PpXrsHc8+TBDg=",
       "module": "github.com/jhump/protoreflect",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 25052281,
+        "lookup_response_sha256": "70bdcd7311b6707d8f0b158bf4811979c2fab0cd7b8999e3ad4a905cfb1c6ae9"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.16.0"
     },
     {
       "h1": "h1:9Nu54bhS/H/Kgo2/7xNSUuC5G28VR8ljfrLKU2G4IjU=",
       "module": "github.com/json-iterator/go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 12562376,
+        "lookup_response_sha256": "c98002220a1e6d5f7372de6109c24749d1cfcb57ddca3488d5c1d71dffd1f2bd"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.13-0.20220915233716-71ac16282d12"
     },
     {
       "h1": "h1:J+D04RuxEKtybzCjuzgcmQuFBiEpYa+5vPU2mAgAxTs=",
       "module": "github.com/kapetan-io/tackle",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52924881,
+        "lookup_response_sha256": "e7d9c666252f4f2eecc70f2d8ac90fd64240ba29efe8275dbb50f288810f6a15"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.15.0"
     },
     {
       "h1": "h1:vJ0Snvo+SLMY72r5J4sEfkuE7AFbixEP2qRbEcum/wA=",
       "module": "github.com/karlseguin/expect",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 341664,
+        "lookup_response_sha256": "1d62e1626be5bd3d59da31d2c4b6e297a060c89fee4c837839b9d9191866c705"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.2-0.20190806010014-778a5f0c6003"
     },
     {
       "h1": "h1:2jupLlAwFm95+YDR+NwD2MEfFO9d4z4Prjl1XXDjuao=",
       "module": "github.com/klauspost/compress",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53269868,
+        "lookup_response_sha256": "484ba749cfde821584723d3f8164f39326ecdf23c11beeba8b6b4be3cad5518a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.18.6"
     },
     {
       "h1": "h1:sXLILfc9jV2QYWkzFOPWStmcUVH2RHEB1JCdY2oVvCQ=",
       "module": "github.com/klauspost/compress",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56588314,
+        "lookup_response_sha256": "48749acf3ed926dfc1a25710b9b4eec22514f12248f4c7049e8942f079bd2c61"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.19.0"
     },
     {
       "h1": "h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV913Dw=",
       "module": "github.com/klauspost/cpuid/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56524361,
+        "lookup_response_sha256": "35e944a20385a4d1cf949087c5d2881597683ab84de8927f1514e293414d1e16"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.4.0"
     },
     {
       "h1": "h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=",
       "module": "github.com/kr/pretty",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 13437364,
+        "lookup_response_sha256": "2352d64d088743d446a436d95e9960a0e551b11de1534b68eb3f1218e2b40bfe"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.1"
     },
     {
       "h1": "h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=",
       "module": "github.com/kr/text",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 787542,
+        "lookup_response_sha256": "d67dfad6979fc5fda6910d9391a43ac5bd70b3507f3838e98a24314f93e11315"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.0"
     },
     {
       "h1": "h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=",
       "module": "github.com/kylelemons/godebug",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 13431,
+        "lookup_response_sha256": "d85e2683ed9f14aacaf33514d2d176d00c7308d0470af68d3428bb5ef897dcba"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:voD1M+ZJXR3MREOKtBwgTF9hYHl1jg+vFKS/+VAkR2k=",
       "module": "github.com/launchdarkly/ccache",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3336274,
+        "lookup_response_sha256": "54cec829f796482b60fcb9ed9d52fdda5af9281d01244fd7e4c07098e8b041a4"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:H9Tp6AfGu/G2qzBJC26iperrvwhzdbiA/gx7qE2nDFI=",
       "module": "github.com/launchdarkly/eventsource",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 39483868,
+        "lookup_response_sha256": "1052cf46940760963446a9987dfcae9ea3b322cbc9bf5289f9c482bd2f6b7434"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.10.0"
     },
     {
       "h1": "h1:k33tuR18RtCmY27RYAJGNVjpGSdXhUiiyvGdX3zb2kE=",
       "module": "github.com/launchdarkly/go-jsonstream/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54831998,
+        "lookup_response_sha256": "862bed88d2cfcb14951e5a12b3ab49dfb72514d4092ffedf4b0ccb945a525c10"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.0.0"
     },
     {
       "h1": "h1:hN8b0RSUKFQRJJwfhPx6//jrIoqb/XpZa7elgv7X4Rc=",
       "module": "github.com/launchdarkly/go-sdk-common/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54833728,
+        "lookup_response_sha256": "36fb70b77e1f12bb46bfd94115010fffc09934bb64f356a65cd337c75c0190ac"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.0.0"
     },
     {
       "h1": "h1:9G0h7E03DpQtcOmofjm8Xumq/Epi8DxBcP8OETNr8b8=",
       "module": "github.com/launchdarkly/go-sdk-events/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54843305,
+        "lookup_response_sha256": "4093781ff9e9f3ec00d652d91704ec234c58799681a27712714f0b49af7b9ea3"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.6.1"
     },
     {
       "h1": "h1:agIy/RN3SqeQDIfKkl+oFslEdeIs7pgsJBs3CdCcGQM=",
       "module": "github.com/launchdarkly/go-semver",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 29178762,
+        "lookup_response_sha256": "10b4461ca9bcd521e89e08c33bb46e0f1f965379c159448c595e22798f12a374"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.3"
     },
     {
       "h1": "h1:p66IaTRGgZ0fONBzZ6Ilvlg776nHwM/B4YGSIjFQ7qw=",
       "module": "github.com/launchdarkly/go-server-sdk-evaluation/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54876910,
+        "lookup_response_sha256": "8fac133154e05d6cacd43325267d90deae926dbe8fe58e375e0aa37c2a06a9c3"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.0.0"
     },
     {
       "h1": "h1:romx94MuAR9E0y95QtAZu7wwHMMFbVojn8M9iHHCXAk=",
       "module": "github.com/launchdarkly/go-server-sdk/v7",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55128044,
+        "lookup_response_sha256": "309ff1a24b4ea45fae7612cf32bc5339d73276684156c39f82249bfb3b6d7b59"
+      },
+      "public_identity_reviewed": true,
       "version": "v7.15.2"
     },
     {
       "h1": "h1:E3bxJMzMoA+cJSF3xxtk2/chr1zshl1ZWa0/oR+8bvg=",
       "module": "github.com/launchdarkly/go-test-helpers/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 39427161,
+        "lookup_response_sha256": "60812fa891e9e79e0c8fd3671ae5e88c6ddbe95b9221d63a23c38e7e28664ef8"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.1.0"
     },
     {
       "h1": "h1:tTWxr2YLKwIvK90ZXEw8GP7UFHtcbTtty8zsI+YjrfQ=",
       "module": "github.com/lib/pq",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52005482,
+        "lookup_response_sha256": "3d33efb8fc6d9e437e944b1e35bb0ce6a52adb833801cb1b47c91d762bdee0ce"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.12.3"
     },
     {
       "h1": "h1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=",
       "module": "github.com/lucasb-eyer/go-colorful",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51755695,
+        "lookup_response_sha256": "8ebce5dc4bb489bf0625a414c9be9f2c1965aa8a74ba762f370c487b4e67ff28"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.4.0"
     },
     {
       "h1": "h1:Q6MvJtQK/iRcRtzAscm/zF23XxJlbECiGPyRicsX+Ak=",
       "module": "github.com/lufia/plan9stats",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51814053,
+        "lookup_response_sha256": "b3cac95ce6c04716f4e9f630beb030cf145060f3dd56e01bc9a67f0631104ea5"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260330125221-c963978e514e"
     },
     {
       "h1": "h1:s31yESBquKXCV9a/ScB3ESkOjUYYv+X0rg8SYxI99mE=",
       "module": "github.com/magiconair/properties",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 36260914,
+        "lookup_response_sha256": "f5b856433d33c435fed98eb6d226c5dbbb3f47a2fa2a17d37543562509894502"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.8.10"
     },
     {
       "h1": "h1:Ap/ptEB9FtWzFKM8NDsTA7QDxerQOC06eZigrTldVj0=",
       "module": "github.com/mark3labs/mcp-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54667994,
+        "lookup_response_sha256": "e71d8c27c2d62c57586a3a21891eae74c31651eff76e1d14c1925e91af3d0ef9"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.54.1"
     },
     {
       "h1": "h1:+u9SLTRGnXv73cEsnsmoZBom+dMU88B2M0aDcWy0/jY=",
       "module": "github.com/mattn/go-colorable",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54871273,
+        "lookup_response_sha256": "35e99de1cb7178937701b5e75ba0c1bbebebe44f09d0eba4870cd7e0e73a2117"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.15"
     },
     {
       "h1": "h1:j8l17JJ9i6VGPUFUYoTUKPSgKe/83EYU2zBC7YNKMw4=",
       "module": "github.com/mattn/go-isatty",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52991825,
+        "lookup_response_sha256": "3f835719b48c6cd096a633c5c4ffa6a682b03f02c9345e6521f08406bb700306"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.22"
     },
     {
       "h1": "h1:cpokDiIn0MGnhdHwuWnJBITySJ20QyNGnY2kR/ay2DU=",
       "module": "github.com/mattn/go-runewidth",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54870266,
+        "lookup_response_sha256": "788f457b78570d1caa830f568d73ea4c64aaebcc3b17a9cf5423011545b1cb7a"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.24"
     },
     {
       "h1": "h1:M2zGm7EW6UQJvDeQxo4T51eKPurbeFbe8WtebGE2xrk=",
       "module": "github.com/mattn/go-shellwords",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 5144208,
+        "lookup_response_sha256": "98240669ccd2171a38c5ead2ee7162bb85574c96e0dfbf52a76d243b46c2a0c2"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.12"
     },
     {
       "h1": "h1:vhmr+TF2A3tuoGNkLDFK9zi36F2LS+hKTRW0Uf8kbzI=",
       "module": "github.com/miekg/dns",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49184328,
+        "lookup_response_sha256": "236674de5a37e92abe8018ce6246c98815a155a2bed38902f3ba919c0de27f1b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.72"
     },
     {
       "h1": "h1:asJizugGgchQod2ja9NJlGOWq4s7KsAWr5XUc9Clgl4=",
       "module": "github.com/minio/highwayhash",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51476572,
+        "lookup_response_sha256": "1f878f17f2b372da2ac42199e0e7326826ac5117784150b110148411c5bcaad7"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.4"
     },
     {
       "h1": "h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG+4E0Y=",
       "module": "github.com/mitchellh/go-homedir",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1398,
+        "lookup_response_sha256": "ad1ba763afafc67ff3d98b7e80136be78967bab72a3b2a6766b7362cd9d2e5ed"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:jrgshOhYAUVNMAJiKbEu7EqAwgJJ2JqpQmpLJOu07cU=",
       "module": "github.com/mitchellh/go-testing-interface",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1131627,
+        "lookup_response_sha256": "d32b3b2eb84366c0b260e07187e73bfe2c9d95c64bd141fd2eaea2da83908f52"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.14.1"
     },
     {
       "h1": "h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=",
       "module": "github.com/mitchellh/mapstructure",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 10312811,
+        "lookup_response_sha256": "08f173e4531064e51a948274c517a01436e3c434562d3f4b51e1a0fdbd8c8861"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.5.0"
     },
     {
       "h1": "h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=",
       "module": "github.com/moby/docker-image-spec",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 22682585,
+        "lookup_response_sha256": "bb1af5e31f67b311ce937aac366d3f0bbe65accbf93dd3ad5e91d6ad300eebce"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.1"
     },
     {
       "h1": "h1:zg5QDUM2mi0JIM9fdQZWC7U8+2ZfixfTYoHL7rWUcP8=",
       "module": "github.com/moby/go-archive",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48349657,
+        "lookup_response_sha256": "498ee70247c078d03bb3620a61138c0565845837f56666803a4a4fa29d8c4182"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.0"
     },
     {
       "h1": "h1:2/sexvQyqIWS8pRSCFddBfpW2qE7vR7FCL+vN8pxwMc=",
       "module": "github.com/moby/moby/api",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55864848,
+        "lookup_response_sha256": "407b715c6f1135105e8ff7a92f5fce867c747d722782b742c3c06a051ffef8a8"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.55.0"
     },
     {
       "h1": "h1:5XhyPk2fuOWf6RlSFa3MkIIgDZkF25xToXW8Q/BH7cc=",
       "module": "github.com/moby/moby/client",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55865502,
+        "lookup_response_sha256": "ed4353bb0c0246e1f79e2970ca7087869a6650ac23846305dec52dd47789a407"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.0"
     },
     {
       "h1": "h1:qlhtafmr6kgMIJjKJMDmMWq7WLkKIo23hsrpR3x084U=",
       "module": "github.com/moby/patternmatcher",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51608736,
+        "lookup_response_sha256": "0855b5ae853bd754a024eb5163198b8a69ab29f41f6df91bb4eb3e7a9bad1c84"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.6.1"
     },
     {
       "h1": "h1:ASQNGNROJSuOO6LL6bPHbKvuZu6NU8P4ldPWk31zj/8=",
       "module": "github.com/moby/sys/sequential",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55165337,
+        "lookup_response_sha256": "66e55c4603378bae8be6e271894228c009eb3bcf9a813bbd6276174517ceb224"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.7.0"
     },
     {
       "h1": "h1:jhcMKit7SA80hivmFJcbB1vqmw//wU61Zdui2eQXuMs=",
       "module": "github.com/moby/sys/user",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 36149763,
+        "lookup_response_sha256": "eb9a5392d81ca6fba4635adf98aba9d31ec7afe88eda5120d94b77fb592ba370"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.0"
     },
     {
       "h1": "h1:tVLXkFOxVu9A64/yh59slHVv9ahO9UIev4JZusOLG/g=",
       "module": "github.com/moby/sys/userns",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 28907710,
+        "lookup_response_sha256": "87f0aeb29240d6e4d8fc134f4b65130d89bdde6dd58f57449ec344ce491ee723"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.0"
     },
     {
       "h1": "h1:6qk3FJAFDs6i/q3W/pQ97SX192qKfZgGjCQqfCJkgzQ=",
       "module": "github.com/moby/term",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 33230685,
+        "lookup_response_sha256": "bf5321c1de4d2aa4357e3783681311ecf0e5312a350ba6225443548304c4dd44"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.2"
     },
     {
       "h1": "h1:TRLaZ9cD/w8PVh93nsPXa1VrQ6jlwL5oN8l14QlcNfg=",
       "module": "github.com/modern-go/concurrent",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 133,
+        "lookup_response_sha256": "2e87f054e9c124668e023872e732a61c65cbf1ddf4a28d1d2bd15e0d4770c13e"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20180306012644-bacd9c7ef1dd"
     },
     {
       "h1": "h1:W5t00kpgFdJifH4BDsTlE89Zl93FEloxaWZfGcifgq8=",
       "module": "github.com/modern-go/reflect2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35615907,
+        "lookup_response_sha256": "b150a15c39fbea6c6045f6bd6f578353a5781d0083c0e4cd30153216978ebc93"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.3-0.20250322232337-35a7c28c31ee"
     },
     {
       "h1": "h1:8imxQsjDm8yFEAVBe7azKmKSgzSkZXDuKkSq9374khM=",
       "module": "github.com/mschoch/smat",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1037317,
+        "lookup_response_sha256": "a7e7a31af4e9f77f867a29518235d6de605f7866b98fa9610bb00056a983bae6"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.0"
     },
     {
       "h1": "h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=",
       "module": "github.com/muesli/cancelreader",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 11078515,
+        "lookup_response_sha256": "d1ad31b30c5e4e32c8672e622721d742f92d5fd7975667c4146b471d554d7f66"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.2"
     },
     {
       "h1": "h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=",
       "module": "github.com/muesli/termenv",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 34791516,
+        "lookup_response_sha256": "db0f77fddb8240e6ffdaf800f6e600bddc9484e445d53032d9864e8db5197029"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.16.0"
     },
     {
       "h1": "h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=",
       "module": "github.com/munnerz/goautoneg",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 307070,
+        "lookup_response_sha256": "5f9d1df485b75208a15200581b52b0aab1730b19bdfb46ca9423a259a137b4ed"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20191010083416-a7dc8b61c822"
     },
     {
       "h1": "h1:XXRgB60MSTnqsRwejQurVDs/hcv2dkt+86GjI+I/bMc=",
       "module": "github.com/nats-io/jwt/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55037080,
+        "lookup_response_sha256": "1a263e5c60fb34dda85f98f7abba6c6bfbd0f83e199c629a5bd7da28ec1d9998"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.8.2"
     },
     {
       "h1": "h1:+xjydPt7rkit67G+04TN0mcO2n+8nveZE7tK/PPV53A=",
       "module": "github.com/nats-io/nats-server/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56476781,
+        "lookup_response_sha256": "edc44ffcc14cac390ed16b29ad8dd04ead5a0092a7a0b33ecd51d52dfd74e9c9"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.14.3"
     },
     {
       "h1": "h1:n3avV4VBsCgsdwh71TppsTwtv+QdPs7ntSKM8qJLGsc=",
       "module": "github.com/nats-io/nats.go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53673636,
+        "lookup_response_sha256": "11b20bd8a3e0f65e6f578b801bbe96eed39dc5c29c9bdc715abcaa84ae2ce325"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.52.0"
     },
     {
       "h1": "h1:rd5oAuLOb8mnAycB0xleuEBNS1pVVnN0fv/FF34Eypg=",
       "module": "github.com/nats-io/nkeys",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55036917,
+        "lookup_response_sha256": "bd35da24b8c347d4e3567e44174b5710a5b23eb7b794d3bcabfac00b4f5f331d"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.16"
     },
     {
       "h1": "h1:5iA8DT8V7q8WK2EScv2padNa/rTESc1KdnPw4TC2paw=",
       "module": "github.com/nats-io/nuid",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 721,
+        "lookup_response_sha256": "c5e949f86f334561810dfd88ff01d1324314763677b0f642295e85a6ccb0f739"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.1"
     },
     {
       "h1": "h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=",
       "module": "github.com/ncruces/go-strftime",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 44790734,
+        "lookup_response_sha256": "18da4782160a38d5c2916e53e5ad7554086ccf857b8ec77d6fa71c6a1beb6474"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:O8x3yXwah4A73hJdlrwo/2X6J62gE5qTMusH0dvz60E=",
       "module": "github.com/oklog/run",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 39319290,
+        "lookup_response_sha256": "fa943926dad81fae2a4e0d4be170444eb8e49f1a1c9fa0730da84e4894c014f5"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.0"
     },
     {
       "h1": "h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=",
       "module": "github.com/opencontainers/go-digest",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1201082,
+        "lookup_response_sha256": "1d4f53b08ef083bc9660becfde434f322c830e793faac15733a40f4966b7e4df"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=",
       "module": "github.com/opencontainers/image-spec",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35016676,
+        "lookup_response_sha256": "49824a48ae2687364dd29d24f4940092838531fcbbb2fe7e6a889fdc1a0c991e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.1"
     },
     {
       "h1": "h1:cBOtyMzM9HTpWjXfbbunk26uA6nG3a8n06Wieeh0MwY=",
       "module": "github.com/pascaldekloe/goe",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3242,
+        "lookup_response_sha256": "9c0e16635bf7b1ec3e77fe86df2f8c71e65058af68aa4f180440891213c3d1e0"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.1.0"
     },
     {
       "h1": "h1:HRMgzkcYKYpi3C8ajMPV8OFXaaRUnok+kx1WdO15EQc=",
       "module": "github.com/patrickmn/go-cache",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 383,
+        "lookup_response_sha256": "8702fd3cb20ba74103e0753761868235747cc571bca3646882f78a2a63fbba76"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.1.0+incompatible"
     },
     {
       "h1": "h1:rh2lKw/P/EqHa724vYH2+VVQ1YnW4u6EOXl0PMAovZE=",
       "module": "github.com/petermattis/goid",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50563643,
+        "lookup_response_sha256": "901badab322f38e076e258d1363cbf8de14d29c8bdf9c330ceaede2ce700e8fa"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260226131333-17d1149c6ac6"
     },
     {
       "h1": "h1:+PhzhWDrjRj89TH2sw43nE3+4+W8lSxIuQadEHZyjUk=",
       "module": "github.com/pierrec/lz4/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54949265,
+        "lookup_response_sha256": "a1a0368f482f5ce9952b1d45bf49a14bd6fd61686fd10041ce08740b7b43b741"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.1.27"
     },
     {
       "h1": "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
       "module": "github.com/pkg/errors",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 706716,
+        "lookup_response_sha256": "84a423562e6748958b4c187d159e46e9c1435347efedf1b55a3c4db3f2e17254"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.9.1"
     },
     {
       "h1": "h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=",
       "module": "github.com/pmezard/go-difflib",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 16828,
+        "lookup_response_sha256": "eefe9a89de0cdc6187304edd94f30b80b2f6e030466c359ca9919819abac3974"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.1-0.20181226105442-5d4384ee4fb2"
     },
     {
       "h1": "h1:o4JXh1EVt9k/+g42oCprj/FisM4qX9L3sZB3upGN2ZU=",
       "module": "github.com/power-devops/perfstat",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 22998377,
+        "lookup_response_sha256": "db192ab96ff5c51c4d9a2bceec92a04b2c61aba6171bbcd15dfa09672ad12750"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20240221224432-82ca36839d55"
     },
     {
       "h1": "h1:Je96obch5RDVy3FDMndoUsjAhG5Edi49h0RJWRi/o0o=",
       "module": "github.com/prometheus/client_golang",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43160415,
+        "lookup_response_sha256": "ad517825fdefe681e3eb350b18789e53f42c6f6a680c6388c74661f3df94f03b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.23.2"
     },
     {
       "h1": "h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=",
       "module": "github.com/prometheus/client_model",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 36301553,
+        "lookup_response_sha256": "a169c42e35ec85ef056b6456e4edd9fb7c35ae4d58edfe2841de3aca200661fd"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.6.2"
     },
     {
       "h1": "h1:pIgK94WWlQt1WLwAC5j2ynLaBRDiinoAb86HZHTUGI4=",
       "module": "github.com/prometheus/common",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48714881,
+        "lookup_response_sha256": "80a5d3c00decfc3708c1a4bc4d0a7e1ccc9d90b462790567e5cb3bb18be58c42"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.67.5"
     },
     {
       "h1": "h1:XwbrGOIplXW/AU3YhIhLODXMJYyC1isLFfYCsTEycfc=",
       "module": "github.com/prometheus/procfs",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50642851,
+        "lookup_response_sha256": "4d4b949b7492b42047250fd5a1c996d2d49fffd14bba9dc5a2d68f4c822c6e5c"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.20.1"
     },
     {
       "h1": "h1:bsUq1dX0N8AOIL7EB/X911+m4EHsnWEHeJ0c+3TTBrg=",
       "module": "github.com/rcrowley/go-metrics",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 36089680,
+        "lookup_response_sha256": "842d1fc688504fe4a764961d4b09a051e325b21d44bde847a221369c787a0182"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20250401214520-65e299d6c5c9"
     },
     {
       "h1": "h1:FPBE4hhbAke+TLmcY3WkpbDffJEomdqPn3HYiqAtL9E=",
       "module": "github.com/redis/go-redis/v9",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55994732,
+        "lookup_response_sha256": "61943bdf400094b8d0a234366a10904e36a8f6dcb0616df9322f75a89a2c04b0"
+      },
+      "public_identity_reviewed": true,
       "version": "v9.21.0"
     },
     {
       "h1": "h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=",
       "module": "github.com/remyoudompheng/bigfft",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15339218,
+        "lookup_response_sha256": "5dd5b6548ec3e8703542e07f0d367bc176cee8ae519d629037098b92cd6000fe"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20230129092748-24d4a6f8daec"
     },
     {
       "h1": "h1:IQUnwTtNURVtdcwH4CJhFH3dXAUwP2fXZaNjPp+sJAY=",
       "module": "github.com/reugn/go-quartz",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43474493,
+        "lookup_response_sha256": "ce174c03695336c9f163a3da2a2ebebc8e4a93029fce787a6072a7aa8e94d389"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.15.2"
     },
     {
       "h1": "h1:vQ4GeJN86C0QH+gTUQcs8McmK62OLT3kmakPMtEWYnY=",
       "module": "github.com/rhysd/actionlint",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51822501,
+        "lookup_response_sha256": "c719133f2e03c902f124a6e65197ca2342cff4baec256b30cd1c7d08f3f5dc10"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.7.12"
     },
     {
       "h1": "h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=",
       "module": "github.com/rivo/uniseg",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 22647345,
+        "lookup_response_sha256": "b9a93f68dcdc89598e5f80f5c6df55f89b9dc929ea0e5f537286d389a8f25eec"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.7"
     },
     {
       "h1": "h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=",
       "module": "github.com/robfig/cron/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 681870,
+        "lookup_response_sha256": "c14499833eb0e86cc828598a5305f7e847a704f259820c5a2ec7eefa642348ad"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.0.1"
     },
     {
       "h1": "h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=",
       "module": "github.com/rogpeppe/go-internal",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 34868592,
+        "lookup_response_sha256": "bab52282dd87acc4db1be8ce3eee5127b44ab03304809792c1b94f9133902285"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.14.1"
     },
     {
       "h1": "h1:iQh3xXAumdQ+4Ufa5b25cRpC5TYKlno6hsv6Cb3pkBk=",
       "module": "github.com/ryanuber/go-glob",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3872,
+        "lookup_response_sha256": "c4dba28175c5cc4192bee6fc4c2119207b20cb259960614b043d8c1ad8f389d3"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=",
       "module": "github.com/santhosh-tekuri/jsonschema/v6",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 37740709,
+        "lookup_response_sha256": "bc678c2fe402037f9ca5716ec98077e1cf73e6790c783a088af0504832fc9c64"
+      },
+      "public_identity_reviewed": true,
       "version": "v6.0.2"
     },
     {
       "h1": "h1:fiaT9rB7g5sr5ddNZvlwheclN9IP86eFW9WgqlEQV+w=",
       "module": "github.com/sasha-s/go-deadlock",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51372591,
+        "lookup_response_sha256": "f101dbe4e4ed70c11207413b9db288aa5147e0784d4ca0e9d921ad8dfa73ad4e"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.9"
     },
     {
       "h1": "h1:nn5Wsu0esKSJiIVhscUtVbo7ada43DJhG55ua/hjS5I=",
       "module": "github.com/sean-/seed",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 365,
+        "lookup_response_sha256": "d2a1f51e2cf606f8e185e734f9c4f36a2641b330bd2680d8f38313e6196f3138"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20170313163322-e2103e2c3529"
     },
     {
       "h1": "h1:sBo2BdShXjmcugAMwjugoGUdUV0pcxY5mW4xKRn3v4c=",
       "module": "github.com/segmentio/ksuid",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 6024353,
+        "lookup_response_sha256": "960a502ee89fab87ca4535930671122b489c3f82aa088d9c8fd75c72fed83fff"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.4"
     },
     {
       "h1": "h1:RPcBXkpz7kOj9PqGFQOlBPZHsyaPvPVQc098y9RmCNM=",
       "module": "github.com/shirou/gopsutil/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54973687,
+        "lookup_response_sha256": "94d87fbe860d30e110a34116afe3c2278265d9d0460b2c3249c19081c104852b"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.26.5"
     },
     {
       "h1": "h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=",
       "module": "github.com/sirupsen/logrus",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48984711,
+        "lookup_response_sha256": "5007b87813e6c05eacd55fcd8f5e2d9b98d16a2641ae1a45e9e043317f9d1c63"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.9.4"
     },
     {
       "h1": "h1:2GtljixMQYUYCmIg7W9aF2dFmniq/mOr2T9tFRh6zSQ=",
       "module": "github.com/sourcegraph/jsonrpc2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 37194984,
+        "lookup_response_sha256": "72af4d6eaa8403e046b8b90c9a910a47f74024091e31b768097d02b9b4aecb0d"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.1"
     },
     {
       "h1": "h1:h2x0u2shc1QuLHfxi+cTJvs30+ZAHOGRic8uyGTDWxY=",
       "module": "github.com/spf13/cast",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43265678,
+        "lookup_response_sha256": "1cdf296f30c044ab9c053512fb5bd2fd169ae498a686587b58b734bc2ee599d1"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.10.0"
     },
     {
       "h1": "h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=",
       "module": "github.com/spf13/pflag",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 42998620,
+        "lookup_response_sha256": "c2eb2071d38ce76ff529e8ad567fb3972566b4eb54bc24956dc83b29ed2dc248"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.10"
     },
     {
       "h1": "h1:xuMeJ0Sdp5ZMRXx/aWO6RZxdr3beISkG5/G/aIRr3pY=",
       "module": "github.com/stretchr/objx",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 23215146,
+        "lookup_response_sha256": "3bb8edc4db41e759c7de9e226361f2ef5622047027d58236a37e497d68417709"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.2"
     },
     {
       "h1": "h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=",
       "module": "github.com/stretchr/objx",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 44732206,
+        "lookup_response_sha256": "38b0945e46077218e648ec71abd73c43c3a29b33b699ec3738ca40aaae1453db"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.5.3"
     },
     {
       "h1": "h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=",
       "module": "github.com/stretchr/testify",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 42652163,
+        "lookup_response_sha256": "fcab23800729cdc492cecc1df4457830e6a15f5ce8a327e3b0b90eecff764e23"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.11.1"
     },
     {
       "h1": "h1:05q6ZDKoe8PLMpQV072obF74HCgP4XJeJYoNuRSX2+8=",
       "module": "github.com/stripe/stripe-go/v82",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43714844,
+        "lookup_response_sha256": "22e556dd15dc3c8af7054fb896a0c0bb3a96e9273c839dab2e626d69f41ba775"
+      },
+      "public_identity_reviewed": true,
       "version": "v82.5.1"
     },
     {
       "h1": "h1:oEQx5MW2DGd9z3AeEQfB2lPM0eLs7ztyaGRu75bFo5A=",
       "module": "github.com/testcontainers/testcontainers-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55892032,
+        "lookup_response_sha256": "c0924e34955cb8788f34745f9979db8ce4bf54d62c20aacaa9478664bb2ecab5"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.43.0"
     },
     {
       "h1": "h1:IjDMn8vwZPYkW7ahGDBZ+RSvQcFeV39S+Uw0yJ9LDAs=",
       "module": "github.com/testcontainers/testcontainers-go/modules/consul",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55891495,
+        "lookup_response_sha256": "3d8808fc36b6dc169b553380106fc26ed7ea9d788238dfcd29ec46a6464bf262"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.43.0"
     },
     {
       "h1": "h1:nTrmoY5WZkio3/EEhOE6bHRkR+W7PBmoaaB/C8k66iA=",
       "module": "github.com/testcontainers/testcontainers-go/modules/etcd",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55891522,
+        "lookup_response_sha256": "f1034ff50aaf15839a2b879cb1cba569cb644780393ac145bed6411d7cfaf239"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.43.0"
     },
     {
       "h1": "h1:27ehoXvm5AG/g+1VxLS1SD3vRhp/H7LuEfwNvddEdmA=",
       "module": "github.com/tidwall/btree",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41651836,
+        "lookup_response_sha256": "72bb841fcb74233e4f05ef9098e8d5ad6034890198c6d4c8f4ecb2f92008ec9d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.8.1"
     },
     {
       "h1": "h1:0pt8FlkOwjN2fPt4bIl4BoNxb98gGHN2ObFEDkrfZnM=",
       "module": "github.com/tidwall/match",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43130989,
+        "lookup_response_sha256": "2546ed3d13a62d329c57614e88db0b558b3f49d9f09679bf7a007a3db7ab1195"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.0"
     },
     {
       "h1": "h1:5qfvrrybgtO85jnhSravmkZyC0D+7WstbfCs3MmPhow=",
       "module": "github.com/tidwall/redcon",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15255766,
+        "lookup_response_sha256": "6ef7dda1e1c0f082661ca3f494ec892a7e6417304d25630a7f5d8687500541ff"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.6.2"
     },
     {
       "h1": "h1:7H0uAN+7RkwWRaxhYXDLqa5V3LPrJeV8wmD9dRUgPQU=",
       "module": "github.com/tklauser/go-sysconf",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53984681,
+        "lookup_response_sha256": "f065ae45f35eb4dc3fccd032e001b4df6d47e75ef78df09b4c54caf777732d9a"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.0"
     },
     {
       "h1": "h1:NR85qdvHA9pFse3x3weVZ0r0ST8R6l5RHbZrlRaqob4=",
       "module": "github.com/tklauser/numcpus",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53984165,
+        "lookup_response_sha256": "e0204850a6a67dc1095c87468e275637329526bf7433bf9036b99eaa69da50c0"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.12.0"
     },
     {
       "h1": "h1:V1v+6opmzuOqDxxnxxM5RWtlHZmqZlDxkKeZGs6DpPg=",
       "module": "github.com/tliron/commonlog",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 44162517,
+        "lookup_response_sha256": "e83fe2affe2d6311ab9b2416441febf3dfb48d1ec0a95af418d86e2cd5efb2ee"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.21"
     },
     {
       "h1": "h1:IKPfwpE8Lu8yB6Dayta+IyRMAbTVunudeauEgjXBt+c=",
       "module": "github.com/tliron/glsp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 23847770,
+        "lookup_response_sha256": "1064b299902d5c5b595c45f99a5ce656d72f8d16fac430eb3fe4f1a8d7eaf80f"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.2"
     },
     {
       "h1": "h1:5JwcBacgnqS3XyhwCWZKvq8ftlbVttNXnt+kfCH+Y2E=",
       "module": "github.com/tliron/go-kutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 44162404,
+        "lookup_response_sha256": "f4cd111470f0c3198cae6fb5a3260a0e9cc33bbad1bc920041bc6d6cdcb2b282"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.4.0"
     },
     {
       "h1": "h1:l6JBN/kr1qN9tFki2dfDUDIwhmBnirxEp7h8CGZNyq8=",
       "module": "github.com/tochemey/goakt/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 57135900,
+        "lookup_response_sha256": "80cf5ce709b37dc1fb02101ca689e4faf37989c5e106b38f92fa467e83005ec5"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.3.1"
     },
     {
       "h1": "h1:GMvXyIc6eeBgFknHVLyVS1GMBQoi8HhNU/ml1cZ1Nm4=",
       "module": "github.com/tochemey/olric",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56783588,
+        "lookup_response_sha256": "dd0c658d2ec7ac5b9caafbccdd9dd04a8c07800c4d8d17de295f7051a600d6b7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.3.11"
     },
     {
       "h1": "h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=",
       "module": "github.com/twitchyliquid64/golang-asm",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 2473903,
+        "lookup_response_sha256": "d2afe708139b3c7f51927a3efb3404282959473fbdc1ea1092944c98b45f11eb"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.15.1"
     },
     {
       "h1": "h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=",
       "module": "github.com/valyala/bytebufferpool",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3153,
+        "lookup_response_sha256": "4cc11edad3ba8f1a198fec7b04202af10a8fade5b7c17d8eec6c24dcda84eb19"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:cQriyiUvjTwOHg8QZaPihLWeRAAVoCpE00IUPn0Bjt8=",
       "module": "github.com/vmihailenco/msgpack/v5",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 20284036,
+        "lookup_response_sha256": "e4d25e736d2c45d642203b88da61c513840c209993ba75fe385d77e5c64c57c6"
+      },
+      "public_identity_reviewed": true,
       "version": "v5.4.1"
     },
     {
       "h1": "h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=",
       "module": "github.com/vmihailenco/tagparser/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 2681257,
+        "lookup_response_sha256": "ead2b7922e17edb6d4ee39197970d147a507f9ce0987d710240eedc8a5829f5b"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.0.0"
     },
     {
       "h1": "h1:3UeQBvD0TFrlVjOeLOBz+CPAI8dnbqNSVwUwRrkp7vQ=",
       "module": "github.com/wsxiaoys/terminal",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 4050,
+        "lookup_response_sha256": "807018e0e6269025414aa19ea89ed4c3ef0990c1c2a889e6167515237da9a648"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20160513160801-0940f3fc43a0"
     },
     {
       "h1": "h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=",
       "module": "github.com/x448/float16",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 715185,
+        "lookup_response_sha256": "e5306d7a555cfdf81f178a921884a7032fa0c9c6c10c8f45a3b9f94a959216e7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.8.4"
     },
     {
       "h1": "h1:Su7DPu48wXMwC3bs7MCNG+z4FhcyEuz5dlvchbq0B0c=",
       "module": "github.com/xdg-go/pbkdf2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 3500696,
+        "lookup_response_sha256": "210b8f745cc64d2418c6d37e506fba45816b4043eb96fdc0db344330f29a7e5c"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:bYKF2AEwG5rqd1BumT4gAnvwU/M9nBp2pTSxeZw7Wvs=",
       "module": "github.com/xdg-go/scram",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 46762289,
+        "lookup_response_sha256": "61170727c0adff7b5ef59683bec614ebbb3d0406e151f4221a780c9de639ae1a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.0"
     },
     {
       "h1": "h1:XLI/Ng3O1Atzq0oBs3TWm+5ZVgkq2aqdlvP9JtoZ6c8=",
       "module": "github.com/xdg-go/stringprep",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 14299560,
+        "lookup_response_sha256": "f69f35972bb8671b24c239d38e3661e5a3b844a3caa3b9127a382f8d777f0090"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.4"
     },
     {
       "h1": "h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=",
       "module": "github.com/xo/terminfo",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 12252979,
+        "lookup_response_sha256": "0cf8887d0ba4f434947b4c4a1f386cda8267f40bb5c85157151d997a4920993d"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20220910002029-abceb7e1c41e"
     },
     {
       "h1": "h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=",
       "module": "github.com/xyproto/randomstring",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 15458033,
+        "lookup_response_sha256": "5418ec1749fa27bc8865798215db13b403b2c9809a50f78c2a89999ba6580d1d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.5"
     },
     {
       "h1": "h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4=",
       "module": "github.com/yosida95/uritemplate/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 10291943,
+        "lookup_response_sha256": "c335ba5fd92ae45bf0754435edfa49a4e82ded1b0720d2947e4ebc3f68a14452"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.0.2"
     },
     {
       "h1": "h1:kYKnWBjvbNP4XLT3+bPEwAXJx262OhaHDWDVOPjL46M=",
       "module": "github.com/yuin/gopher-lua",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 20978052,
+        "lookup_response_sha256": "bfa9ca4224be4e14032dc90f0ae44853a39eb3e96b3f15b52cf4ba6807b5f8c1"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.1"
     },
     {
       "h1": "h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=",
       "module": "github.com/yusufpapurcu/wmi",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 22355390,
+        "lookup_response_sha256": "634512d668f77bef8a34570d4afbeb604fd658f828b6214ea3775343e729fa16"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.4"
     },
     {
       "h1": "h1:6sD/Ucpl7jNq10rM2pgqTs0sZ9V3qMrqfIIy5YPccHs=",
       "module": "github.com/zalando/go-keyring",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51547852,
+        "lookup_response_sha256": "a33cdfc3f5e0da7318e52b4f9a2696c731984f6513c23cf5e95df3a7ee6f1fcb"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.8"
     },
     {
       "h1": "h1:g7C04CbJuIDKNPFHmsk4hwZDO5O+kntRxzaUoNXj+IQ=",
       "module": "github.com/zeebo/assert",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 2580955,
+        "lookup_response_sha256": "9f62e258bfb6518b00988a52eccf79e437794fc800a3f1bdfa8c264529c557d4"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.0"
     },
     {
       "h1": "h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=",
       "module": "github.com/zeebo/xxh3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49232932,
+        "lookup_response_sha256": "2e08e70cf212ef271015984c3a5cc13d19eaadb75d07daae3017a9327460bf6b"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:S7GAl7Fxv12yohbwFfIbQCGDWbQbtDGPET4P/bD4lxU=",
       "module": "go.etcd.io/bbolt",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55966405,
+        "lookup_response_sha256": "17dd801aaf3e6d75ef8b8ce3f4fb7fab1a43004aa67df0e3f3fe2726f23b2fa8"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.5.0"
     },
     {
       "h1": "h1:AvHPZv15LYEe7tZDyFglv7xnbiuF6GMZpZqKpIzXTt0=",
       "module": "go.etcd.io/etcd/api/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56621425,
+        "lookup_response_sha256": "87f23b8cb06fa445c9f508993bf281f674c9d0069df6a504372cc325e1bec9c1"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.6.13"
     },
     {
       "h1": "h1:7QeMOisYByx8dBA7/CKcwCaPWfjb5C0xpmrIov/8WyY=",
       "module": "go.etcd.io/etcd/client/pkg/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56621152,
+        "lookup_response_sha256": "93cf442c0dc9951026a528845d18e2e79b0aba8294c1590cac231f2105f254eb"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.6.13"
     },
     {
       "h1": "h1:0E+9ZYGpMsi9KlOJVoCdONh9PUDawKDTy5mSNY8wOEI=",
       "module": "go.etcd.io/etcd/client/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56621399,
+        "lookup_response_sha256": "bd599b6c2b3308e7b601a0c172e34c8979a4a19306c586d3b9762f5848fc210b"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.6.13"
     },
     {
       "h1": "h1:IexDdCuuNJ3BHrELgBlyaH9p60JXAvdzWR128q+U5tU=",
       "module": "go.mongodb.org/mongo-driver",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49650422,
+        "lookup_response_sha256": "e53ef80f4e201edf012f1e8adf4a7d7573d65f8d4a10e849264955a1263630c2"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.17.9"
     },
     {
       "h1": "h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=",
       "module": "go.opentelemetry.io/auto/sdk",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 43594843,
+        "lookup_response_sha256": "96658f1a299a5165cd1623835a5666d61be300493de8bc646ce570e6758bb0eb"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.1"
     },
     {
       "h1": "h1:8tvICD4vSTOOsNrsI4Ljf6C+6UKvpTEH5XY3JMoyPoo=",
       "module": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54814101,
+        "lookup_response_sha256": "253cfaec78ab63597c11324cf3053462545a62180df98709213dbb756d6d79fb"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.69.0"
     },
     {
       "h1": "h1:JjwHmHpA4iZ3wBxluu2fbbE7j4kqlE8jXyAyPXH7HqU=",
       "module": "go.opentelemetry.io/otel",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54784851,
+        "lookup_response_sha256": "bfe1529821a0110df8276985712fa0e1b2c20419da2969ed0e95ee6968a7d50d"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.44.0"
     },
     {
       "h1": "h1:pdrWmLHofpubmArBv1LgFSv1Z0Ie/ppdZzu+kUN5EeU=",
       "module": "go.opentelemetry.io/otel",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702140,
+        "lookup_response_sha256": "393ece1e7d632e6ae4d713c3296a85c993cf4d9b38a4d9d8164fd04597d0f480"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:88Y4s2C8oTui1LGM6bTWkw0ICGcOLCAI5l6zsD1j20k=",
       "module": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51993409,
+        "lookup_response_sha256": "1067568ceb1e584169c713fd23866fe8188ba702eb9dcb159d13c297e3fef995"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.43.0"
     },
     {
       "h1": "h1:QRefszxJmfPdjXUUm3j6iDzY03mTPXMjqErFqQ67vUg=",
       "module": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702195,
+        "lookup_response_sha256": "8bdd2693ef2b98f54d87ead088b90747163998b7c604857c8630edaa4895319e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:3iZJKlCZufyRzPzlQhUIWVmfltrXuGyfjREgGP3UUjc=",
       "module": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51992565,
+        "lookup_response_sha256": "2d1d670a26e5b0bd9d5f241251a54f87193041afafc06391465157467c810a55"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.43.0"
     },
     {
       "h1": "h1:QBajQ2SrwQijzHyZbQlPsuIzpl/ll8DY6wPWsajeGcI=",
       "module": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702197,
+        "lookup_response_sha256": "005638c9e8c6dfe0c216cb280d8d9f8ae210f68ce437c8722e04c08c7e145361"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:1w0gILTcHdr3YI+ixLyjemwrVnsMURbTZFrSYCdDdmc=",
       "module": "go.opentelemetry.io/otel/metric",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54784757,
+        "lookup_response_sha256": "b6ff57e3d92574c494bb480a079f8f36461fe12740d2bee26401d76bb2e4297c"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.44.0"
     },
     {
       "h1": "h1:7Eg1uH7CJ5cXv9is6tnBe1FI6rj1nwUdbFypRm3br/M=",
       "module": "go.opentelemetry.io/otel/metric",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702136,
+        "lookup_response_sha256": "081e3a8978ab17df7da4aa3e028aa205e2e304bbbf03627fcb782525b858d831"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:nHYwb9lK+fJPU/dnT6s7W7Z8itMWyqrnVfbheVYrZ58=",
       "module": "go.opentelemetry.io/otel/sdk",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54784755,
+        "lookup_response_sha256": "e1a98f669ea3d2c904614f995036df4ba8fc8181a31a439e3375e557e241bc97"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.44.0"
     },
     {
       "h1": "h1:4VVSMgQ83dUgW2aoX5f6JgLvHwIvzcuLnF9lUdCSpCw=",
       "module": "go.opentelemetry.io/otel/sdk",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702139,
+        "lookup_response_sha256": "e7ad996e8c9931cef3bc775bd19cb0903fbb4e874c482488a35dbcaeada4445e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:3LlKgI+VjbVsjNRFZJZAJ30WjXC5VkNRks6si09iEfI=",
       "module": "go.opentelemetry.io/otel/sdk/metric",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54784756,
+        "lookup_response_sha256": "dc4a5779d44373ee7b19e2cdb5b7075b9096bc2a1fb29dcd4aa6c1a758df4fc8"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.44.0"
     },
     {
       "h1": "h1:oVFszMfyj1Am6s24Vtc7wBb8BKLcwepJjNEYILuiE3o=",
       "module": "go.opentelemetry.io/otel/sdk/metric",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702126,
+        "lookup_response_sha256": "841a6f521e70e8fe3eea61aef88ef4d4077b7eca1d6b10359f8626b1bf7d6712"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:jxF5CsGYCe74MCRx2X4g7WsY/VBKRqqpNvXlX/6gtIk=",
       "module": "go.opentelemetry.io/otel/trace",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54784956,
+        "lookup_response_sha256": "83b146041214ab55b088b2703132e9adaa01036073896928b1753535441efa9a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.44.0"
     },
     {
       "h1": "h1:l/mP6Uv7oNO7/TblbhpbgMidxhq1uO/rPsikOyVhxag=",
       "module": "go.opentelemetry.io/otel/trace",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58702544,
+        "lookup_response_sha256": "4bebc0c80a777953635f2c79ee3b9003eaa73066ac656ae5fbe9b5cf7b241310"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.45.0"
     },
     {
       "h1": "h1:IQRWgT5srOCYfiWnpqUYz9CVmbO8bFmKcwYxpuCSL2g=",
       "module": "go.opentelemetry.io/proto/otlp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50961205,
+        "lookup_response_sha256": "dac48bbab557d2d6eaeefc69f87c4d08d9f4480c1543632193ca5ba47a0f66e4"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.10.0"
     },
     {
       "h1": "h1:5rrYs0Ykyj50sdU/JU0x8etU+LubXWb+gED6TbEdMIk=",
       "module": "go.opentelemetry.io/proto/otlp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 57870378,
+        "lookup_response_sha256": "367d138f6dcf31d777707753b33fcfc22c579ec452e5877958ef7ce3b8618a22"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.11.0"
     },
     {
       "h1": "h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=",
       "module": "go.uber.org/atomic",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 17343430,
+        "lookup_response_sha256": "3881e82f1d52c9ccd6b51b0bf54a4a04951fbc0626bf6f1a7b2bbfd1a5e9e8c8"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.11.0"
     },
     {
       "h1": "h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=",
       "module": "go.uber.org/goleak",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 20246898,
+        "lookup_response_sha256": "8ae7529ba8a79764e51f9d078751a678e1d072b9f8f29dfaccd231da2e753e2e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.3.0"
     },
     {
       "h1": "h1:hyF9dfmbgIX5EfOdasqLsWD6xqpNZlXblLB/Dbnwv3Y=",
       "module": "go.uber.org/mock",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 42202320,
+        "lookup_response_sha256": "b780d5c70206f8d2cc6ade4b291a709d98544591efb1eb455c29fd3f001d7883"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.6.0"
     },
     {
       "h1": "h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=",
       "module": "go.uber.org/multierr",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 16731537,
+        "lookup_response_sha256": "887e5cc3adf7a12958b6838039c150a8baa6f68913ba075a65dc48d58198dbde"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.11.0"
     },
     {
       "h1": "h1:IZzaP1Fv73/T/pBMLk4VutPl36uNC+OSUh3JLG3FIjo=",
       "module": "go.uber.org/zap",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53060845,
+        "lookup_response_sha256": "b1cc108eb4466304db90f67f5cd39cd1dfdad7443f3ef41d0906cc62d511de1c"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.28.0"
     },
     {
       "h1": "h1:tuyd0P+2Ont/d6e2rl3be67goVK4R6deVxCUX5vyPaQ=",
       "module": "go.yaml.in/yaml/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50880731,
+        "lookup_response_sha256": "cb7af5fdd0425cc179a6bd3c189750daf45e63fb21498b1fce4b76fc208364e0"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.4.4"
     },
     {
       "h1": "h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=",
       "module": "go.yaml.in/yaml/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 39386585,
+        "lookup_response_sha256": "7c05bba12a098ebfac023e11a1632345dbcd525a01f7150346e0cfac6e2ab978"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.0.4"
     },
     {
       "h1": "h1:3h1fjsh1CTAPjW7q/EMe+C8shx5d8ctzZTrLcs/j8Go=",
       "module": "go.yaml.in/yaml/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 46084258,
+        "lookup_response_sha256": "f3e242acceeb39df07d488a8608f47815246507486863bb0d78020d8fa0d9fa5"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.0.0-rc.3"
     },
     {
       "h1": "h1:wVwVdqsTuUbJvhYVCspQYwZXHNYeLSoZnmHD+ggddpQ=",
       "module": "golang.org/x/arch",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55339869,
+        "lookup_response_sha256": "f7fedabbec74e9594a95d8528ecbbae14ed4f41214e4c42d67d8b5899a99a7aa"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.28.0"
     },
     {
       "h1": "h1:QZ4Muo8THX6CizN2vPPd5fBGHyogrdK9fG4wLPFUsto=",
       "module": "golang.org/x/crypto",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55349159,
+        "lookup_response_sha256": "553bb2133baf0c663bb604c5b88f8c7ac6e6a2471da766d24fb6509dd13d50b3"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.53.0"
     },
     {
       "h1": "h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=",
       "module": "golang.org/x/crypto",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 62569101,
+        "lookup_response_sha256": "563c82cb9975e68dddaac146dc4b0b9c96671665910df933abb4242508d866b0"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.57.0"
     },
     {
       "h1": "h1:X8Hz2ImujgbmetVuW+w2YkyZChE3cBpZi2P158rTG9M=",
       "module": "golang.org/x/exp",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55547239,
+        "lookup_response_sha256": "823998ce649353e3ba72a56a655ae007c9a7e53cfb13127beba1375a631f66be"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260611194520-c48552f49976"
     },
     {
       "h1": "h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ=",
       "module": "golang.org/x/mod",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55348382,
+        "lookup_response_sha256": "27a479b83dcdeb66f1d3701afa51367dbf8873c590791096a6d5ce3bfbe48626"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.37.0"
     },
     {
       "h1": "h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=",
       "module": "golang.org/x/mod",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 62544779,
+        "lookup_response_sha256": "5dba0d430cd7a94a017f89bf6decdcfacb4e51cbcdacf2e9f59655d39d7a4137"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.41.0"
     },
     {
       "h1": "h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o=",
       "module": "golang.org/x/net",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55468105,
+        "lookup_response_sha256": "cd1e2cf60483f1f21c32766c9da2ea733d84e8d9978c9fca03f1f7ae4e22cd5f"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.56.0"
     },
     {
       "h1": "h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=",
       "module": "golang.org/x/net",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 59638935,
+        "lookup_response_sha256": "2f1de2f9265be91d3bcdf64f7fed76daf32b9134669e88912bf41980ab1e8312"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.58.0"
     },
     {
       "h1": "h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=",
       "module": "golang.org/x/net",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 67226349,
+        "lookup_response_sha256": "627c95d4a25e2633a38de5d1928cdf8abb58e4ab715e7903ae5d9063aeaf79c9"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.60.0"
     },
     {
       "h1": "h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs=",
       "module": "golang.org/x/oauth2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50925305,
+        "lookup_response_sha256": "1a93c79b5c59d73bd27834b64f2e83c6577253667998cbdb2096d51abf713add"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.36.0"
     },
     {
       "h1": "h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=",
       "module": "golang.org/x/sync",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55339870,
+        "lookup_response_sha256": "61f19d714637c068b39d6af364f9c7d73b1285e2b4db2dfcfe922e96b5363623"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.21.0"
     },
     {
       "h1": "h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=",
       "module": "golang.org/x/sync",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 62544932,
+        "lookup_response_sha256": "9f6cac4e11763dd360ddd4d0386908b9eda4f6e8cda26a3647b66eef12568ba8"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.23.0"
     },
     {
       "h1": "h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=",
       "module": "golang.org/x/sys",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55339871,
+        "lookup_response_sha256": "49cf670c6e5042540568aaf79ee85bfb157a88418965df4e270ebf61dcd7087f"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.46.0"
     },
     {
       "h1": "h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=",
       "module": "golang.org/x/sys",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 62544739,
+        "lookup_response_sha256": "2e6a6c4b3ad06ec55125097f36d456a163b52f134810d6f5056a9f3c1bcbd1a7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.48.0"
     },
     {
       "h1": "h1:3+OXuTbaKDgwk8jTi3aSLHRlmWqHEUDUtxnbFigO4YE=",
       "module": "golang.org/x/term",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 62561312,
+        "lookup_response_sha256": "10a2a4e3fc4d36373773a3d3759d74715f70e45dfcf3b42f1335044dda608bda"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.46.0"
     },
     {
       "h1": "h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=",
       "module": "golang.org/x/text",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 62562259,
+        "lookup_response_sha256": "2dc566b4a1b6af3cf5d8c6606e084aea4715b76ef434b910cf81a802f162915b"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.42.0"
     },
     {
       "h1": "h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U=",
       "module": "golang.org/x/time",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50925302,
+        "lookup_response_sha256": "036492099d24183105c00060192bcf270e3d730ace4b507e94ec5464e5a821b7"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.15.0"
     },
     {
       "h1": "h1:7jTurBkPZu4moS/Uy4OQT1M+QBlsj3wejyZwsT8Z7rk=",
       "module": "golang.org/x/tools",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55544785,
+        "lookup_response_sha256": "b067136bb757354810ceabd783226766758f2d44ddceb37a4da852f3ff448572"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.46.0"
     },
     {
       "h1": "h1:3NI7VXzL9+1WZD52Dx2ttoPwD5DWrFGpl9mFZDlmisI=",
       "module": "golang.org/x/tools",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 59735387,
+        "lookup_response_sha256": "d27dea65c4fb26770f999dde734b640390899df82ea63fc9520756bee22c1a8b"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.49.0"
     },
     {
       "h1": "h1:VbpOemQlsSMrYmn7T2OUvQ4dqxQXU+ouZFQsZOx50z4=",
       "module": "gonum.org/v1/gonum",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 48864053,
+        "lookup_response_sha256": "236beeb6a558e58831c45670a7b1c53d914e3144e922704b2e7a559368a5d803"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.17.0"
     },
     {
       "h1": "h1:xr2lwHI91bn3UiXcnyzRMQjp2LRiM8wEHzwUaE0YhTs=",
       "module": "google.golang.org/genproto/googleapis/api",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56016030,
+        "lookup_response_sha256": "bb4b3a8f1f11d2b027f60036731354fcd1a900185133babbc6c1e39347d8e9bb"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260622175928-b703f567277d"
     },
     {
       "h1": "h1:jQ9p21COKWjP3VwuFrNRiiOTMh3mPpN45R7SLrH/HUU=",
       "module": "google.golang.org/genproto/googleapis/api",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56544174,
+        "lookup_response_sha256": "a8bbb0a84b3fd7df650beda28c4c4f7d6805f048166376ba8c959dd59b7528cf"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260630182238-925bb5da69e7"
     },
     {
       "h1": "h1:FarXi840EJWSHYTN3ERkADbPWjl307+FGrA22KAVjjc=",
       "module": "google.golang.org/genproto/googleapis/api",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58690943,
+        "lookup_response_sha256": "bb66eb42666f6ee2af037bb372e1c303251005ade33014203339b07fe193f4f9"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260803160001-6ac0973c030d"
     },
     {
       "h1": "h1:mpAgMyM9vQHxycBlDq50y1VHpfSfVwzXvrQKtYbXuUY=",
       "module": "google.golang.org/genproto/googleapis/rpc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56016031,
+        "lookup_response_sha256": "5219b7dd0e6b8e63e35545d6c5832ecb9997b3564d82a341f89f630e8e2077dd"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260622175928-b703f567277d"
     },
     {
       "h1": "h1:eM/YSd5bBFagF51o1E745Ta7RwzpW0h+z+QDNZOgmQ8=",
       "module": "google.golang.org/genproto/googleapis/rpc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56544199,
+        "lookup_response_sha256": "c2215b79536554be5c798ed9222ddb1296e72e569b1a67f26211fdcdab22dd5b"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260630182238-925bb5da69e7"
     },
     {
       "h1": "h1:IL4hdHzcUv2l/gcg98/Rj3FbtE6axwqslOW8SW0C+S0=",
       "module": "google.golang.org/genproto/googleapis/rpc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 58690963,
+        "lookup_response_sha256": "859f75d59218a503d2f4da0dcd28f168addee443c2212522352231c942364cf4"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260803160001-6ac0973c030d"
     },
     {
       "h1": "h1:VnnIIZ88UzOOKLukQi+ImGz8O1Wdp8nAGGnvOfEIWQQ=",
       "module": "google.golang.org/grpc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54139707,
+        "lookup_response_sha256": "2afae803214d683ef7903839ae6898cae1c4d91b7d8faa7b922ae922ec9fff1c"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.81.1"
     },
     {
       "h1": "h1:EManeRomTObA0BU7I8vXgg/78uE5MJ9M8B39EX2WscU=",
       "module": "google.golang.org/grpc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 60773534,
+        "lookup_response_sha256": "3cdf918a7713aa02c92c3939f36f8a6ad5f6e47ccfc8bddbfaab56a5ce7ef443"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.83.2"
     },
     {
       "h1": "h1:rgSNvqscFZ1JgV/4wH5GOsZFSFkR2Eua9As3KIr2LlM=",
       "module": "google.golang.org/grpc/cmd/protoc-gen-go-grpc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53942084,
+        "lookup_response_sha256": "030c74ebea909198038d9da85de99c21b04d1ed8ace2f3d94f97a168da23e963"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.6.2"
     },
     {
       "h1": "h1:+5/Sw3GsDNlEmu7TfklWKPdQ0Ykja5VEmq2i817+jbI=",
       "module": "google.golang.org/protobuf",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 49128765,
+        "lookup_response_sha256": "bf42240df86e6a68d845fc9f67afd912f224ea8fb53b8bef124c81c843ceb4be"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.36.12-0.20260120151049-f2248ac996af"
     },
     {
       "h1": "h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=",
       "module": "gopkg.in/check.v1",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 409,
+        "lookup_response_sha256": "c0857dba064d84500e24988ce3d03628b383a7a558f411caffbd5fd773d73c87"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20161208181325-20d25e280405"
     },
     {
       "h1": "h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=",
       "module": "gopkg.in/check.v1",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1958632,
+        "lookup_response_sha256": "5f4bbc8b2fd1b5958b036500924c816d2e043339bae43748d6d8c84e44d09be4"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0-20201130134442-10cb98267c6c"
     },
     {
       "h1": "h1:czT3CmqEaQ1aanPc5SdlgQrrEIb8w/wwCvWWnfEbYzo=",
       "module": "gopkg.in/evanphx/json-patch.v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41739579,
+        "lookup_response_sha256": "a6712fcba0fe31a6dee4a789983791ec25936cf9cd1addc50c5ad9ffe93bd134"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.13.0"
     },
     {
       "h1": "h1:JlY4R6oVz+ZSvcDhVfNQ/k/8Xo6yb2s1PBhslPZPX4c=",
       "module": "gopkg.in/ghodss/yaml.v1",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 57822,
+        "lookup_response_sha256": "e2b0d8fa79c7c1db1e8fc66f8ce229aaa3c2d178e873ed24300741f9d464de64"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:73M5CoZyi3ZLMOyDlQh031Cx6N9NDJ2Vvfl76EDAgDc=",
       "module": "gopkg.in/inf.v0",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 90,
+        "lookup_response_sha256": "50775654866e2f069345610d08f51d2f7c652833bd9cbee943c212efbbc9df29"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.9.1"
     },
     {
       "h1": "h1:D8xgwECY7CYvx+Y2n4sBz93Jn9JRvxdiyyo8CTfuKaY=",
       "module": "gopkg.in/yaml.v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 1908176,
+        "lookup_response_sha256": "67e1637e07afba319340c873d7d130a603ab473ce627e5cc1be339e7ecd64665"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.4.0"
     },
     {
       "h1": "h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=",
       "module": "gopkg.in/yaml.v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 10738965,
+        "lookup_response_sha256": "201ffef40b9a038d1c33cd225f2e683ed930374d05a4f5bceecf0bbe47fe4381"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.0.1"
     },
     {
       "h1": "h1:TF6YDLIzKfccK7cq9YpTcGX8TJmEkHVRv78DM51fRYY=",
       "module": "k8s.io/api",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55604770,
+        "lookup_response_sha256": "7cda398aacd5db51aa89a1134639240209207ed2aa1eb1ec09abba3ab33698bd"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.36.2"
     },
     {
       "h1": "h1:0PE/W/WNy1UX61NLbXY5TMbJ6UwLL6E6lAPkYrKFxbQ=",
       "module": "k8s.io/apimachinery",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55604751,
+        "lookup_response_sha256": "379a053f6f7b5e82c7a3ff2f1c3f74b4fc3b4ecb6d60abf0a145f347f62401dd"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.36.2"
     },
     {
       "h1": "h1:bfgxmFKc9CgqsgX4xKLAAdmTQlWee7Ob/HlDOrJ5TBI=",
       "module": "k8s.io/client-go",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55604819,
+        "lookup_response_sha256": "6b7d68364d808b28e35d011a68c8f069f0112646c83a31231a900b74f92a9f18"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.36.2"
     },
     {
       "h1": "h1:Tf+J3AH7xnUzZyVVXhTgGhEKnFqye14aadWv7bzXdzc=",
       "module": "k8s.io/klog/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50871620,
+        "lookup_response_sha256": "9c9331ea3d3f30f18d6cc64cc4cc2e2865765b81629f74793f9447a4845997fd"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.140.0"
     },
     {
       "h1": "h1:m2wZhD5+vJZyCVkTvUHIfaiXc/mdt3Pxyx3vUnGsKzU=",
       "module": "k8s.io/kube-openapi",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56111355,
+        "lookup_response_sha256": "879f5ae186859510c95e95b918f1baec52da616fe4f853a79a13faa618ea2340"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260624041617-8f3fa4921821"
     },
     {
       "h1": "h1:Ea7fgQ5we8Y9T0OX5o0dAHzQOBRI07D/dEYRaB9ZZEs=",
       "module": "k8s.io/utils",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 56279474,
+        "lookup_response_sha256": "0db35f9514117238da78091e663f4343dffebf6511becfea7d1ff6c2ca8a45de"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20260626114624-be93311217bd"
     },
     {
       "h1": "h1:Hd/4Es+MBj+/7hSdZaisNyu6bv3V0Dp2MdllyfqaH+c=",
       "module": "modernc.org/cc/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54683192,
+        "lookup_response_sha256": "e8715797c0ab17dd1a690d157ac2f07a952a81173f2a74641e0137d10d0f6f5f"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.28.4"
     },
     {
       "h1": "h1:OVnSOWQjVKOYkFxoHYB+qQmSHK5gqMqARM+K9DpR/Ws=",
       "module": "modernc.org/ccgo/v4",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 54795741,
+        "lookup_response_sha256": "fa886cd5b61ea0cee12797a4c367194feef2464c6ad55d28f60d8c6db9b3f0be"
+      },
+      "public_identity_reviewed": true,
       "version": "v4.34.4"
     },
     {
       "h1": "h1:j6ZzNTftVS054gi281TyLjHPp6CPHr2KCxEXjEbD6SM=",
       "module": "modernc.org/fileutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 50246249,
+        "lookup_response_sha256": "299c5d06657aa217929b4b0cc8278386af4b736bca749bf6ec1e6a5911379a7e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.4.0"
     },
     {
       "h1": "h1:nyqdV8q46KvTpZlsw66kWqwXRHdjIlJOhG6kxiV/9xI=",
       "module": "modernc.org/gc/v2",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35233537,
+        "lookup_response_sha256": "8c9ebd9d347043f692fb29a1549f77108d8d70e1fdca4af384a6673e4ce95afb"
+      },
+      "public_identity_reviewed": true,
       "version": "v2.6.5"
     },
     {
       "h1": "h1:6QAplYyVO+KdPW3pGnqmJDUxtkec8ooEWvks/hhU3lc=",
       "module": "modernc.org/gc/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 53665528,
+        "lookup_response_sha256": "f9f86c8e54f25a33f7802d0717ed6cc78ac94d9fd56f1aeaa6d6585ffea71844"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.1.3"
     },
     {
       "h1": "h1:HvEowk7LxcPd0eq6mVOAEMai46V+i7Jrj13t4AzuNks=",
       "module": "modernc.org/goabi0",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 39520942,
+        "lookup_response_sha256": "f53b944554dd24dd8a9cb3df75d7707b1d3f21a856057b82a0d3a99461624b2d"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.0"
     },
     {
       "h1": "h1:+ra4Ui8ngyt8HDcO1FTDPWlkAh6yOdaO2yAoh8MddQA=",
       "module": "modernc.org/libc",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55701401,
+        "lookup_response_sha256": "25e61332bb191e6346c96b42816985641d641236e159975a88210e4c2ca59926"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.73.4"
     },
     {
       "h1": "h1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=",
       "module": "modernc.org/mathutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 33105375,
+        "lookup_response_sha256": "9a8f42a7cea7f935b501f43d06f3ad0795d60d22cbd054df195dcb1846f46335"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.7.1"
     },
     {
       "h1": "h1:o4QC8aMQzmcwCK3t3Ux/ZHmwFPzE6hf2Y5LbkRs+hbI=",
       "module": "modernc.org/memory",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 37405749,
+        "lookup_response_sha256": "26e5a54bdfe24a72cd48086cf725d013478af1c244c4f28470b823a807c4e3fd"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.11.0"
     },
     {
       "h1": "h1:tGyef5ApycA7FSEOMraay9SaTk5zmbx7Tu+cJs4QKZg=",
       "module": "modernc.org/opt",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 51603038,
+        "lookup_response_sha256": "6d90b643a6719bf7775800f7c4b84a528d3fc02b25002b371272c18107fdd077"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.2.0"
     },
     {
       "h1": "h1:+xyoGf15mM3NMlPDnFqrteY07klSFxLElE2PVuWIJ7w=",
       "module": "modernc.org/sortutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 33183571,
+        "lookup_response_sha256": "ae3a628265d04cd605876e8cfa72d8cad93365717287afe59df1d5966ac0f58e"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.1"
     },
     {
       "h1": "h1:20WG8N9q4ji/dEqGk4uiI0c6OPjSeLTNYGFCc3+7c1M=",
       "module": "modernc.org/sqlite",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 55962221,
+        "lookup_response_sha256": "627ecaf043d4301d81b617f9b3f3b779f30182a1fd32e704049ce46cc477785a"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.53.0"
     },
     {
       "h1": "h1:UneZBkQA+DX2Rp35KcM69cSsNES9ly8mQWD71HKlOA0=",
       "module": "modernc.org/strutil",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 33139222,
+        "lookup_response_sha256": "295d5afa175bbd7c7f2a8f432e2c4b698138c056763b3b5294c97a2838b490a8"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.2.1"
     },
     {
       "h1": "h1:Xl7Ap9dKaEs5kLoOQeQmPWevfnk/DM5qcLcYlA8ys6Y=",
       "module": "modernc.org/token",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 13889924,
+        "lookup_response_sha256": "d5ccda83ea37d3dfcf55b6014aee7c619b12e2fca596917c26f5f1975b697df6"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.1.0"
     },
     {
       "h1": "h1:DP3TfgZhDkT7lerUdnp6PTGKyxxzz6T+cOlY/xEvfWk=",
       "module": "mvdan.cc/sh/v3",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52113817,
+        "lookup_response_sha256": "a5f9c109413a78dc398f6bf48b9171e543e785d5f8c12e849a4a0bdd97dfc4c3"
+      },
+      "public_identity_reviewed": true,
       "version": "v3.13.1"
     },
     {
       "h1": "h1:IpInykpT6ceI+QxKBbEflcR5EXP7sU1kvOlxwZh5txg=",
       "module": "sigs.k8s.io/json",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41425494,
+        "lookup_response_sha256": "ca2dedd2d4600f8d86dc6c4fbac5fa4e20491eff5fb775a382a9322bc69b67d9"
+      },
+      "public_identity_reviewed": true,
       "version": "v0.0.0-20250730193827-2d320260d730"
     },
     {
       "h1": "h1:JfjMILfT8A6RbawdsK2JXGBR5AQVfd+9TbzrlneTyrU=",
       "module": "sigs.k8s.io/randfill",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 35045175,
+        "lookup_response_sha256": "f46b09cb92a4c71504809d16140c907581911107d5515176fac4a4d589ecc791"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.0.0"
     },
     {
       "h1": "h1:qmp2e3ZfFi1/jJbDGpD4mt3wyp6PE1NfKHCYLqgNQJo=",
       "module": "sigs.k8s.io/structured-merge-diff/v6",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 52505712,
+        "lookup_response_sha256": "e2966c112619d81d58748919f03a6d5059a3a06018b0aa3e40b011638d0f10b3"
+      },
+      "public_identity_reviewed": true,
       "version": "v6.4.0"
     },
     {
       "h1": "h1:G8fkbMSAFqgEFgh4b1wmtzDnioxFCUgTZhlbj5P9QYs=",
       "module": "sigs.k8s.io/yaml",
-      "public_identity_reviewed": false,
+      "public_identity_evidence": {
+        "lookup_record_number": 41185776,
+        "lookup_response_sha256": "4e6f67f3e70af0a485e13ab67f8c94a3dcd9df75541b99d3f1e8fe44a11c9eac"
+      },
+      "public_identity_reviewed": true,
       "version": "v1.6.0"
     }
   ],
   "public_identity_admission": "Reject before contacting any proxy unless every requested module row is independently admitted public. No direct/private fallback; checksum authentication remains mandatory. Root may narrow to exact selected closure after actual source receipt.",
+  "public_identity_review_evidence": {
+    "authenticated_tls": true,
+    "count": 389,
+    "origin": "sum.golang.org:443",
+    "raw_responses_retained_privately": true,
+    "receipt_sha256": "56db61b827e94b76c945609aaa1fc43dd869b60e7526422d69ff0a9fc3afa477",
+    "retrieved_at_utc": "2026-10-11T19:09:20.865158+00:00",
+    "scope": "Public identity presence and exact expected h1 line on TLS-authenticated public checksum database; native Go SumDB signature/checksum verification still mandatory during hosted preload. No local signature verification claimed."
+  },
   "source_go_mod_admission": [
     {
       "commit": "81b9b1df2386f7d44c8464c999a4ea0919813526",
@@ -2665,5 +4230,5 @@
       "sha256": "fcc8ca41ba6d633651dd12d7dfa594f0617ec2ffc390a7beb1258db3d7e5060d"
     }
   ],
-  "status": "EXACT COMMITTED PUBLIC PRELOAD REVIEW INVENTORY; NO NETWORK/DOWNLOAD PERFORMED; MODULE PUBLIC-IDENTITY ADMISSION PENDING"
+  "status": "FIXED389 PUBLIC IDENTITIES VERIFIED AGAINST EXACT H1 ON TLS-AUTHENTICATED PUBLIC CHECKSUM DATABASE; NATIVE HOSTED CHECKSUM VERIFICATION AND RUNTIME ACCEPTANCE REMAIN REQUIRED"
 }

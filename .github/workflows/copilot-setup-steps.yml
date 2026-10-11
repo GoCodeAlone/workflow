@@ -208,9 +208,9 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/bootstrap-manifest.json)"
-          test "${actual%% *}" = b898780384a2d424b42b61e715d02d596e57ca829cb27c41ce94c4ed2fdd684e
+          test "${actual%% *}" = 63263ea6f45155e05e965b0b77430f02b4e1ca6210cb082180894d38b4ff7281
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-production-proof.py)"
-          test "${actual%% *}" = fa1fb9cd2d27b257c4cc8293e9f091dd12866721c4f412ae3844a9cfef125d3c
+          test "${actual%% *}" = b87fcaa157db54aa339e4f52341590c3f3e724f4bafbb37be2a9fb9f3f8a58d5
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
@@ -238,7 +238,7 @@ jobs:
           actual="$(/usr/bin/sha256sum scripts/osv-offline/check-readonly-fixtures.py)"
           test "${actual%% *}" = 6a19b5bf414ee9aff165de8decc6f3f67b311e7e0366d19f939fa9e27df1137a
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run.py)"
-          test "${actual%% *}" = 1bf192a8283396234c9514e0fd66939b72fe95d38e806c070f3fd4a5299eb996
+          test "${actual%% *}" = 25f93a98b352f07e1555cf4a51f6dd1fc7115b96a6d6750163bd5900bbd33997
           fixture_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-fixture-proof-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-fixture-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$fixture_dir" >> "$GITHUB_OUTPUT"

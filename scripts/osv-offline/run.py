@@ -448,19 +448,7 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, ma
                         raise Refusal('dependency declaration is outside exact reviewed public inventory')
                 elif filename == 'go.mod' or name in allowed:
                     raise Refusal('required source module declaration is missing')
-    if not all(row['public_identity_reviewed'] is True for row in inventory['items']):
-        raise Refusal('public module identity admission remains incomplete')
-    # Preload only explicit reviewed path/version arguments; no candidate command,
-    # npm install, direct VCS, private proxy fallback or implicit module graph call.
-    online = env(go, state, runtime, online=True)
-    for item in inventory['items']:
-        target = item['module'] + '@' + item['version']
-        downloaded = bounded_run([str(go), 'mod', 'download', '-json', target], state, online, 90, prepare_budget)
-        if downloaded.returncode or downloaded.stderr:
-            raise Refusal('authenticated explicit public module preload failed')
-        record = json.loads(downloaded.stdout, object_pairs_hook=strict_object)
-        if record.get('Path') != item['module'] or record.get('Version') != item['version'] or record.get('Sum') != item['h1'] or record.get('Error'):
-            raise Refusal('public module preload identity/checksum mismatch')
+    preload_public_modules(inventory, go, state, env(go, state, runtime, online=True), bounded_run, prepare_budget)
     db = databases(state, profile, prepare_budget)
     write_completion(state / 'prepared.json', {'complete': True, 'sources': sources, 'databases': db,
         'profile_sha256': manifest['trusted_files']['scanner-profile.json'],
@@ -468,6 +456,57 @@ def prepare(phase, state, manifest, profile, runtime, bounded_run, Budget, *, ma
         'event': event, 'automatic_admission': not manual,
         'bootstrap_manifest_sha256': digest(HERE / 'bootstrap-manifest.json'),
         'created_at': datetime.now(timezone.utc).isoformat()}, prepare_budget)
+
+def preload_public_modules(inventory, go, state, online, bounded_run, budget):
+    items = inventory['items']
+    if not items or not all(row['public_identity_reviewed'] is True for row in items):
+        raise Refusal('public module identity admission remains incomplete')
+    expected = {(row['module'], row['version']): row['h1'] for row in items}
+    if len(expected) != len(items):raise Refusal('duplicate public module inventory identity')
+    # Only explicit reviewed identities; no implicit graph, direct/private fallback,
+    # candidate command or npm install. Small batches share the unchanged budget.
+    logs = state / 'public-preload-logs';logs.mkdir(mode=0o700)
+    result = {'complete': False, 'accepted': False, 'expected_count': len(items),
+        'inventory_sha256': digest(HERE / 'public-module-preload-inventory.json'),
+        'commands': [], 'authenticated_count': 0}
+    total_raw = 0
+    decoder = json.JSONDecoder(object_pairs_hook=strict_object,
+        parse_constant=lambda _: (_ for _ in ()).throw(Refusal('nonfinite preload JSON')))
+    try:
+        for start in range(0, len(items), 16):
+            batch = items[start:start + 16]
+            targets = [row['module'] + '@' + row['version'] for row in batch]
+            actual = bounded_run([str(go), 'mod', 'download', '-json', *targets], state, online, 90, budget)
+            row = {'batch': start // 16, 'targets': targets, 'exit': actual.returncode}
+            for suffix, raw in (('stdout', actual.stdout), ('stderr', actual.stderr)):
+                data = raw.encode();total_raw += len(data)
+                if total_raw > MAX_JSON:raise Refusal('public preload aggregate raw bound exceeded')
+                path = logs / (str(start // 16) + '.' + suffix)
+                with path.open('xb') as stream:
+                    os.fchmod(stream.fileno(), 0o600);stream.write(data);stream.flush();os.fsync(stream.fileno())
+                row[suffix + '_sha256'] = digest(path)
+            result['commands'].append(row)
+            if actual.returncode or actual.stderr:
+                raise Refusal('authenticated public preload batch ' + str(start // 16) + ' failed')
+            remaining = actual.stdout;records = {}
+            try:
+                while remaining.strip():
+                    remaining = remaining.lstrip();record, consumed = decoder.raw_decode(remaining)
+                    remaining = remaining[consumed:]
+                    if not isinstance(record, dict):raise Refusal('public preload record is not an object')
+                    identity = (record.get('Path'), record.get('Version'))
+                    if identity in records:raise Refusal('duplicate public preload response identity')
+                    records[identity] = record
+            except (ValueError, TypeError):
+                raise Refusal('public preload JSON stream is incomplete') from None
+            batch_expected = {(item['module'], item['version']): item['h1'] for item in batch}
+            if set(records) != set(batch_expected) or any(records[k].get('Sum') != h or records[k].get('Error') for k,h in batch_expected.items()):
+                raise Refusal('public module preload identity/checksum mismatch')
+            result['authenticated_count'] += len(records);budget.left()
+        result['complete'] = result['authenticated_count'] == len(items)
+    finally:
+        write_completion(state / 'public-module-preload-receipt.json', result, budget)
+
 
 def socket_filter():
     # x86_64 seccomp_data arch/nr offsets; all socket syscalls and namespace,
@@ -1032,6 +1071,8 @@ def cleanup_startup_directory():
         parent = Path(sys.pycache_prefix).parent
         runner_parent = Path(os.environ.get('RUNNER_TEMP', '/nonexistent'))
         if parent.parent == runner_parent and parent.name.startswith('osv-python-'):
+            try:parent.lstat()
+            except FileNotFoundError:return  # Already removed before this failed phase.
             owned(parent)
             parent.rmdir()
 

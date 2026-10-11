@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -125,10 +126,20 @@ def run(output, supplier_root, compiler_root, gopath, module_cache, build_cache)
                     source = private/name
                     if source.exists():
                         m.regular(source);shutil.copyfile(source,target/name);(target/name).chmod(0o600)
-            for name in ('prepared.json','public-database-receipts.json'):
+            for name in ('prepared.json','public-database-receipts.json','public-module-preload-receipt.json'):
                 source = state/name
                 if source.exists():
                     m.regular(source);shutil.copyfile(source,output/name);(output/name).chmod(0o600)
+            logs = state/'public-preload-logs'
+            if logs.exists():
+                m.owned(logs);target = output/'public-preload-logs';target.mkdir(mode=0o700)
+                total_raw = 0
+                for source in sorted(logs.iterdir()):
+                    if not re.fullmatch(r'[0-9]+\.(?:stdout|stderr)', source.name):
+                        raise m.Refusal('unexpected public preload raw log')
+                    total_raw += m.regular(source).st_size
+                    if total_raw > m.MAX_JSON:raise m.Refusal('public preload aggregate raw bound exceeded')
+                    shutil.copyfile(source,target/source.name);(target/source.name).chmod(0o600)
         evidence = m.REPOSITORY/'offline-evidence'
         if evidence.exists():
             total = 0

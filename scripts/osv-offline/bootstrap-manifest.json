@@ -1,13 +1,13 @@
 {
   "container_image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
   "container_image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
-  "core_contract_sha256": "6a28499a4799e84087e8bc6bf33a2b9244c1986108cd313634efec27958ee38c",
+  "core_contract_sha256": "72a81cef260721e5e73cb11ac385576d3062ec59b1df32efb531ac15122b6f59",
   "first_install_execution_receipt_sha256": null,
   "hosted_job_timing_acceptance_sha256": null,
   "linux_pins": {
-    "govulncheck": "55425f57ab2501c257efd0fe4abe361974849fab3e54dd0e8f04d4d3c57a2d65",
-    "osv-reporter": "d148474ac6f4a407a369544e18a96f2d900e6c0a8309b5255cd3b4b4c2a198eb",
-    "osv-scanner": "c810df66004c75f734eb4502ea5ff44115e4e3444e18d8b38bd87ff33094d69d"
+    "govulncheck": "8ecc28d73b863e88217f0b732be492b0a46a73e2ac097c270759bb2e530d6449",
+    "osv-reporter": "8c35e2fbe3434d575d7bc9eed4534b7c20d4c18b2167b13c1edefd099a88c231",
+    "osv-scanner": "d3f3bd20fc073acfb357b0cb9165a21d260572da8a3b4160efa6a4643e670add"
   },
   "linux_runtime_acceptance_sha256": null,
   "permanent_install_authorized": true,
@@ -15,7 +15,7 @@
     "baseline": "2fcb9baf4f03d599efb1fc4c462455a978620ae4",
     "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
   },
-  "public_preload_inventory_sha256": "dd5ee66e70ae1699c21d4f4a976fbf78208caf58d5e547fe72f4d491ce9ecbb9",
+  "public_preload_inventory_sha256": "55f56e27e6b9cf6b5b497f2618494e5cec65f69ecc41255ffe169d058bf400fc",
   "resource_contract": "Exact aggregate container memory2147483648/swap0/pids256/CPU2; scan total1800/native720/source240/manifest30; reporter240. Immutable core and independent actual admission index; fresh same-job supplier paths. Finite manual proof is provisional and never supplies missing normal-event evidence.",
   "reviewed_protocol_binding_sha256": "4197aa92770c04bbf8e349cc3672b02fae157ebbf28da816773414861dbb888f",
   "source_object_delivery_acceptance_sha256": null,
@@ -32,8 +32,8 @@
     "osv_supplier.py": "c485eb0620959219e0f5c65d502431c467704d24e78270ee8f028fdf0aef349e",
     "osv_trusted.py": "2148339ccbaefdcb81396affa481ce3643a491b95228ddd61507eccdcca11bcc",
     "prepare-supplier.py": "7f729027a8b2dd299ae64dbfe7028cc58b9590b55ae30d58b6d473947e35cf0b",
-    "run-production-proof.py": "fa1fb9cd2d27b257c4cc8293e9f091dd12866721c4f412ae3844a9cfef125d3c",
-    "run.py": "1bf192a8283396234c9514e0fd66939b72fe95d38e806c070f3fd4a5299eb996",
+    "run-production-proof.py": "b87fcaa157db54aa339e4f52341590c3f3e724f4bafbb37be2a9fb9f3f8a58d5",
+    "run.py": "25f93a98b352f07e1555cf4a51f6dd1fc7115b96a6d6750163bd5900bbd33997",
     "scanner-profile.json": "2deb233b43cf4fdc5babfe481c88bafe1bc8413062ea1e93041039e01b4c9997"
   },
   "version": 2

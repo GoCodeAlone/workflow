@@ -134,3 +134,14 @@ Docker, namespace or privileged operation is performed:
 python3 -I -S -B -X pycache_prefix=/tmp/osv-supplier-controls-absent \
   scripts/osv-offline/test-prepare-supplier.py
 ```
+
+Application preload is a separate fixed 389-identity inventory from the two
+reviewed source commits. Every identity and expected ZIP h1 was observed on the
+TLS-authenticated public Go checksum database; raw records are retained for
+independent review. This public-presence review does not claim local signature
+verification. Hosted Go must still authenticate each explicit version through
+public GoProxy and SumDB, with no direct/private fallback. Batches of at most 16
+share the existing preparation budget and retain exact native exits and bounded
+raw outputs. Application tests and scanner execution remain offline afterward.
+The normal binary pins now refer to the three actual hosted supplier builds from
+run38166068637; the five normal admission receipts remain unbound.
