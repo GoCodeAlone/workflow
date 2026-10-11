@@ -15,6 +15,21 @@ on:
         type: boolean
         required: false
         default: false
+      exact_candidate_runtime_proof:
+        description: 'Run the approved exact existing candidate controls and schema witness'
+        type: boolean
+        required: false
+        default: false
+      exact_candidate_source_review_json:
+        description: 'Exact current independent source-review admission JSON'
+        type: string
+        required: false
+        default: ''
+      exact_candidate_source_review_sha256:
+        description: 'SHA256 of the exact source-review admission JSON bytes'
+        type: string
+        required: false
+        default: ''
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
@@ -282,3 +297,150 @@ jobs:
           test '${{ steps.supplier.outcome }}' = success
           test '${{ steps.production.outcome }}' = success
           test '${{ steps.fixtures.outcome }}' = success
+
+  exact-candidate-runtime:
+    if: github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    env:
+      OSV_RUNTIME_SOURCE_REVIEW: ${{ inputs.exact_candidate_source_review_json }}
+      OSV_RUNTIME_SOURCE_REVIEW_SHA: ${{ inputs.exact_candidate_source_review_sha256 }}
+    steps:
+      - name: Check out the exact source-reviewed candidate witness
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify complete source pins before helper imports
+        id: preflight
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
+          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-proof-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=5s 20s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
+            OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/exact-candidate-runtime/hosted.py preflight "$proof_dir" --execute
+      - name: Supply the unchanged pinned Python image
+        id: image
+        if: steps.preflight.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
+            /usr/bin/docker pull docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a
+      - name: Authenticate and receive only the approved unpublished asset
+        id: delivery
+        if: steps.preflight.outcome == 'success' && steps.image.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROOF_DIRECTORY: ${{ steps.preflight.outputs.evidence }}
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
+          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          /usr/bin/timeout --signal=TERM --kill-after=5s 205s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
+            OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            GH_TOKEN="$GH_TOKEN" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/exact-candidate-runtime/hosted.py deliver "$PROOF_DIRECTORY" --execute
+      - name: Seal the exact read-only executable receiver
+        id: receiver
+        if: steps.delivery.outcome == 'success'
+        continue-on-error: true
+        env:
+          PROOF_DIRECTORY: ${{ steps.preflight.outputs.evidence }}
+          OSV_DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
+          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          /usr/bin/timeout --signal=TERM --kill-after=5s 35s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
+            OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            OSV_DELIVERY_OUTCOME="$OSV_DELIVERY_OUTCOME" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/exact-candidate-runtime/hosted.py receive "$PROOF_DIRECTORY" --execute
+      - name: Prove actual controls then the fixed candidate schema operation
+        id: runtime
+        if: steps.receiver.outcome == 'success'
+        continue-on-error: true
+        env:
+          PROOF_DIRECTORY: ${{ steps.preflight.outputs.evidence }}
+          OSV_RECEIVER_OUTCOME: ${{ steps.receiver.outcome }}
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/exact-candidate-runtime/hosted.py)"
+          test "${actual%% *}" = 4b42ef19b7f56f4b08c2cc1928c19ff60b14f416b7b80bc7afac0efeda72b628
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/exact-candidate-startup-XXXXXXXXXX")"
+          /usr/bin/timeout --signal=TERM --kill-after=5s 90s /usr/bin/env -i \
+            PATH=/usr/bin:/bin LANG=C LC_ALL=C HOME=/nonexistent RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" \
+            RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            OSV_RUNTIME_SOURCE_REVIEW="$OSV_RUNTIME_SOURCE_REVIEW" \
+            OSV_RUNTIME_SOURCE_REVIEW_SHA="$OSV_RUNTIME_SOURCE_REVIEW_SHA" \
+            OSV_RECEIVER_OUTCOME="$OSV_RECEIVER_OUTCOME" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/exact-candidate-runtime/hosted.py runtime "$PROOF_DIRECTORY" --execute
+      - name: Retain bounded receipts and native schema evidence
+        if: ${{ always() && steps.preflight.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: exact-candidate-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.preflight.outputs.evidence }}/state.json
+            ${{ steps.preflight.outputs.evidence }}/review.json
+            ${{ steps.preflight.outputs.evidence }}/transport-receipt.json
+            ${{ steps.preflight.outputs.evidence }}/*-failure.json
+            ${{ steps.preflight.outputs.evidence }}/receiver/receiver-proof.json
+            ${{ steps.preflight.outputs.evidence }}/runtime/controller-*.json
+            ${{ steps.preflight.outputs.evidence }}/runtime/container-ownership.json*
+            ${{ steps.preflight.outputs.evidence }}/runtime/container/request.json
+            ${{ steps.preflight.outputs.evidence }}/runtime/container/worker-*.json
+            ${{ steps.preflight.outputs.evidence }}/runtime/container/native-controls.json
+            ${{ steps.preflight.outputs.evidence }}/runtime/container/native-control-*.json
+            ${{ steps.preflight.outputs.evidence }}/runtime/container/candidate.stdout
+            ${{ steps.preflight.outputs.evidence }}/runtime/container/candidate.stderr
+          if-no-files-found: error
+          retention-days: 5
+      - name: Enforce genuine delivery receiver and runtime phase outcomes
+        if: ${{ !cancelled() }}
+        run: |
+          test '${{ steps.preflight.outcome }}' = success
+          test '${{ steps.image.outcome }}' = success
+          test '${{ steps.delivery.outcome }}' = success
+          test '${{ steps.receiver.outcome }}' = success
+          test '${{ steps.runtime.outcome }}' = success

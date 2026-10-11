@@ -1,0 +1,88 @@
+{
+  "accepted": false,
+  "artifact_bytes": 115900576,
+  "artifact_sha256": "9819a5b582e1f0b6ab135b75c5113baf36f7507a6904e64e2984c318447e8bdf",
+  "cold_start": "Workflow pins hosted.py; hosted.py validates the exact review input, manifest and all eight helper bytes before the first helper import.",
+  "files": {
+    "candidate_contract.py": {
+      "bytes": 7504,
+      "mode": "0644",
+      "sha256": "9501c8b66cffcf5dd8c919d39ddb8042033c30aeb970985611851c87b6ae4bda"
+    },
+    "candidate_controls.py": {
+      "bytes": 10131,
+      "mode": "0644",
+      "sha256": "c1e16164426c00903fd581a2a48568b8a3652772520fbf57542fadfb83df1e2a"
+    },
+    "candidate_enforcement.py": {
+      "bytes": 15383,
+      "mode": "0644",
+      "sha256": "ce0496a6313d2010c3c0e9256ac14da7f4075ce4be66dc55cb4e8fa18bda1332"
+    },
+    "container-seccomp.json": {
+      "bytes": 1954,
+      "mode": "0644",
+      "sha256": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9"
+    },
+    "container-worker.py": {
+      "bytes": 8696,
+      "mode": "0644",
+      "sha256": "72ea09e64a86d1aa9ac7bac6699630f9a2e8df2378d985e7fe2422eca5fe206c"
+    },
+    "osv_container.py": {
+      "bytes": 19854,
+      "mode": "0644",
+      "sha256": "97cbc201703c217d942bc5a0b9de76b1bb3b5e7e0cbb56d278508d77360f742e"
+    },
+    "receive-candidate.py": {
+      "bytes": 2966,
+      "mode": "0644",
+      "sha256": "ffc604b31569a786a019f1c1494ea10093511cdea3b9378a84d7476d27891cf8"
+    },
+    "run-candidate-runtime.py": {
+      "bytes": 9390,
+      "mode": "0644",
+      "sha256": "f9c49fe112f9d1eb79ac39347eb3ad9bba250c9d82f3ee634fa2758646e1803a"
+    }
+  },
+  "native_control_count": 35,
+  "native_control_names": [
+    "first_owned_exec",
+    "same_binary_reexec",
+    "thread_reexec",
+    "execveat_reexec",
+    "wrong_pid_notification",
+    "fork",
+    "vfork",
+    "clone_process",
+    "executable_mmap",
+    "executable_mprotect",
+    "executable_pkey_mprotect",
+    "mremap",
+    "remap_file_pages",
+    "shmat",
+    "userfaultfd",
+    "process_vm_writev",
+    "pidfd_getfd",
+    "new_seccomp_filter",
+    "prctl_seccomp",
+    "personality",
+    "legacy_uselib",
+    "clone_thread",
+    "landlock_other_read",
+    "landlock_empty_work",
+    "landlock_empty_home",
+    "landlock_empty_tmp",
+    "landlock_empty_no-external-plugins",
+    "landlock_exec",
+    "listener_death",
+    "notification_deadline",
+    "canceled_notification_deadline",
+    "x32",
+    "i386",
+    "stdout_overflow",
+    "stderr_overflow"
+  ],
+  "schema": "workflow.GO5932.exact-runtime-source-manifest.v1",
+  "source_commit": "81b9b1df2386f7d44c8464c999a4ea0919813526"
+}

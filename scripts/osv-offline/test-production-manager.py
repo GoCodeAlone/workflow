@@ -1,5 +1,6 @@
 """Offline admission/retirement fault controls; no Docker or Go invocation."""
 import copy
+from collections import Counter
 import hashlib
 import importlib.util
 import json
@@ -31,8 +32,10 @@ class ProductionTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256((HERE/file).read_bytes()).hexdigest(),pin,file)
         guards=re.findall(r'actual="\$\(/usr/bin/sha256sum (scripts/osv-offline/[^ )]+)\)"\n\s+test "\$\{actual%% \*\}" = ([0-9a-f]{64})',workflow)
         expected={'scripts/osv-offline/'+file for file in ('container-source-bindings.json','run-container-proof.py','prepare-supplier.py','bootstrap-manifest.json','run-production-proof.py','check-readonly-fixtures.py','run.py')}
+        expected.add('scripts/osv-offline/exact-candidate-runtime/hosted.py')
         self.assertEqual({file for file,pin in guards},expected)
-        self.assertEqual(len(guards),len(expected))
+        self.assertEqual(Counter(file for file,pin in guards),
+            Counter({file:4 if file.endswith('/exact-candidate-runtime/hosted.py') else 1 for file in expected}))
         for file,pin in guards:
             self.assertEqual(hashlib.sha256((HERE.parent.parent/file).read_bytes()).hexdigest(),pin,file)
 
