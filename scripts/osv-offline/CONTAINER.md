@@ -19,7 +19,10 @@ The host controller creates and binds the full container ID before starting.
 Client timeout does not retire the container. ID-specific kill/wait/removal,
 verified absence and the final deadline must precede successful publication.
 An uncertain create request cannot credit retirement from a first absence
-snapshot. Every read-only input needs a kernel mount-flag witness, with a real
+snapshot. Absence requires an exact-target Docker not-found response and an
+empty inspection result. Receipts record creation attempts and inspection
+classifications, byte counts and hashes without retaining raw diagnostics.
+Every read-only input needs a kernel mount-flag witness, with a real
 EROFS write-denial witness on the separately owned fixture.
 No host credential, home or socket is mounted. Credentialed reporting remains
 outside the worker. Runtime proof does not grant a clean vulnerability result

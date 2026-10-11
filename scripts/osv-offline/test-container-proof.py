@@ -25,8 +25,9 @@ class ProofTests(unittest.TestCase):
         compiler=root/'compiler';(compiler/'bin').mkdir(parents=True);(compiler/'bin/go').write_bytes(b'fixed compiler fixture')
         state={'cleanup_calls':0,'started':False,'mode':'success','clock':0}
         class FakeContainer:
-            def __init__(self,*args,**kwargs):self.retired=False
-            def create(self):return {'Id':'a'*64}
+            def __init__(self,*args,**kwargs):self.retired=False;self.creation_attempted=False;self.identifier=None
+            def create(self):self.creation_attempted=True;self.identifier='a'*64;return {'Id':self.identifier}
+            def lifecycle_evidence(self):return {'constructed':True,'creation_attempted':self.creation_attempted,'container_id':self.identifier,'retired':self.retired,'inspections':[]}
             def start_wait(self):
                 state['started']=True
                 request=json.loads((output/'request.json').read_text())
@@ -74,6 +75,7 @@ class ProofTests(unittest.TestCase):
             code,r,s,load=self.execute(Path(temp))
             self.assertEqual(code,0);self.assertTrue(r['runtime_boundary_pass'])
             self.assertEqual(s['cleanup_calls'],1);self.assertTrue(r['cleanup']['absent'])
+            self.assertTrue(r['lifecycle']['creation_attempted']);self.assertTrue(r['lifecycle']['retired'])
             for key in ('accepted','installation_admitted','scanner_execution','candidate_execution'):
                 self.assertIs(r[key],False)
 

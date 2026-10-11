@@ -25,7 +25,7 @@ class LifecycleTests(unittest.TestCase):
         def run(argv,seconds=15):
             state['calls'].append(argv[:]);c=holder['container']
             if argv[:2]==['container','inspect']:
-                if state['row'] is None:return subprocess.CompletedProcess(argv,1,'','Error: No such container: '+argv[2]+'\n')
+                if state['row'] is None:return subprocess.CompletedProcess(argv,1,'[]\n','Error response from daemon: No such container: '+argv[2]+'\n')
                 return subprocess.CompletedProcess(argv,0,json.dumps([state['row']]),'')
             if argv[0]=='create':
                 i='a'*64
@@ -88,7 +88,42 @@ class LifecycleTests(unittest.TestCase):
             with self.assertRaises(m.BoundaryError):c.create()
             self.assertEqual(c.identifier,'a'*64);c.cleanup()
             self.assertFalse(any(a[0]=='start' for a in s['calls']))
+
+    def test_documented_absence_formats_require_exact_target_and_empty_inspect_rows(self):
+        identifier='a'*64
+        for prefix in ('Error: No such container: ','Error: No such object: ','Error response from daemon: No such container: '):
+            with self.subTest(prefix=prefix):
+                self.assertTrue(m.confirmed_absence(subprocess.CompletedProcess([],1,'[]\n',prefix+identifier+'\n'),identifier))
+        for rc,stdout,stderr in (
+            (1,'[]','Error response from daemon: No such container: '+'b'*64),
+            (1,'[]','permission denied while trying to connect to the Docker daemon socket'),
+            (1,'[]','Cannot connect to the Docker daemon at unix:///var/run/docker.sock'),
+            (1,'[]','Warning: diagnostic\nError response from daemon: No such container: '+identifier),
+            (125,'[]','Error response from daemon: No such container: '+identifier),
+            (1,'[{}]','Error response from daemon: No such container: '+identifier),
+            (1,'null','Error response from daemon: No such container: '+identifier),
+            (1,'','Error response from daemon: No such container: '+identifier)):
+            with self.subTest(rc=rc,stdout=stdout,stderr=stderr):
+                self.assertFalse(m.confirmed_absence(subprocess.CompletedProcess([],rc,stdout,stderr),identifier))
+
+    def test_lifecycle_receipt_binds_real_attempt_id_retirement_and_inspection_hashes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp));c.create();c.start_wait();c.cleanup();r=c.lifecycle_evidence()
+            self.assertTrue(r['creation_attempted']);self.assertTrue(r['retired']);self.assertEqual(r['container_id'],'a'*64)
+            self.assertEqual(r['inspections'][0]['classification'],'confirmed-absence')
+            self.assertEqual(r['inspections'][-1]['target'],'a'*64)
+            self.assertEqual(r['inspections'][-1]['exit_code'],1)
+            self.assertEqual(len(r['inspections'][-1]['stderr_sha256']),64)
+            self.assertNotIn('stderr',r['inspections'][-1])
             self.assertIn(['rm','a'*64],s['calls'])
+
+    def test_seventeenth_inspection_is_refused_before_call_or_collection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            c,s=self.fixture(Path(temp))
+            for _ in range(16):self.assertIsNone(c.inspect(c.name))
+            with self.assertRaises(m.BoundaryError):c.inspect(c.name)
+            self.assertEqual(len(s['calls']),16)
+            self.assertEqual(len(c.lifecycle_evidence()['inspections']),16)
 
     def test_cid_mismatch_does_not_start_and_closes_only_authenticated_created_id(self):
         with tempfile.TemporaryDirectory() as temp:

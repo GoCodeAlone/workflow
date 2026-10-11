@@ -4,6 +4,7 @@ The provider daemon is trusted. No daemon socket, credentials or host namespace
 is exposed to the nonroot scanner. The manager and its subprocesses share the
 container's hard resource group; client retirement is never container cleanup.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,17 @@ ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C', 'HOME': '/nonexisten
 
 class BoundaryError(RuntimeError):
     pass
+
+def confirmed_absence(result, identifier):
+    # Docker28 passes the engine-client prefix through unchanged. Only a
+    # complete, exact-target not-found response with no inspect rows qualifies.
+    messages=('Error: No such container: '+identifier,
+              'Error: No such object: '+identifier,
+              'Error response from daemon: No such container: '+identifier)
+    if result.returncode!=1 or result.stderr.strip() not in messages:
+        return False
+    try:return json.loads(result.stdout)==[]
+    except (ValueError,TypeError):return False
 
 def eligible():
     if (platform.system() != 'Linux' or platform.machine() != 'x86_64' or
@@ -77,6 +89,7 @@ class Container:
         self.seconds = seconds
         self.identifier = None
         self.creation_attempted = False
+        self.inspection_receipts = []
         self.nonce = secrets.token_hex(16)
         self.name = 'wf-osv-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'] + '-' + self.nonce
         self.labels = {'workflow.osv.owner': self.nonce, 'workflow.osv.commit': os.environ['GITHUB_SHA']}
@@ -87,16 +100,28 @@ class Container:
         self.retired = False
 
     def inspect(self, identifier):
+        if len(self.inspection_receipts)>=16:raise BoundaryError('inspection evidence bound exceeded')
         r = self.run(['container', 'inspect', identifier], 15)
+        absent=confirmed_absence(r,identifier)
+        classification='confirmed-absence' if absent else ('inspect-success' if not r.returncode else 'unclassified-error')
+        if r.returncode and 'permission denied' in r.stderr.lower():classification='permission-denied'
+        if r.returncode and 'cannot connect to the docker daemon' in r.stderr.lower():classification='connection-failed'
+        self.inspection_receipts.append({'target':identifier,'exit_code':r.returncode,
+            'classification':classification,'stdout_bytes':len(r.stdout.encode()),'stderr_bytes':len(r.stderr.encode()),
+            'stdout_sha256':hashlib.sha256(r.stdout.encode()).hexdigest(),
+            'stderr_sha256':hashlib.sha256(r.stderr.encode()).hexdigest()})
         if r.returncode:
-            if r.returncode == 1 and r.stderr.strip() in (
-                'Error: No such container: ' + identifier, 'Error: No such object: ' + identifier):
-                return None
+            if absent:return None
             raise BoundaryError('Docker inspection failed; absence is unproved')
         rows = json.loads(r.stdout)
         if len(rows) != 1:
             raise BoundaryError('ambiguous container identity')
         return rows[0]
+
+    def lifecycle_evidence(self):
+        return {'constructed':True,'creation_attempted':self.creation_attempted,
+            'container_id':self.identifier,'name':self.name,'retired':self.retired,
+            'inspections':[dict(row) for row in self.inspection_receipts]}
 
     def owned(self, row):
         if (row is None or not ID.fullmatch(row.get('Id', '')) or row.get('Image') != IMAGE_CONFIG or

@@ -103,6 +103,8 @@ def run(output,compiler_root,execute=False):
                 result['input_cleanup']=True
             except Exception as error:
                 result['input_cleanup_failure']=type(error).__name__;code=2;result['runtime_boundary_pass']=False
+        result['lifecycle']=container.lifecycle_evidence() if container is not None else {
+            'constructed':False,'creation_attempted':False,'container_id':None,'retired':False,'inspections':[]}
     result['elapsed_seconds']=round(time.monotonic()-started,3)
     if result['elapsed_seconds']>=180:code=2;result['runtime_boundary_pass']=False
     write(output/'container-runtime-proof.json',result)
