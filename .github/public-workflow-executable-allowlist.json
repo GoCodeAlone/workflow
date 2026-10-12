@@ -94,5 +94,21 @@
     "sha256": "b5597c106885bdc9b1f7161f7c6a1635d92f5f9273c41ec799233d68d6dbf3e4",
     "state": "active",
     "workflowPath": ".github/workflows/public-workflow-policy.yml"
+  },
+  {
+    "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
+    "path": "scripts/check-public-workflow-policy.sh",
+    "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
+    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
+    "state": "staged",
+    "workflowPath": ".github/workflows/public-workflow-policy.yml"
+  },
+  {
+    "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
+    "path": ".github/workflows/policytool/adoptionguard/run.sh",
+    "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
+    "sha256": "b5597c106885bdc9b1f7161f7c6a1635d92f5f9273c41ec799233d68d6dbf3e4",
+    "state": "staged",
+    "workflowPath": ".github/workflows/public-workflow-policy.yml"
   }
 ]
