@@ -122,5 +122,11 @@
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
     "state": "staged",
     "presence": "present"
+  },
+  {
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
+    "state": "staged",
+    "presence": "present"
   }
 ]

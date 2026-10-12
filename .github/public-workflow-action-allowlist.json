@@ -734,5 +734,29 @@
     "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
     "state": "staged",
     "rationale": "Focused frozen benchmark repair action."
+  },
+  {
+    "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
+    "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
+    "state": "staged",
+    "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+  },
+  {
+    "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
+    "nodeSHA256": "d170cf6c1b95b868d42e4c7a91c661d8835d3ffd59d4c0ffc23dd3aec2ac8a20",
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
+    "state": "staged",
+    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
+  },
+  {
+    "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
+    "nodeSHA256": "c0b7090d0fe415fcaa265a9c715741653779117d033009a8cf99def40466ad9d",
+    "path": ".github/workflows/public-workflow-policy.yml",
+    "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
+    "state": "staged",
+    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
   }
 ]
