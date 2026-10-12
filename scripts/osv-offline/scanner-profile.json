@@ -70,7 +70,7 @@
     "golang.org/x/net v0.60.0; append authenticated two sum rows; retain all original rows"
   ],
   "phase_memory_proposal": {
-    "actual_parent_startup_guard_sha256": "ba58180c97506aad0463280f5a75cd2c79fc99bc021bf6b68a718a5866bb5a86",
+    "actual_parent_startup_guard_sha256": "2ca4e1177ed370637a3ef1a085fa50f3c7065d4f17006ed4b7e96c95e1ee0d3f",
     "default_probe_controls_memory_bytes": 2147483648,
     "freeform_resource_values_permitted": false,
     "owner_approval_sha256": "a39bcb6cbbefe722afa7ea21916d786c7e6073f1f5122ab86cabb921a0e783b4",

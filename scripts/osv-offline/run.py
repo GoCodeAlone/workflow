@@ -1155,7 +1155,7 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
         finally:
             write(private / 'container-lifecycle.json', container.lifecycle_evidence())
             if selection['authority'] is not None and container.retired:
-                resource_probe_export(Path(selection['probe']['output']),phase,headroom_module(manifest))
+                resource_probe_export(Path(selection['probe']['output']),phase,headroom_module(manifest),state,manifest,private)
     if not container.retired or cleanup.get('absent') is not True:
         raise Refusal('production container retirement is unproved')
     trusted();budget.left()
@@ -1194,6 +1194,8 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
         resource_phase=selection['phase'],resource_authority=selection['authority'],kernel_limits=selection['limits'],
         runtime_witness_sha256=digest(private / 'runtime-witness.json'),
         lifecycle_sha256=digest(private / 'container-lifecycle.json'))
+    if selection['authority'] is not None:
+        result['resource_export_sha256']=seal_resource_export(state,phase,manifest,result)
     trusted();budget.left()
     cleanup_startup_directory()
     trusted();budget.left()
@@ -1230,7 +1232,8 @@ def resource_source_guard(raw,headroom_sha):
         raise Refusal('invalid bounded resource source frame')
     text=raw.decode('utf-8');tree=ast.parse(text);lines=raw.splitlines(keepends=True)
     names={'headroom_module','resource_source_guard','resource_guard_digest','write_request_resource','resource_headroom',
-        'resource_host_identity','resource_probe_export','validate_resource_probe','resource_probe','resource_startup_observer','wait_resource_ready'}
+        'resource_host_identity','resource_probe_export','validate_resource_probe','resource_probe','resource_startup_observer','wait_resource_ready',
+        'resource_export_snapshot','resource_export_context','resource_export_buffers','validate_resource_export','seal_resource_export','copy_resource_export'}
     blocks={};intervals=[]
     for node in tree.body:
         if not isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)) or node.name not in names:continue
@@ -1313,29 +1316,262 @@ def resource_host_identity(helper,output,name):
     helper.retain(output/'raw',name+'-host-boot-id.raw',raw,'/proc/sys/kernel/random/boot_id',identity)
     return hashlib.sha256(raw).hexdigest()
 
-def resource_probe_export(output,phase,helper):
-    # This evidence is host-owned and outside every writable scan carveout.
-    raw,_=helper.file_bytes(output/'docker-parent-headroom-proof.json',1048576,uid=os.getuid());proof=helper.decode(raw)
-    if proof.get('retirement_verified') is not True or proof.get('lifecycle',{}).get('retired') is not True:
-        raise Refusal('resource probe cannot publish before owned retirement')
+def resource_export_snapshot(root,helper,*,published=False):
+    """Capture one bounded owned export tree through checked directory/file FDs."""
+    root=Path(root);owned(root);files={};directories=[];count=0;total=0
+    def walk(path,prefix=''):
+        nonlocal count,total
+        directory=helper.Directory(path,os.getuid())
+        try:
+            names=sorted(os.listdir(directory.fd))
+            if len(names)>64:raise Refusal('resource export directory count limit')
+            for name in names:
+                count+=1
+                if count>128 or not re.fullmatch(r'[a-zA-Z0-9_.-]+',name):raise Refusal('resource export entry/name limit')
+                info=os.stat(name,dir_fd=directory.fd,follow_symlinks=False);relative=prefix+name
+                if stat.S_ISDIR(info.st_mode):
+                    owned(path/name);directories.append(relative);walk(path/name,relative+'/')
+                elif stat.S_ISREG(info.st_mode):
+                    if published and stat.S_IMODE(info.st_mode)!=0o600:raise Refusal('resource export private mode differs')
+                    raw,_=helper.file_bytes(Path(name),1048576,uid=os.getuid(),directory_fd=directory.fd)
+                    total+=len(raw)
+                    if total>8*1048576:raise Refusal('resource export aggregate byte limit')
+                    files[relative]=raw
+                else:raise Refusal('resource export nonregular entry')
+                directory.check()
+        finally:directory.close()
+    walk(root)
+    return files,sorted(directories)
+
+def resource_export_context(state,phase,manifest,helper):
+    if phase not in ('scan-baseline','scan-candidate'):raise Refusal('unrequested resource export phase')
+    owned(state);label=phase.removeprefix('scan-')
+    raw,_=helper.file_bytes(state/(label+'-current.json'),65536,uid=os.getuid());current=helper.decode(raw)
+    if (set(current)!={'token','label','phase'} or current['label']!=label or current['phase']!=phase or
+        not SHA.fullmatch(str(current['token']))):raise Refusal('resource export current phase/token differs')
+    identity={key:os.environ[key] for key in helper.IDENTITY}
+    if (identity['GITHUB_REPOSITORY']!='GoCodeAlone/workflow' or identity['GITHUB_JOB']!='osv-production-proof' or
+        identity['GITHUB_EVENT_NAME']!='workflow_dispatch' or identity['GITHUB_REF']!='refs/heads/prep/osv-prerequisites-20261011-r1' or
+        not COMMIT.fullmatch(identity['GITHUB_SHA']) or not identity['GITHUB_RUN_ID'].isdecimal() or identity['GITHUB_RUN_ATTEMPT']!='1'):
+        raise Refusal('resource export finite identity differs')
+    return {'phase':phase,'token':current['token'],'identity':identity,
+        'core_contract_sha256':manifest['core_contract_sha256'],'bootstrap_manifest_sha256':digest(HERE/'bootstrap-manifest.json'),
+        'prepared_sha256':digest(state/'prepared.json')}
+
+def resource_probe_export(output,phase,helper,state,manifest,private=None):
+    # Diagnostics survive failure. Only the later host-owned eligibility seal admits reports.
+    context=resource_export_context(state,phase,manifest,helper);require_retired_containers(state);output=Path(output);owned(output)
+    if output.parent!=Path(os.environ['RUNNER_TEMP']) or not output.name.startswith('osv-headroom-'):
+        raise Refusal('resource export source is not current owned probe output')
+    files,directories=resource_export_snapshot(output,helper)
+    fixed={'docker-parent-headroom-proof.json','host-docker-parent-before.json','host-docker-parent-after.json',
+        'ownership.json','ownership.json.created','worker/container.id','worker/headroom-worker.json','scan-start/actual-parent.json'}
+    rawname=r'(?:before|after)-(?:owned-live-inspect\.json|init-(?:stat|cgroup)-(?:first|final)\.raw|leaf-(?:memory\.max|memory\.swap\.max|pids\.max|cpu\.max)\.raw|physical-meminfo\.raw|parent-(?:[0-9]|[12][0-9]|3[01])-(?:memory\.max|memory\.current)\.raw)'
+    for name in files:
+        if name in fixed:continue
+        if name=='raw/probe-host-boot-id.raw' or name=='scan-start/raw/startup-host-boot-id.raw':continue
+        if re.fullmatch(r'raw/'+rawname,name) or re.fullmatch(r'scan-start/raw/'+rawname,name):continue
+        raise Refusal('resource export contains unrequested probe file')
+    if set(directories)-{'raw','worker','scan-start','scan-start/raw'}:raise Refusal('resource export contains unrelated directory')
+    proof=helper.decode(files.get('docker-parent-headroom-proof.json',b''))
+    if (proof.get('retirement_verified') is not True or proof.get('lifecycle',{}).get('retired') is not True or
+        proof.get('identity')!=context['identity'] or proof.get('parent_phase')!=phase or
+        proof.get('source_manifest_sha256')!=manifest['trusted_files']['docker-headroom-manifest.json']):
+        raise Refusal('resource diagnostic probe provenance/retirement differs')
+    # Preserve only fixed data handoffs, including incomplete ones, under existing bounds.
+    if private is not None:
+        private=Path(private);owned(private)
+        if private.parent!=state or not private.name.startswith('worker-'):raise Refusal('resource export worker source differs')
+        directories.append('startup')
+        for name in ('request.json','resource-waiting.json','resource-waiting.json.committed','resource-ready.json','resource-ready.json.committed'):
+            source=private/name
+            if source.exists() or source.is_symlink():
+                raw,_=helper.file_bytes(source,0 if name.endswith('.committed') else 65536,uid=os.getuid())
+                if name=='request.json':
+                    request=helper.decode(raw)
+                    fields={'phase','state','private','runtime','resource_phase','resource_authority','core_contract_sha256',
+                        'prepared_sha256','identity','uid','gid','host_namespaces','readonly_targets','forbidden_paths',
+                        'compiler_path','compiler_sha256','resource_nonce','resource_container_id'}
+                    runtime_fields={'accepted','identity','core_contract_sha256','compiler_root','compiler_sha256','supplier_root',
+                        'supplier_pins','supplier_delivery_proof_sha256','supplier_delivery_proof_path','existing_gopath',
+                        'existing_module_cache','existing_build_cache'}
+                    if set(request)!=fields or type(request['runtime']) is not dict or set(request['runtime'])!=runtime_fields:
+                        raise Refusal('resource raw request contains unrequested fields')
+                files['startup/'+name]=raw
+    if len(files)+len(directories)+2>128 or sum(map(len,files.values()))>8*1048576-131072:
+        raise Refusal('resource handoff export aggregate bound exceeded')
+    index={'schema':'workflow.offline-scanner.resource-export.v1','accepted':False,'report_eligible':False,
+        'context':context,'worker_private':private.name if private is not None else None,
+        'probe_output':output.name,'probe_sha256':hashlib.sha256(files['docker-parent-headroom-proof.json']).hexdigest(),
+        'directories':sorted(directories),'files':{name:{'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()} for name,raw in sorted(files.items())}}
+    index_path=state/('resource-export-'+phase+'.json');write(index_path,index)
+    raw,_=helper.file_bytes(index_path,65536,uid=os.getuid())
     destination=REPOSITORY/'offline-evidence'
     if not destination.exists():destination.mkdir(mode=0o700)
     owned(destination);target=destination/('resource-guard-'+phase);target.mkdir(mode=0o700)
-    total=0;count=0;queue=[(output,target)]
-    while queue:
-        source,out=queue.pop();owned(source)
-        entries=list(source.iterdir())
-        if len(entries)>64:raise Refusal('resource evidence directory count limit')
-        for item in sorted(entries):
-            count+=1
-            if count>128:raise Refusal('resource evidence file count limit')
-            if item.is_symlink():raise Refusal('resource evidence symlink')
-            dest=out/item.name
-            if item.is_dir():dest.mkdir(mode=0o700);queue.append((item,dest));continue
-            raw,_=helper.file_bytes(item,1048576,uid=os.getuid());total+=len(raw)
-            if total>8*1048576:raise Refusal('resource evidence aggregate byte limit')
-            with dest.open('xb') as stream:os.fchmod(stream.fileno(),0o600);stream.write(raw)
-    return {'files_and_directories':count,'bytes':total}
+    for name in sorted(directories,key=lambda name:(name.count('/'),name)):(target/name).mkdir(mode=0o700)
+    for name,data in dict(files,**{'export-index.json':raw}).items():
+        with (target/name).open('xb') as stream:os.fchmod(stream.fileno(),0o600);stream.write(data);stream.flush();os.fsync(stream.fileno())
+    return hashlib.sha256(raw).hexdigest()
+
+def resource_export_buffers(state,phase,manifest):
+    helper=headroom_module(manifest);context=resource_export_context(state,phase,manifest,helper)
+    path=state/('resource-export-'+phase+'.json');raw,opened=helper.file_bytes(path,65536,uid=os.getuid());index=helper.decode(raw)
+    if opened['mode']!=0o600:raise Refusal('resource export host index mode differs')
+    if (set(index)!={'schema','accepted','report_eligible','context','worker_private','probe_output','probe_sha256','directories','files'} or
+        index['schema']!='workflow.offline-scanner.resource-export.v1' or index['accepted'] is not False or
+        index['report_eligible'] is not False or index['context']!=context or type(index['files']) is not dict or
+        type(index['directories']) is not list or not SHA.fullmatch(str(index['probe_sha256']))):
+        raise Refusal('resource export index/current phase differs')
+    target=REPOSITORY/'offline-evidence'/('resource-guard-'+phase)
+    files,directories=resource_export_snapshot(target,helper,published=True)
+    eligible=state/('resource-export-'+phase+'.eligible.json');extra={}
+    if eligible.exists() or eligible.is_symlink():
+        value,opened=helper.file_bytes(eligible,65536,uid=os.getuid())
+        if opened['mode']!=0o600:raise Refusal('resource eligible host index mode differs')
+        extra['eligible-index.json']=value
+    expected=set(index['files'])|{'export-index.json'}|set(extra)
+    if set(files)!=expected or directories!=index['directories'] or files['export-index.json']!=raw:
+        raise Refusal('resource export exact membership/index differs')
+    for name,row in index['files'].items():
+        if (type(row) is not dict or set(row)!={'bytes','sha256'} or type(row['bytes']) is not int or
+            row['bytes']!=len(files[name]) or row['sha256']!=hashlib.sha256(files[name]).hexdigest()):
+            raise Refusal('resource export bytes/hash differ')
+    for name,value in extra.items():
+        if files[name]!=value:raise Refusal('resource eligible index buffer differs')
+    if hashlib.sha256(files['docker-parent-headroom-proof.json']).hexdigest()!=index['probe_sha256']:
+        raise Refusal('resource export probe hash differs')
+    return helper,index,raw,files
+
+def validate_resource_export(state,phase,manifest,result,*,sealed=True):
+    from osv_resources import authorize_phase,validate_witness,ACTUAL_PARENT_STARTUP_GUARD_SHA256
+    helper,index,index_raw,files=resource_export_buffers(state,phase,manifest)
+    private_name=index['worker_private']
+    if type(private_name) is not str or not re.fullmatch('worker-[a-zA-Z0-9_-]+',private_name):
+        raise Refusal('resource export lacks exact completed worker')
+    private=owned(state/private_name);native={}
+    names=('request.json','resource-waiting.json','resource-waiting.json.committed','resource-ready.json','resource-ready.json.committed',
+        'runtime-witness.json','worker-result.json','container-lifecycle.json')
+    for name in names:
+        raw,_=helper.file_bytes(private/name,0 if name.endswith('.committed') else 65536,uid=os.getuid());native[name]=raw
+        if name.startswith('resource-') or name=='request.json':
+            if files.get('startup/'+name)!=raw:raise Refusal('resource startup exported/current buffer differs')
+    request=helper.decode(native['request.json']);waiting=helper.decode(native['resource-waiting.json']);ready=helper.decode(native['resource-ready.json'])
+    identity={key:index['context']['identity'][key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')}
+    authority=request.get('resource_authority');limits=authorize_phase(phase,authority)
+    cid=request.get('resource_container_id');nonce=request.get('resource_nonce');request_sha=hashlib.sha256(native['request.json']).hexdigest()
+    if (request.get('phase')!=phase or request.get('resource_phase')!=phase or request.get('state')!=str(state) or
+        request.get('private')!=str(private) or request.get('identity')!=identity or
+        request.get('core_contract_sha256')!=manifest['core_contract_sha256'] or
+        request.get('prepared_sha256')!=index['context']['prepared_sha256'] or
+        not SHA.fullmatch(str(cid)) or not re.fullmatch('[0-9a-f]{32}',str(nonce))):
+        raise Refusal('resource export worker request/context differs')
+    joined={'resource_phase':phase,'resource_authority':authority,'core_contract_sha256':manifest['core_contract_sha256'],
+        'nonce':nonce,'container_id':cid,'request_sha256':request_sha}
+    if (set(waiting)!=set(joined)|{'schema','native_started','worker_private_pid'} or
+        waiting.get('schema')!='workflow.offline-scanner.resource-waiting.v1' or waiting.get('native_started') is not False or
+        type(waiting.get('worker_private_pid')) is not int or waiting['worker_private_pid']<=0 or
+        set(ready)!=set(joined)|{'schema','actual_parent_observation_sha256','actual_kernel_limits','requested_memory_bytes','native_execution_permitted'} or
+        ready.get('schema')!='workflow.offline-scanner.resource-ready.v1' or ready.get('native_execution_permitted') is not True or
+        ready.get('requested_memory_bytes')!=3000000000 or ready.get('actual_kernel_limits')!=limits or
+        any(waiting.get(key)!=value or ready.get(key)!=value for key,value in joined.items())):
+        raise Refusal('resource export waiting/ready closed binding differs')
+    proof=helper.decode(files['docker-parent-headroom-proof.json'])
+    original=validate_resource_probe(proof,phase,manifest,index['context']['identity'],ACTUAL_PARENT_STARTUP_GUARD_SHA256)
+    if authority['actual_headroom_receipt_sha256']!=index['probe_sha256']:
+        raise Refusal('resource export authority/probe differs')
+    probe_owner=helper.decode(files.get('ownership.json',b''));probe_created=helper.decode(files.get('ownership.json.created',b''))
+    probe_worker=helper.decode(files.get('worker/headroom-worker.json',b''))
+    probe_labels={'workflow.osv.owner':proof['nonce'],'workflow.osv.commit':identity['GITHUB_SHA']}
+    probe_name='wf-osv-'+identity['GITHUB_RUN_ID']+'-'+identity['GITHUB_RUN_ATTEMPT']+'-'+proof['nonce']
+    if (probe_owner.get('nonce')!=proof['nonce'] or probe_owner.get('labels')!=probe_labels or
+        probe_owner.get('name')!=probe_name or probe_created!={'container_id':proof['container_id'],'name':probe_name,'labels':probe_labels} or
+        proof['lifecycle'].get('name')!=probe_name or files.get('worker/container.id',b'').decode('ascii').strip()!=proof['container_id'] or
+        probe_worker!=proof.get('worker') or hashlib.sha256(files['worker/headroom-worker.json']).hexdigest()!=proof.get('worker_sha256')):
+        raise Refusal('resource export probe ownership/worker custody differs')
+    actual_raw=files.get('scan-start/actual-parent.json',b'');actual=helper.decode(actual_raw)
+    if (hashlib.sha256(actual_raw).hexdigest()!=ready['actual_parent_observation_sha256'] or
+        actual.get('container_id')!=cid or actual.get('nonce')!=nonce or
+        resource_headroom(actual,helper,limits)!=resource_headroom(original,helper,{'memory.max':'2147483648','memory.swap.max':'0','pids.max':'256'}) or
+        files.get('raw/probe-host-boot-id.raw')!=files.get('scan-start/raw/startup-host-boot-id.raw') or
+        not re.fullmatch(b'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\n',files.get('raw/probe-host-boot-id.raw',b''))):
+        raise Refusal('resource export actual parent/host identity differs')
+    expected={'docker-parent-headroom-proof.json','ownership.json','ownership.json.created','worker/container.id',
+        'worker/headroom-worker.json','raw/probe-host-boot-id.raw','scan-start/actual-parent.json','scan-start/raw/startup-host-boot-id.raw'}
+    expected.update('startup/'+name for name in names[:5])
+    for observation,prefix in [(row,'') for row in proof['observations']]+[(actual,'scan-start/')]:
+        if prefix=='':
+            name='host-docker-parent-'+observation['moment']+'.json';expected.add(name)
+            if helper.decode(files.get(name,b''))!=observation:raise Refusal('resource export observation buffer differs')
+        rows=observation.get('raw_custody');seen=set()
+        if type(rows) is not list or not rows:raise Refusal('resource export raw native custody absent')
+        moment=observation['moment']
+        required={'raw/'+moment+'-'+name for name in ('owned-live-inspect.json','init-stat-first.raw','init-stat-final.raw',
+            'init-cgroup-first.raw','init-cgroup-final.raw','physical-meminfo.raw',
+            'leaf-memory.max.raw','leaf-memory.swap.max.raw','leaf-pids.max.raw','leaf-cpu.max.raw')}
+        for n,parent in enumerate(observation['docker_parent_ancestors']):
+            if not parent.get('uncontrolled_root_fields_observed_absent'):
+                required.update('raw/'+moment+'-parent-'+str(n)+'-'+field+'.raw' for field in ('memory.max','memory.current'))
+        for row in rows:
+            name=row.get('relative_path');path=PurePosixPath(name) if type(name) is str else PurePosixPath('/')
+            if (name in seen or name not in required or path.is_absolute() or '..' in path.parts or
+                type(row.get('bytes')) is not int or not 0<=row['bytes']<=65536 or not SHA.fullmatch(str(row.get('sha256')))):
+                raise Refusal('resource export raw custody membership differs')
+            seen.add(name);data=files.get(prefix+name)
+            if data is None or len(data)!=row['bytes'] or hashlib.sha256(data).hexdigest()!=row['sha256']:
+                raise Refusal('resource export raw native custody hash differs')
+            expected.add(prefix+name)
+        if seen!=required:raise Refusal('resource export raw native custody incomplete')
+    if set(index['files'])!=expected:raise Refusal('resource completed export contains missing/extra raw input')
+    witness=helper.decode(native['runtime-witness.json']);worker=helper.decode(native['worker-result.json']);lifecycle=helper.decode(native['container-lifecycle.json'])
+    validate_witness(phase,authority,witness.get('witness',{}))
+    if (witness.get('complete') is not True or witness.get('identity')!=identity or
+        witness.get('core_contract_sha256')!=manifest['core_contract_sha256'] or
+        witness.get('resource_ready_sha256')!=hashlib.sha256(native['resource-ready.json']).hexdigest() or
+        witness['witness'].get('manager_pid')!=waiting['worker_private_pid'] or
+        worker.get('complete') is not True or type(worker.get('exit')) is not int or worker['exit'] not in (0,1) or
+        worker.get('resource_phase')!=phase or worker.get('resource_authority')!=authority or
+        lifecycle.get('retired') is not True or lifecycle.get('container_id')!=cid or
+        result.get('container_retired') is not True or result.get('container_id')!=cid or
+        result.get('resource_phase')!=phase or result.get('resource_authority')!=authority or result.get('kernel_limits')!=limits or
+        result.get('runtime_witness_sha256')!=hashlib.sha256(native['runtime-witness.json']).hexdigest() or
+        result.get('lifecycle_sha256')!=hashlib.sha256(native['container-lifecycle.json']).hexdigest()):
+        raise Refusal('resource export native witness/result/retirement differs')
+    created_raw,_=helper.file_bytes(state/'container-ledgers'/(private_name+'.created'),65536,uid=os.getuid())
+    created=helper.decode(created_raw)
+    if (created.get('container_id')!=cid or created.get('labels')!={'workflow.osv.owner':nonce,'workflow.osv.commit':identity['GITHUB_SHA']}):
+        raise Refusal('resource export full CID/owner ledger differs')
+    require_retired_containers(state)
+    value={'schema':'workflow.offline-scanner.resource-export-eligibility.v1','accepted':False,'report_eligible':True,
+        'context':index['context'],'index_sha256':hashlib.sha256(index_raw).hexdigest(),'worker_private':private_name,
+        'container_id':cid,'resource_authority':authority,'native_files':{name:hashlib.sha256(raw).hexdigest() for name,raw in native.items()}}
+    if sealed:
+        raw=files.get('eligible-index.json',b'')
+        if not raw or helper.decode(raw)!=value or result.get('resource_export_sha256')!=hashlib.sha256(raw).hexdigest():
+            raise Refusal('resource export lacks current sealed eligibility')
+    return value,files
+
+def seal_resource_export(state,phase,manifest,result):
+    value,files=validate_resource_export(state,phase,manifest,result,sealed=False)
+    path=state/('resource-export-'+phase+'.eligible.json');write(path,value)
+    helper=headroom_module(manifest);raw,_=helper.file_bytes(path,65536,uid=os.getuid())
+    target=REPOSITORY/'offline-evidence'/('resource-guard-'+phase)/'eligible-index.json'
+    with target.open('xb') as stream:os.fchmod(stream.fileno(),0o600);stream.write(raw);stream.flush();os.fsync(stream.fileno())
+    return hashlib.sha256(raw).hexdigest()
+
+def copy_resource_export(state,phase,manifest,destination,*,completed=False):
+    require_retired_containers(state)
+    helper,index,index_raw,files=resource_export_buffers(state,phase,manifest)
+    # A failed current attempt may retain diagnostic buffers; never promote it.
+    eligible=state/('resource-export-'+phase+'.eligible.json')
+    if type(completed) is not bool:raise Refusal('resource collector outcome must be exact')
+    if completed:
+        result,_=complete_result(state,phase.removeprefix('scan-'),manifest,index['context']['token'])
+        _,files=validate_resource_export(state,phase,manifest,result)
+    destination.mkdir(mode=0o700)
+    for name in sorted(index['directories'],key=lambda name:(name.count('/'),name)):(destination/name).mkdir(mode=0o700)
+    for name,raw in files.items():
+        with (destination/name).open('xb') as stream:os.fchmod(stream.fileno(),0o600);stream.write(raw);stream.flush();os.fsync(stream.fileno())
 
 def validate_resource_probe(value,phase,manifest,identity,guard):
     from osv_resources import ACTUAL_PARENT_STARTUP_GUARD_SHA256,limits_for_phase
@@ -1379,7 +1615,7 @@ def resource_probe(phase,manifest,state,budget):
             'core_contract_sha256':manifest['core_contract_sha256']}, {'output':str(output),'observation':observation,
             'host_identity_sha256':host_identity,'recorded_monotonic':time.monotonic(),'receipt_sha256':hashlib.sha256(raw).hexdigest()}
     except Exception:
-        resource_probe_export(output,phase,helper);raise
+        resource_probe_export(output,phase,helper,state,manifest);raise
 
 def resource_startup_observer(container,row,private,request,request_sha,selection,manifest,budget):
     helper=headroom_module(manifest);probe=selection['probe'];ready=private/'resource-ready.json'
@@ -1572,23 +1808,38 @@ def publish(state, name, source):
 
 def evidence(state, manifest):
     require_retired_containers(state)
+    completed={label:complete_result(state,label,manifest) for label in load(state/'prepared.json')['sources']}
+    resource_exports={};resource_bytes=0
+    for label,(result,proof) in completed.items():
+        if result.get('resource_authority') is not None:
+            phase='scan-'+label
+            if phase not in ('scan-baseline','scan-candidate') or result.get('resource_phase')!=phase:
+                raise Refusal('unrequested completed resource export phase')
+            _,buffers=validate_resource_export(state,phase,manifest,result)
+            resource_bytes+=sum(map(len,buffers.values()))
+            resource_exports['resource-guard-'+phase]=phase
     destination = REPOSITORY / 'offline-evidence'
     if destination.exists() or destination.is_symlink():
         owned(destination)
         for item in destination.iterdir():
+            if item.name in resource_exports:
+                owned(item)
+                continue
             if not re.fullmatch(r'failure-(?:prepare|scan|report|gate)-(?:scheduled|differential|baseline|candidate)\.json', item.name):
                 raise Refusal('refuse existing unrelated evidence publication path')
             regular(item)
     else:
         destination.mkdir(mode=0o700)
-    total = 0
+    total = resource_bytes
     for name in ['prepared.json', 'public-database-receipts.json', 'application-metadata-receipt.json']:
         source = state / name; regular(source)
+        total+=source.stat().st_size
+        if total>128*1024*1024:raise Refusal('evidence publication aggregate bound exceeded')
         shutil.copyfile(source, destination / name); (destination / name).chmod(0o600)
-    for label in load(state / 'prepared.json')['sources']:
-        result, proof = complete_result(state, label, manifest)
+    for label,(result,proof) in completed.items():
         output = destination / label; output.mkdir(mode=0o700)
         write(output / 'result.json', result)
+        total+=(output/'result.json').stat().st_size
         for source in proof.iterdir():
             if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.native-memory\.jsonl|receipt\.json|results\.json|database-validation\.json', source.name):
                 continue

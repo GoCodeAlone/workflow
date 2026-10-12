@@ -301,15 +301,17 @@ class ResourceControls(unittest.TestCase):
             self.assertEqual(c.requested_memory,3000000000);self.assertEqual(c.limits['memory.max'],'2999996416')
             c.runner.assert_not_called()
     def test_probe_export_owned_retirement_and_same_buffer_file_custody(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp).resolve();output=root/'probe';output.mkdir(mode=0o700);(output/'raw').mkdir(mode=0o700)
-            proof=self.proof();m.write(output/'docker-parent-headroom-proof.json',proof);(output/'raw/observed.raw').write_bytes(b'actual mocked bytes')
-            with patch.object(m,'REPOSITORY',root):
-                receipt=m.resource_probe_export(output,'scan-candidate',h)
-            self.assertEqual((root/'offline-evidence/resource-guard-scan-candidate/raw/observed.raw').read_bytes(),b'actual mocked bytes')
-            self.assertGreater(receipt['bytes'],0)
-            bad=root/'bad';bad.mkdir(mode=0o700);m.write(bad/'docker-parent-headroom-proof.json',dict(proof,retirement_verified=False))
-            with patch.object(m,'REPOSITORY',root),self.assertRaises(m.Refusal):m.resource_probe_export(bad,'scan-baseline',h)
+        fixture=ResourceExportControls();fixture.setUp()
+        try:
+            output,private,result=fixture.scenario('candidate')
+            receipt=m.resource_probe_export(output,'scan-candidate',h,fixture.state,MANIFEST,private)
+            name='raw/before-physical-meminfo.raw'
+            self.assertEqual((fixture.repo/'offline-evidence/resource-guard-scan-candidate'/name).read_bytes(),(output/name).read_bytes())
+            self.assertRegex(receipt,'^[0-9a-f]{64}$')
+            path=output/'docker-parent-headroom-proof.json';proof=json.loads(path.read_text());proof['retirement_verified']=False;path.write_text(json.dumps(proof))
+            with self.assertRaisesRegex(m.Refusal,'provenance/retirement'):
+                m.resource_probe_export(output,'scan-candidate',h,fixture.state,MANIFEST,private)
+        finally:fixture.doCleanups()
     def test_source_framing_hashes_decorators_exact_bytes_and_all_function_names(self):
         raw=(HERE/'run.py').read_bytes();head=MANIFEST['trusted_files']['run-docker-headroom-proof.py']
         digest=m.resource_source_guard(raw,head)
@@ -349,5 +351,221 @@ class ResourceControls(unittest.TestCase):
             'source_object_delivery_acceptance_sha256','first_install_execution_receipt_sha256'):
             self.assertIsNone(MANIFEST[field])
         self.assertEqual(json.loads((HERE/'manual-proof-plan.json').read_text())['scan_seconds'],1800)
+
+class ResourceExportControls(unittest.TestCase):
+    """Real bounded export/report paths with explicitly mocked native completion."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name).resolve();self.repo=self.root/'repo';self.repo.mkdir(mode=0o700)
+        self.state=self.root/'state';self.state.mkdir(mode=0o700);(self.state/'container-ledgers').mkdir(mode=0o700)
+        self.env={'GITHUB_REPOSITORY':'GoCodeAlone/workflow','GITHUB_SHA':'c'*40,'GITHUB_REF':'refs/heads/prep/osv-prerequisites-20261011-r1',
+            'GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1','GITHUB_JOB':'osv-production-proof','RUNNER_TEMP':str(self.root)}
+        self.enter=patch.dict(os.environ,self.env);self.enter.start();self.addCleanup(self.enter.stop)
+        patcher=patch.object(m,'REPOSITORY',self.repo);patcher.start();self.addCleanup(patcher.stop)
+        patcher=patch.object(m,'headroom_module',return_value=h);patcher.start();self.addCleanup(patcher.stop)
+        patcher=patch.object(r.os,'sysconf',return_value=4096);patcher.start();self.addCleanup(patcher.stop)
+        self.completed={};self.private={}
+        m.write(self.state/'prepared.json',{'sources':{'baseline':{},'candidate':{}}})
+        m.write(self.state/'public-database-receipts.json',{})
+        m.write(self.state/'application-metadata-receipt.json',{})
+        (self.state/'runs').mkdir(mode=0o700)
+    def bytes(self,path,raw):
+        with path.open('xb') as stream:os.fchmod(stream.fileno(),0o600);stream.write(raw)
+    def scenario(self,label):
+        phase='scan-'+label;private=self.state/('worker-'+label);private.mkdir(mode=0o700);self.private[label]=private
+        nonce=('d' if label=='candidate' else 'e')*32;cid=('f' if label=='candidate' else '9')*64
+        token=('1' if label=='candidate' else '2')*64
+        m.write(self.state/(label+'-current.json'),{'label':label,'phase':phase,'token':token})
+        identity={key:self.env[key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')}
+        labels={'workflow.osv.owner':nonce,'workflow.osv.commit':self.env['GITHUB_SHA']};name='wf-osv-123-1-'+nonce
+        owner={'nonce':nonce,'name':name,'labels':labels,'output':str(private),'helper_root':str(m.HERE),'production':True}
+        created={'container_id':cid,'name':name,'labels':labels}
+        m.write(self.state/'container-ledgers'/private.name,owner)
+        m.write(self.state/'container-ledgers'/(private.name+'.created'),created)
+        m.write(self.state/'container-ledgers'/(private.name+'.retired'),dict(created,retired=True,cleanup={'absent':True}))
+        probe=self.root/('osv-headroom-'+label);probe.mkdir(mode=0o700)
+        for directory in ('raw','worker','scan-start','scan-start/raw'):(probe/directory).mkdir(mode=0o700)
+        def observation(c,enlarged,output,moment):
+            value=ResourceControls().observation(c,enlarged);value['moment']=moment
+            if enlarged:value['nonce']=nonce
+            value['raw_custody']=[]
+            names={'owned-live-inspect.json','init-stat-first.raw','init-stat-final.raw','init-cgroup-first.raw','init-cgroup-final.raw',
+                'physical-meminfo.raw','leaf-memory.max.raw','leaf-memory.swap.max.raw','leaf-pids.max.raw','leaf-cpu.max.raw',
+                'parent-0-memory.max.raw','parent-0-memory.current.raw'}
+            for suffix in sorted(names):
+                relative='raw/'+moment+'-'+suffix;raw=b'explicit mocked native observation\n'
+                self.bytes(output/relative,raw)
+                value['raw_custody'].append({'relative_path':relative,'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()})
+            return value
+        a=observation('a'*64,False,probe,'before');b=observation('a'*64,False,probe,'after')
+        actual=observation(cid,True,probe/'scan-start','before')
+        for value in (a,b):h.write(probe/('host-docker-parent-'+value['moment']+'.json'),value)
+        actual_sha=h.write(probe/'scan-start/actual-parent.json',actual)
+        boot=b'11111111-2222-3333-4444-555555555555\n'
+        self.bytes(probe/'raw/probe-host-boot-id.raw',boot);self.bytes(probe/'scan-start/raw/startup-host-boot-id.raw',boot)
+        probe_labels={'workflow.osv.owner':'b'*32,'workflow.osv.commit':self.env['GITHUB_SHA']};probe_name='wf-osv-123-1-'+'b'*32
+        h.write(probe/'ownership.json',{'nonce':'b'*32,'labels':probe_labels,'name':probe_name})
+        h.write(probe/'ownership.json.created',{'container_id':'a'*64,'labels':probe_labels,'name':probe_name})
+        self.bytes(probe/'worker/container.id',('a'*64).encode())
+        probe_worker={'complete':True,'exit':0};worker_sha=h.write(probe/'worker/headroom-worker.json',probe_worker)
+        proof=ResourceControls().proof();proof.update(parent_phase=phase,identity={key:self.env[key] for key in h.IDENTITY},
+            observations=[a,b],worker=probe_worker,worker_sha256=worker_sha,lifecycle={'retired':True,'container_id':'a'*64,'name':probe_name})
+        probe_sha=h.write(probe/'docker-parent-headroom-proof.json',proof)
+        authority=ResourceControls().authority();authority.update(phase=phase,actual_headroom_receipt_sha256=probe_sha)
+        runtime={key:None for key in ('accepted','identity','core_contract_sha256','compiler_root','compiler_sha256','supplier_root',
+            'supplier_pins','supplier_delivery_proof_sha256','supplier_delivery_proof_path','existing_gopath','existing_module_cache','existing_build_cache')}
+        request={'phase':phase,'resource_phase':phase,'state':str(self.state),'private':str(private),'runtime':runtime,
+            'resource_authority':authority,'core_contract_sha256':MANIFEST['core_contract_sha256'],'prepared_sha256':m.digest(self.state/'prepared.json'),
+            'identity':identity,'uid':os.getuid(),'gid':os.getgid(),'host_namespaces':{},'readonly_targets':[],'forbidden_paths':[],
+            'compiler_path':'/compiler/bin/go','compiler_sha256':'0'*64,'resource_nonce':nonce,'resource_container_id':cid}
+        request_sha=m.write_request_resource(private/'request.json',request)
+        joined={'resource_phase':phase,'resource_authority':authority,'core_contract_sha256':MANIFEST['core_contract_sha256'],
+            'nonce':nonce,'container_id':cid,'request_sha256':request_sha}
+        m.write_request_resource(private/'resource-waiting.json',dict(joined,schema='workflow.offline-scanner.resource-waiting.v1',
+            native_started=False,worker_private_pid=123),committed=True)
+        ready_sha=m.write_request_resource(private/'resource-ready.json',dict(joined,schema='workflow.offline-scanner.resource-ready.v1',
+            actual_parent_observation_sha256=actual_sha,actual_kernel_limits=r.limits_for_phase(phase),
+            requested_memory_bytes=3000000000,native_execution_permitted=True),committed=True)
+        witness={'manager_pid':123,'resource_phase':phase,'resource_authority':authority,'requested_memory_bytes':3000000000,
+            'memory_page_size':4096,'kernel_limits':r.limits_for_phase(phase),'child':{'memory':str(r.SCAN_KERNEL_MEMORY)}}
+        h.write(private/'runtime-witness.json',{'complete':True,'identity':identity,'core_contract_sha256':MANIFEST['core_contract_sha256'],
+            'resource_ready_sha256':ready_sha,'witness':witness})
+        worker={'complete':True,'exit':0,'resource_phase':phase,'resource_authority':authority}
+        h.write(private/'worker-result.json',worker)
+        h.write(private/'container-lifecycle.json',{'retired':True,'container_id':cid})
+        result=dict(worker,label=label,resource_phase=phase,resource_authority=authority,kernel_limits=r.limits_for_phase(phase),
+            container_id=cid,container_retired=True,runtime_witness_sha256=m.digest(private/'runtime-witness.json'),
+            lifecycle_sha256=m.digest(private/'container-lifecycle.json'))
+        out=self.state/'runs'/label;out.mkdir(mode=0o700);h.write(out/'receipt.json',{});h.write(out/'results.json',{})
+        self.completed[label]=(result,out)
+        return probe,private,result
+    def export(self,label,seal=True):
+        probe,private,result=self.scenario(label)
+        m.resource_probe_export(probe,'scan-'+label,h,self.state,MANIFEST,private)
+        if seal:result['resource_export_sha256']=m.seal_resource_export(self.state,'scan-'+label,MANIFEST,result)
+        return probe,private,result
+    def evidence(self):
+        with patch.object(m,'complete_result',side_effect=lambda state,label,manifest,*args:self.completed[label]):
+            m.evidence(self.state,MANIFEST)
+    def test_real_export_then_report_path_accepts_exact_both_current_seals(self):
+        for label in ('baseline','candidate'):self.export(label)
+        report=self.state/'report';report.mkdir(mode=0o700);self.bytes(report/'reporter.sarif',b'{}');self.bytes(report/'reporter.stderr',b'')
+        result={'sarif':str(report/'reporter.sarif'),'sarif_sha256':m.digest(report/'reporter.sarif'),'annotations_sha256':m.digest(report/'reporter.stderr')}
+        with patch.object(m,'complete_result',side_effect=lambda state,label,manifest,*args:self.completed[label]), \
+            patch.object(m,'boundary',return_value=(0,result,old.module('clock_io','osv_io.py').Budget(5))),patch.object(m,'trusted'):
+            self.assertEqual(m.reporting('report-differential',self.state,MANIFEST,{},None,None),0)
+        self.assertTrue((self.repo/'offline-evidence/baseline/result.json').is_file())
+        self.assertEqual((self.repo/'offline-evidence/resource-guard-scan-candidate/startup/resource-ready.json.committed').read_bytes(),b'')
+        self.assertTrue((self.repo/'results.sarif').is_file())
+    def test_original_source_rejects_legitimate_export_before_same_fixture_success(self):
+        for label in ('baseline','candidate'):self.export(label)
+        original=module('old_export_manager','../../../predecessor/scripts/osv-offline/run.py')
+        with patch.object(original,'HERE',m.HERE),patch.object(original,'REPOSITORY',self.repo), \
+            patch.object(original,'complete_result',side_effect=lambda state,label,manifest,*args:self.completed[label]):
+            with self.assertRaisesRegex(Exception,'refuse existing unrelated evidence publication path'):
+                original.evidence(self.state,MANIFEST)
+        self.evidence();self.assertTrue((self.repo/'offline-evidence/candidate/result.json').is_file())
+    def test_failure_diagnostics_copy_same_buffers_without_minting_eligibility(self):
+        _,private,result=self.export('candidate',seal=False)
+        self.completed.clear()
+        destination=self.root/'diagnostic-copy';m.copy_resource_export(self.state,'scan-candidate',MANIFEST,destination)
+        self.assertEqual((destination/'startup/request.json').read_bytes(),(private/'request.json').read_bytes())
+        self.assertFalse((destination/'eligible-index.json').exists())
+        with self.assertRaisesRegex(Exception,'sealed eligibility'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,result)
+    def test_unrequested_cross_phase_stale_and_unknown_destination_entries_refuse(self):
+        for label in ('baseline','candidate'):self.export(label)
+        self.bytes(self.repo/'offline-evidence/unrelated.json',b'{}')
+        with self.assertRaisesRegex(Exception,'unrelated evidence'):self.evidence()
+        (self.repo/'offline-evidence/unrelated.json').unlink()
+        pointer=self.state/'candidate-current.json';v=json.loads(pointer.read_text());v['token']='7'*64;pointer.write_text(json.dumps(v))
+        with self.assertRaisesRegex(Exception,'current phase'):self.evidence()
+    def test_missing_extra_symlink_and_truncated_export_refuse(self):
+        self.export('candidate');target=self.repo/'offline-evidence/resource-guard-scan-candidate'
+        self.bytes(target/'extra.json',b'{}')
+        with self.assertRaisesRegex(Exception,'membership'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,self.completed['candidate'][0])
+        (target/'extra.json').unlink()
+        path=target/'startup/resource-ready.json';original=path.read_bytes();path.write_bytes(original[:-1])
+        with self.assertRaisesRegex(Exception,'hash differ'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,self.completed['candidate'][0])
+        path.write_bytes(original);path.unlink();path.symlink_to(self.private['candidate']/'resource-ready.json')
+        with self.assertRaisesRegex(Exception,'nonregular'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,self.completed['candidate'][0])
+    def test_changed_private_buffer_or_nonempty_commit_marker_refuses(self):
+        _,private,result=self.export('candidate')
+        marker=private/'resource-ready.json.committed';marker.write_bytes(b'x')
+        with self.assertRaises(Exception):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,result)
+        marker.write_bytes(b'')
+        ready=private/'resource-ready.json';v=json.loads(ready.read_text());v['nonce']='0'*32;ready.write_text(json.dumps(v))
+        with self.assertRaisesRegex(Exception,'startup exported/current'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,result)
+    def test_mutated_retirement_native_witness_and_eligibility_hash_refuse(self):
+        _,private,result=self.export('candidate')
+        bad=dict(result,resource_export_sha256='0'*64)
+        with self.assertRaisesRegex(Exception,'sealed eligibility'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,bad)
+        bad=dict(result,container_id='8'*64)
+        with self.assertRaisesRegex(Exception,'native witness/result'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,bad)
+        retired=self.state/'container-ledgers'/(private.name+'.retired');v=json.loads(retired.read_text());v['retired']=False;retired.write_text(json.dumps(v))
+        with self.assertRaisesRegex(Exception,'retirement'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,result)
+    def test_default_scheduled_two_gib_report_needs_no_expansion_export(self):
+        self.completed={'candidate':({'complete':True,'resource_authority':None},self.state/'runs')}
+        m.write(self.state/'runs/results.json',{})
+        (self.state/'prepared.json').write_text(json.dumps({'sources':{'candidate':{}}}))
+        self.evidence();self.assertFalse(any(p.name.startswith('resource-guard') for p in (self.repo/'offline-evidence').iterdir()))
+    def test_absent_eligible_seal_cannot_pass_report_evidence(self):
+        (self.state/'prepared.json').write_text(json.dumps({'sources':{'candidate':{}}}))
+        self.export('candidate',seal=False)
+        with self.assertRaisesRegex(Exception,'sealed eligibility'):self.evidence()
+
+    def test_success_collector_uses_current_sealed_token_not_absent_parent_step_environment(self):
+        _,private,result=self.export('candidate')
+        calls=[]
+        def complete(state,label,manifest,token=None):
+            calls.append(token);self.assertEqual(token,'1'*64);return self.completed[label]
+        with patch.object(m,'complete_result',side_effect=complete):
+            m.copy_resource_export(self.state,'scan-candidate',MANIFEST,self.root/'success-copy',completed=True)
+        self.assertEqual(calls,['1'*64])
+        self.assertEqual((self.root/'success-copy/startup/resource-ready.json').read_bytes(),(private/'resource-ready.json').read_bytes())
+
+    def test_failed_probe_remains_bounded_diagnostic_without_eligible_worker_seal(self):
+        probe,private,result=self.scenario('candidate');path=probe/'docker-parent-headroom-proof.json'
+        value=json.loads(path.read_text());value.update(measurement_complete=False,actual_exit=2,exit=2);path.write_text(json.dumps(value))
+        m.resource_probe_export(probe,'scan-candidate',h,self.state,MANIFEST)
+        copy=self.root/'failed-probe-copy';m.copy_resource_export(self.state,'scan-candidate',MANIFEST,copy)
+        self.assertEqual((copy/'docker-parent-headroom-proof.json').read_bytes(),path.read_bytes())
+        self.assertFalse((copy/'eligible-index.json').exists())
+        with self.assertRaisesRegex(Exception,'exact completed worker'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,result)
+
+    def test_cross_phase_unrequested_default_or_foreign_index_refuses(self):
+        self.export('candidate');index=self.state/'resource-export-scan-candidate.json';original=index.read_bytes()
+        for mutation in ({'phase':'scan-baseline'},{'core_contract_sha256':'0'*64},{'identity':dict(self.env,GITHUB_RUN_ID='999')}):
+            value=json.loads(original);value['context'].update(mutation);index.write_text(json.dumps(value))
+            with self.subTest(mutation=mutation),self.assertRaisesRegex(Exception,'index/current phase'):
+                m.validate_resource_export(self.state,'scan-candidate',MANIFEST,self.completed['candidate'][0])
+        index.write_bytes(original)
+        with self.assertRaisesRegex(Exception,'unrequested'):m.resource_export_context(self.state,'scan-scheduled',MANIFEST,h)
+
+    def test_duplicate_or_unknown_index_fields_refuse_without_copying_credentials(self):
+        self.export('candidate');index=self.state/'resource-export-scan-candidate.json';original=index.read_bytes()
+        index.write_bytes(b'{"schema":0,'+original[1:])
+        with self.assertRaisesRegex(Exception,'duplicate JSON'):m.resource_export_buffers(self.state,'scan-candidate',MANIFEST)
+        value=json.loads(original);value['unknown']=True;index.write_text(json.dumps(value))
+        with self.assertRaisesRegex(Exception,'index/current phase'):m.resource_export_buffers(self.state,'scan-candidate',MANIFEST)
+
+    def test_unknown_raw_request_field_refuses_before_export_tree(self):
+        probe,private,result=self.scenario('candidate');path=private/'request.json';value=json.loads(path.read_text());value['unexpected']=True;path.write_text(json.dumps(value))
+        with self.assertRaisesRegex(Exception,'unrequested fields'):m.resource_probe_export(probe,'scan-candidate',h,self.state,MANIFEST,private)
+        self.assertFalse((self.repo/'offline-evidence').exists())
+
+    def test_resource_additions_share_existing_128mib_report_budget(self):
+        for label in ('baseline','candidate'):self.export(label)
+        original=m.regular
+        def size(source,*args):
+            if source.name=='results.json':return SimpleNamespace(st_size=128*1024*1024)
+            return original(source,*args)
+        with patch.object(m,'regular',side_effect=size),self.assertRaisesRegex(Exception,'aggregate bound'):self.evidence()
+
+    def test_changed_export_permissions_and_hardlink_alias_refuse(self):
+        self.export('candidate');path=self.repo/'offline-evidence/resource-guard-scan-candidate/startup/resource-ready.json'
+        path.chmod(0o644)
+        with self.assertRaisesRegex(Exception,'private mode'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,self.completed['candidate'][0])
+        path.chmod(0o600);os.link(path,self.root/'alias')
+        with self.assertRaisesRegex(Exception,'read file shape'):m.validate_resource_export(self.state,'scan-candidate',MANIFEST,self.completed['candidate'][0])
 
 if __name__=='__main__':unittest.main()

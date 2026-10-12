@@ -164,7 +164,16 @@ def run(output, supplier_root, compiler_root, gopath, module_cache, build_cache)
             for path in evidence.rglob('*'):
                 if path.is_file():total += m.regular(path).st_size
             if total > 128*1024*1024:raise m.Refusal('finite raw evidence aggregate bound exceeded')
-            shutil.copytree(evidence,output/'offline-evidence',symlinks=False)
+            target=output/'offline-evidence';target.mkdir(mode=0o700)
+            for source in sorted(evidence.iterdir()):
+                if source.name in ('resource-guard-scan-baseline','resource-guard-scan-candidate'):
+                    resource_phase=source.name.removeprefix('resource-guard-')
+                    m.copy_resource_export(state,resource_phase,manifest,target/source.name,
+                        completed=successes.get(resource_phase.removeprefix('scan-')) is True)
+                elif source.is_dir():
+                    shutil.copytree(source,target/source.name,symlinks=False)
+                else:
+                    shutil.copyfile(source,target/source.name);(target/source.name).chmod(0o600)
         result['complete'] = 'error' not in result and all(successes.get(label) for label in ('baseline','candidate')) and len(result['phases'])==5 and all(
             row.get('executed') and row.get('exit') in (0,1) for row in result['phases'])
         result['raw_findings_preserved'] = True

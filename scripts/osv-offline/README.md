@@ -1,5 +1,15 @@
 # Offline scanner
 
+Resource-guard exports retain bounded failed-attempt diagnostics separately
+from report eligibility. Reports admit only the exact current phase/token,
+run, source/core, owner, probe, full container ID, native witness and retired
+worker joins sealed by the host. The raw request, waiting/ready buffers and
+their existing zero-byte commit markers remain in the phase export. Unknown,
+stale, modified or partial exports cannot authorize a completed report. These
+records share the existing 8 MiB resource and 128 MiB aggregate evidence bounds;
+this publication fix neither proves that the approved 3 GB scan fits nor
+changes vulnerability findings, memory limits or native execution.
+
 The pinned container prerequisite passed at commit
 `6150c3712d984942889436b5d4e53ba9ce5bc41c`,
 [hosted run38156036062](https://github.com/GoCodeAlone/workflow/actions/runs/38156036062).

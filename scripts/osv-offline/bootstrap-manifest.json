@@ -1,7 +1,7 @@
 {
   "container_image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
   "container_image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
-  "core_contract_sha256": "1fbb0ae1dcfee8b42ac1947a0de91a0ac5510f2ddd0185312bde9587d219259c",
+  "core_contract_sha256": "19db31317e2772bd9d3a4c2d356ec6d10b9ad6b77e038facaf91de08e51fcab0",
   "finite_baseline_projection_sha256": "e2ee5bc06a8308a19e3a875bd5324c04218d42b4c63fc2a459cbe45921be5bc8",
   "first_install_execution_receipt_sha256": null,
   "hosted_job_timing_acceptance_sha256": null,
@@ -28,19 +28,19 @@
     "container-worker.py": "7a9a0f3cd9aedffb6ff22bed14f149f82c7255680de0458082684cea59019ca1",
     "docker-headroom-manifest.json": "9e429206bdede8f3e51adf34409ce3c0f6d0137d019be96cc72cb2043ccca71f",
     "headroom-worker.py": "246a9af8075e11eb2b2d3bf72f44e4ceea7e2d9d33bce5786743c5ca7e27547c",
-    "manual-proof-plan.json": "373b931119e17be4ef162fc1f26e148048b102c3e1fdb605e6d7fa9224997377",
+    "manual-proof-plan.json": "4d40f385d13f7f04c56d1e30574a7d2ed4a21c9a10b2d0b9addd1a2078fbfa3f",
     "osv_completion.py": "dcd8e844370464b1b4e7b4c061a9b4f0ca3b746b211cf705dc520e8d400ae045",
     "osv_container.py": "fac4f07474e4053d8752f2063a6f9579184f13386e7dd6dc015acf2bc1fcf509",
     "osv_io.py": "dacb84479059f630793c116af6c09eeacd34b7eb1bfdfd7c7a8a5840b1b58a9f",
     "osv_producer.py": "2b91d18cf63c3637294ba2f6db9c0224271e065f386b274a88f6459423aad03c",
-    "osv_resources.py": "194c6b3109ceaf30c45c752d72e38b53b0b197ab8b3c2534931ab182134d96a8",
+    "osv_resources.py": "5a4a5dcbc3268803fcd69839934b5fa8a220f753f9fe8f4ada9e40753ca04544",
     "osv_supplier.py": "c485eb0620959219e0f5c65d502431c467704d24e78270ee8f028fdf0aef349e",
     "osv_trusted.py": "2148339ccbaefdcb81396affa481ce3643a491b95228ddd61507eccdcca11bcc",
     "prepare-supplier.py": "7f729027a8b2dd299ae64dbfe7028cc58b9590b55ae30d58b6d473947e35cf0b",
     "run-docker-headroom-proof.py": "afdf66773bef8ca6dee3cb3069d3db5c594e617c40b290c9a2b69f087a158650",
-    "run-production-proof.py": "bcfc2c4e30fb988281244333ca3504a5e498bface54db3e9df75e310856b04d0",
-    "run.py": "b2f18a1108c7c8d6cf646a704654a326492d14a3db4886cc9d7135fd0329da51",
-    "scanner-profile.json": "12c0e4b17cda850a3ed02de65d45417a365bfb0efa70ea15374b4f36edd8a73d"
+    "run-production-proof.py": "595d73fe94dffe02aa6540c8e47becd6a13b6db05a8e9d4d84346372679aa032",
+    "run.py": "5b5ba55f0b08ac4a1c79e31e9338834541c118b071240a913b63ce31d20fcf56",
+    "scanner-profile.json": "3155550567b840361d0ad1c778c1af2d33902ca05ffac0b4a1906beeaee58829"
   },
   "version": 2
 }
