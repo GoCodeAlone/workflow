@@ -64,3 +64,18 @@ provenance remains part of the unchanged complete public metadata catalog union.
 This subject is restricted to manual differential evidence collection; normal
 event admission refuses it. Original baseline native failure remains preserved,
 and all candidate findings and complete native analysis remain blocking.
+
+The next finite trial uses supported GOGC50/GOMEMLIMIT512MiB in the same hard
+2GiB container, with GOMAXPROCS2, readonly flags, suppliers, roots and deadlines
+preserved. This may reduce transient allocation; it cannot shrink an inherently
+live graph. Bounded native-session RSS/HWM samples distinguish scanner and Go
+child observations, without identifying an OOM victim or continuous peak. Fixed
+host MemTotal/MemAvailable and ancestor memory limits are recorded before/after;
+these observations reserve no capacity and authorize no resource increase.
+
+Tuning applies only to scan workers: their Go version/manifest/source-catalog
+commands, standalone govulncheck, full OSV scanner and inherited Go subprocesses.
+Host preparation/preload and report workers retain GOMEMLIMIT768MiB/default GOGC;
+supplier compilation and exact candidate schema paths remain unchanged.
+The host receipt describes current runner ancestors. Docker-parent ancestry may
+differ and remains UNKNOWN/HOLD; these values cannot prove Docker headroom.

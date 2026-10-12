@@ -1053,6 +1053,7 @@
   "finding_policy_changed": false,
   "installation_admitted": false,
   "job": "osv-production-proof",
+  "native_gc_trial_authorization_sha256": "2812aa31aa773081bf7e66f923c1f7cee77e68a646ebb471356c385591931b00",
   "normal_event_delivery_proved": false,
   "phases": [
     "prepare-differential",

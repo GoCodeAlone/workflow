@@ -221,7 +221,7 @@ class MemoryLifetimeTests(unittest.TestCase):
             'ui/package-lock.json':{}}
         self.env={'PATH':str(self.go.parent)+':/usr/bin:/bin','GOTOOLCHAIN':'local','GOENV':'off','GOWORK':'off',
             'GOPROXY':'off','GOSUMDB':'off','GOFLAGS':'-mod=readonly','CGO_ENABLED':'0','GOVCS':'*:off',
-            'GOPRIVATE':'','GONOPROXY':'none','GONOSUMDB':'none','GOMAXPROCS':'2','GOMEMLIMIT':'768MiB'}
+            'GOPRIVATE':'','GONOPROXY':'none','GONOSUMDB':'none','GOMAXPROCS':'2','GOMEMLIMIT':'512MiB','GOGC':'50'}
         self.events=[];self.database_refs=[];self.native_done=False;self.mutation=None;self.child_code=0;self.native_code=0;self.scanner_exit=1;self.catalog_code=0
         original=self.p.database
         def database(*args):
@@ -233,7 +233,7 @@ class MemoryLifetimeTests(unittest.TestCase):
         patch.object(self.p,'PINS',{(self.p.platform.system(),self.p.platform.machine()):pins}).start()
         patch.object(self.p,'bounded_run',side_effect=self.native).start()
 
-    def native(self,argv,cwd,env,timeout,budget):
+    def native(self,argv,cwd,env,timeout,budget,*,observer=None):
         from subprocess import CompletedProcess
         if argv[:2]==[str(self.go),'version']:
             return CompletedProcess(argv,0,'go version go1.27.2 linux/amd64\n','')
@@ -632,5 +632,171 @@ class FiniteBaselineTests(unittest.TestCase):
         for argument in (path,str(path),PathLike()):self.assertEqual(read_report(argument),{'results':[]})
         path.write_text('{"results":[],"results":[]}')
         with self.assertRaises(IncompleteScan):read_report(str(path))
+
+class NativeSamplingTests(unittest.TestCase):
+    """Mocked causal/ownership controls; never native PID or host memory credit."""
+    def setUp(self):
+        self.f=MemoryLifetimeTests('test_complete_pipeline_defers_raw_records_and_retains_advisory_only_block')
+        self.f.setUp();self.addCleanup(self.f.doCleanups);self.p=self.f.p
+        self.proc=self.f.base/'fake-proc';self.proc.mkdir()
+        patch.object(self.p,'PROC_ROOT',self.proc).start()
+        self.child=SimpleNamespace(pid=42,returncode=None)
+        self.member(42,os.getpid(),42,'govulncheck',100,64)
+        self.member(43,42,42,'compile',200,96)
+        (self.f.cg/'cgroup.procs').write_text(str(os.getpid())+'\n42\n43\n')
+        from osv_io import Budget
+        self.budget=Budget();self.before=self.p.begin_memory(self.f.out,'root2-govulncheck',self.f.witness,self.budget,['fixed'])
+        self.sampler=self.p.NativeMemorySamples(self.f.out,'root2-govulncheck',self.f.witness,self.budget,self.before)
+        self.addCleanup(lambda:self.sampler.file.close() if not self.sampler.file.closed else None)
+    def member(self,pid,ppid,pgrp,name,hwm,rss,start=100):
+        root=self.proc/str(pid);root.mkdir(exist_ok=True)
+        fields=['S',str(ppid),str(pgrp),str(pgrp)]+['0']*15+[str(start)]
+        (root/'stat').write_text(str(pid)+' ('+name+') '+' '.join(fields)+'\n')
+        (root/'cgroup').write_text('0::/\n')
+        (root/'status').write_text('Name:\t'+name+'\nVmRSS:\t'+str(rss)+' kB\nVmHWM:\t'+str(hwm)+' kB\nRssAnon:\t'+str(rss)+' kB\n')
+    def records(self):return [json.loads(line) for line in self.sampler.path.read_text().splitlines()]
+    def test_sample_distinguishes_native_and_compiler_pressure_without_victim_claim(self):
+        self.sampler(self.child)
+        sample=self.records()[1];self.assertEqual([p['role'] for p in sample['processes']],['native-leader','go-compiler'])
+        self.assertEqual(sample['processes'][0]['memory_bytes']['VmRSS'],64*1024)
+        self.member(42,os.getpid(),42,'govulncheck',1800000,1700000)
+        self.member(43,42,42,'compile',100,64);self.sampler.next_sample=0;self.sampler(self.child)
+        second=self.records()[2];self.assertGreater(second['processes'][0]['memory_bytes']['VmRSS'],1700000*1000)
+        binding=self.sampler.close(-9,True);self.assertFalse(binding['accepted'])
+        self.assertEqual(binding['sha256'],hashlib.sha256(self.sampler.path.read_bytes()).hexdigest())
+        self.assertFalse(self.records()[-1]['continuous_measurement_or_victim_attribution'])
+    def test_no_proc_reads_after_reap_or_closed_and_no_other_child_rebinding(self):
+        self.child.returncode=0
+        with patch.object(self.p,'proc_bytes') as read,self.assertRaisesRegex(Exception,'after reap'):
+            self.sampler(self.child)
+        read.assert_not_called();self.child.returncode=None;self.sampler(self.child)
+        with self.assertRaisesRegex(Exception,'another child'):self.sampler(SimpleNamespace(pid=99,returncode=None))
+        self.sampler.close(0,True)
+        with patch.object(self.p,'proc_bytes') as read,self.assertRaisesRegex(Exception,'after reap'):self.sampler(self.child)
+        read.assert_not_called()
+    def test_reused_leader_wrong_parent_session_cgroup_and_status_refuse(self):
+        self.sampler(self.child)
+        self.member(42,os.getpid(),42,'govulncheck',100,64,start=101);self.sampler.next_sample=0
+        with self.assertRaisesRegex(Exception,'reused'):self.sampler(self.child)
+        self.member(42,99,42,'govulncheck',100,64);self.sampler.next_sample=0
+        with self.assertRaisesRegex(Exception,'direct-child'):self.sampler(self.child)
+        self.member(42,os.getpid(),99,'govulncheck',100,64);self.sampler.next_sample=0
+        with self.assertRaisesRegex(Exception,'direct-child'):self.sampler(self.child)
+        self.member(42,os.getpid(),42,'govulncheck',100,64);self.sampler.next_sample=0
+        (self.proc/'42/cgroup').write_text('0::/foreign\n')
+        with self.assertRaisesRegex(Exception,'left owned cgroup'):self.sampler(self.child)
+        (self.proc/'42/cgroup').write_text('0::/\n');(self.proc/'42/status').write_text('VmRSS: 1 kB\n');self.sampler.next_sample=0
+        with self.assertRaisesRegex(Exception,'fields missing'):self.sampler(self.child)
+    def test_owned_proc_virtual_files_reject_symlink_and_growth(self):
+        path=self.proc/'42/status';other=self.proc/'private';os.replace(path,other);path.symlink_to(other)
+        with self.assertRaisesRegex(Exception,'owned regular'):self.p.proc_bytes(path)
+        path.unlink();path.write_bytes(b'x'*16385)
+        with self.assertRaisesRegex(Exception,'bound'):self.p.proc_bytes(path)
+    def test_diagnostic_limit_is_explicit_and_shared_budget_remains_enforced(self):
+        self.sampler.LIMIT=self.sampler.bytes+4096
+        self.sampler(self.child);self.assertTrue(self.sampler.truncated)
+        self.sampler.close(0,True);self.assertTrue(self.records()[-1]['truncated'])
+        self.assertFalse(self.records()[-1]['accepted'])
+        self.assertEqual(self.records()[-2]['record'],'stop')
+        self.assertEqual(self.records()[-1]['diagnostic_status'],'HOLD')
+    def test_shared_native_stream_reserve_stops_only_sampling(self):
+        self.budget.limit=self.budget.used+20*1024*1024+4096
+        self.sampler(self.child);self.assertTrue(self.sampler.truncated)
+        self.assertEqual(self.sampler.stop_reason,'existing-aggregate-budget-native-stream-reserve')
+        self.sampler.next_sample=0
+        with patch.object(self.p,'proc_bytes') as read:self.sampler(self.child)
+        read.assert_not_called();self.assertEqual(self.sampler.unobserved_intervals,1)
+        binding=self.sampler.close(0,True);self.assertEqual(binding['diagnostic_status'],'HOLD')
+    def test_closed_tuning_environment_and_original_go_flags(self):
+        runtime=dict(existing_gopath='/old/go',existing_module_cache='/old/mod',existing_build_cache='/old/build')
+        env=m.env(Path('/fixed/go/bin/go'),self.f.base,runtime,analysis=True)
+        self.assertEqual((env['GOGC'],env['GOMEMLIMIT'],env['GOMAXPROCS'],env['GOFLAGS']),('50','512MiB','2','-mod=readonly'))
+        normal=m.env(Path('/fixed/go/bin/go'),self.f.base,runtime)
+        self.assertEqual(normal['GOMEMLIMIT'],'768MiB');self.assertNotIn('GOGC',normal)
+        for key,value in [('GOGC','100'),('GOMEMLIMIT','768MiB'),('GOMAXPROCS','1'),('GOFLAGS','-mod=readonly -p=1')]:
+            self.f.env[key]=value
+            with self.assertRaisesRegex(Exception,'unbound compiler'):self.f.run_producer()
+            self.f.env[key]=env[key]
+    def test_native_sample_same_size_mutation_after_capture_refuses(self):
+        self.sampler(self.child)
+        raw=self.sampler.path.read_bytes();changed=raw.replace(b'native-leader',b'corrupt-value')
+        self.assertEqual(len(raw),len(changed));self.assertNotEqual(raw,changed)
+        self.sampler.path.write_bytes(changed)
+        with self.assertRaisesRegex(Exception,'bytes changed after capture'):self.sampler.close(0,True)
+
+class HostMemoryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name).resolve();self.proc=self.root/'proc';self.proc.mkdir();(self.proc/'self').mkdir()
+        self.cg=self.root/'cgroup';self.cg.mkdir();(self.cg/'job').mkdir()
+        (self.proc/'self/cgroup').write_text('0::/job\n')
+        (self.proc/'meminfo').write_text('MemTotal: 8388608 kB\nMemAvailable: 6291456 kB\n')
+        for root,limit,current in [(self.cg,'4294967296','1073741824'),(self.cg/'job','max','536870912')]:
+            (root/'memory.max').write_text(limit+'\n');(root/'memory.current').write_text(current+'\n');(root/'cgroup.procs').write_text(str(os.getpid())+'\n')
+        self.addCleanup(patch.stopall);patch.object(m,'HOST_PROC',self.proc).start();patch.object(m,'HOST_CGROUP',self.cg).start()
+        from osv_io import Budget
+        self.budget=Budget()
+    def test_real_values_derive_effective_ancestor_headroom_and_never_admit_expansion(self):
+        value=m.host_memory_snapshot(self.budget)
+        self.assertEqual(value['effective_cgroup_memory_max_bytes'],4294967296)
+        self.assertEqual(value['current_group_memory_current_bytes'],536870912)
+        self.assertEqual(value['estimated_physical_and_cgroup_headroom_bytes'],3221225472)
+        self.assertIsNone(value['docker_parent_effective_headroom_bytes'])
+        self.assertEqual(value['docker_parent_headroom_status'],'UNKNOWN/HOLD')
+        self.assertFalse(value['accepted']);self.assertIn('no reservation',value['scope'])
+    def test_uncontrolled_root_absence_is_explicit_not_zero_usage(self):
+        (self.cg/'memory.max').unlink();(self.cg/'memory.current').unlink()
+        value=m.host_memory_snapshot(self.budget);self.assertIsNone(value['effective_cgroup_memory_max_bytes'])
+        self.assertIsNone(value['ancestor_cgroup_memory'][-1]['memory_current_bytes'])
+        self.assertTrue(value['ancestor_cgroup_memory'][-1]['uncontrolled_root_fields_observed_absent'])
+    def test_missing_partial_controller_unsafe_group_invalid_memory_and_alias_refuse(self):
+        (self.cg/'job/memory.max').unlink()
+        with self.assertRaisesRegex(m.Refusal,'nonroot'):m.host_memory_snapshot(self.budget)
+        (self.cg/'job/memory.max').write_text('max\n');(self.proc/'self/cgroup').write_text('0::/../escape\n')
+        with self.assertRaises(m.Refusal):m.host_memory_snapshot(self.budget)
+        (self.proc/'self/cgroup').write_text('0::/job\n');(self.proc/'meminfo').write_text('MemTotal: 1 kB\nMemAvailable: 2 kB\n')
+        with self.assertRaisesRegex(m.Refusal,'contradictory'):m.host_memory_snapshot(self.budget)
+
+class NativeObserverLifecycleTests(unittest.TestCase):
+    def fixture(self):
+        sys.path.insert(0,str(HERE));self.addCleanup(lambda:sys.path.remove(str(HERE)))
+        io=module('owned_observer_io','osv_io.py');events=[]
+        class Pipe:
+            def __init__(self,fd):self.fd=fd
+            def fileno(self):return self.fd
+            def close(self):events.append(('close',self.fd))
+        class Proc:
+            pid=42;returncode=None
+            def __init__(self):self.stdout=Pipe(10);self.stderr=Pipe(11);self.reaped=False
+            def wait(self,timeout):events.append(('wait',timeout));self.reaped=True;self.returncode=0;return 0
+        proc=Proc()
+        class Selector:
+            def __init__(self):self.mapping={}
+            def register(self,pipe,event,index):self.mapping[pipe.fd]=SimpleNamespace(fileobj=pipe,data=index)
+            def unregister(self,pipe):self.mapping.pop(pipe.fd)
+            def get_map(self):return self.mapping
+            def select(self,seconds):return [(next(iter(self.mapping.values())),1)]
+            def close(self):events.append(('selector-close',None))
+        with patch.object(io.subprocess,'Popen',return_value=proc),patch.object(io.selectors,'DefaultSelector',Selector),\
+            patch.object(io.os,'set_blocking'),patch.object(io.os,'read',return_value=b''),patch.object(io.os,'killpg') as kill:
+            yield io,proc,events,kill
+    def test_observer_only_before_owned_reap_and_native_capture_semantics_unchanged(self):
+        fixture=self.fixture();io,proc,events,kill=next(fixture)
+        def observe(current):self.assertIs(current,proc);self.assertFalse(current.reaped);events.append(('observe',current.pid))
+        result=io.bounded_run(['owned'],HERE,{},1,observer=observe)
+        self.assertEqual(result.returncode,0);self.assertEqual(result.stdout,'');self.assertEqual(result.stderr,'')
+        self.assertEqual([name for name,_ in events].count('observe'),2);self.assertTrue(proc.reaped);kill.assert_not_called()
+        fixture.close()
+    def test_observer_refusal_or_shared_budget_failure_kills_only_owned_unreaped_group(self):
+        for kind in ('refusal','budget'):
+            with self.subTest(kind=kind):
+                fixture=self.fixture();io,proc,events,kill=next(fixture);budget=io.Budget(limit=1)
+                def observe(current):
+                    self.assertFalse(current.reaped)
+                    if kind=='budget':budget.charge(2)
+                    else:raise RuntimeError('mocked observer refuses')
+                with self.assertRaises(Exception):io.bounded_run(['owned'],HERE,{},1,budget,observer=observe)
+                kill.assert_called_once_with(42,io.signal.SIGKILL);self.assertTrue(proc.reaped)
+                self.assertEqual(len([x for x in events if x[0]=='wait']),1);fixture.close()
 
 if __name__=='__main__':unittest.main()

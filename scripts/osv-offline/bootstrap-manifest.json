@@ -1,7 +1,7 @@
 {
   "container_image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
   "container_image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
-  "core_contract_sha256": "45ec4d019d037b3c7f726abffece838a4e1a4638b44ad6126ea44918322e112d",
+  "core_contract_sha256": "ad0b4348b59632fb838a95bf920331382c1c3954c2e118fdd728555804aa371d",
   "finite_baseline_projection_sha256": "e2ee5bc06a8308a19e3a875bd5324c04218d42b4c63fc2a459cbe45921be5bc8",
   "first_install_execution_receipt_sha256": null,
   "hosted_job_timing_acceptance_sha256": null,
@@ -17,7 +17,7 @@
     "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
   },
   "public_preload_inventory_sha256": "55f56e27e6b9cf6b5b497f2618494e5cec65f69ecc41255ffe169d058bf400fc",
-  "resource_contract": "Exact aggregate container memory2147483648/swap0/pids256/CPU2; scan total1800/native720/source240/manifest30; reporter240. Immutable core and independent actual admission index; fresh same-job supplier paths. Finite manual proof is provisional and never supplies missing normal-event evidence.",
+  "resource_contract": "Exact aggregate container memory2147483648/swap0/pids256/CPU2; scan total1800/native720/source240/manifest30; reporter240. Immutable core and independent actual admission index; fresh same-job supplier paths. Finite manual proof is provisional and never supplies missing normal-event evidence. Finite one-trial application GOGC50/GOMEMLIMIT512MiB; hard quotas/deadlines unchanged; bounded owned-native and host-headroom diagnostics within existing byte budgets.",
   "reviewed_protocol_binding_sha256": "4197aa92770c04bbf8e349cc3672b02fae157ebbf28da816773414861dbb888f",
   "source_object_delivery_acceptance_sha256": null,
   "status": "PRODUCTION CONTAINER SOURCE PREPARATION; FIVE ACTUAL ADMISSION DECISIONS UNBOUND",
@@ -26,17 +26,17 @@
     "application-metadata-catalog.json": "13a73207ad91ef10c6279cf714cbb758c75116261b345c599275789dacef0ee5",
     "container-seccomp.json": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9",
     "container-worker.py": "3a2cc039af7485f5f18fd0465d6e6b443cdf21a0a922ea1ae34f94c2eb4178db",
-    "manual-proof-plan.json": "cc64bb09024a381ee2ce6bea5e2ada8a3787aa04f4875cca1f0695bf89330858",
+    "manual-proof-plan.json": "896f6dd7b7d983ef9d4efc50b1d0fa947deafd74d8e556e6500bbf622f0c3644",
     "osv_completion.py": "dcd8e844370464b1b4e7b4c061a9b4f0ca3b746b211cf705dc520e8d400ae045",
     "osv_container.py": "97cbc201703c217d942bc5a0b9de76b1bb3b5e7e0cbb56d278508d77360f742e",
-    "osv_io.py": "c86e54e9abd38ef97b6b0e184b542ffab38a12f22154eee18c905a99f4a2ce92",
-    "osv_producer.py": "82ca8f4d6d0401872047d3d037ba3e05715ef587dfc209ab88d174b3ec260c5f",
+    "osv_io.py": "dacb84479059f630793c116af6c09eeacd34b7eb1bfdfd7c7a8a5840b1b58a9f",
+    "osv_producer.py": "b7ac4fb9fb01395acd3071ba3a36815e61f15fd85d6eb673cf3f2824fe4fb239",
     "osv_supplier.py": "c485eb0620959219e0f5c65d502431c467704d24e78270ee8f028fdf0aef349e",
     "osv_trusted.py": "2148339ccbaefdcb81396affa481ce3643a491b95228ddd61507eccdcca11bcc",
     "prepare-supplier.py": "7f729027a8b2dd299ae64dbfe7028cc58b9590b55ae30d58b6d473947e35cf0b",
-    "run-production-proof.py": "fc2585e6d35c5d6d0bcf27e70dd5ab71e990eb1ce8f2a6a1d3aeda774ea80bf4",
-    "run.py": "0010e061263c4e7086ee65ca6a6eab104c7c2942cd5b81722eb7dd4a06f35110",
-    "scanner-profile.json": "51c2c098ada346649433615ea7dd88d2134ed6d53690c015839560b4dceadbdd"
+    "run-production-proof.py": "bcfc2c4e30fb988281244333ca3504a5e498bface54db3e9df75e310856b04d0",
+    "run.py": "f6083b1f249238895ad141afe77d285f0edab948373525d2e79d525a741f1792",
+    "scanner-profile.json": "d4cd9db6e8cf79ae1112c2daaa3f61fe047843d07dfb43827c599ecbb7a94a40"
   },
   "version": 2
 }

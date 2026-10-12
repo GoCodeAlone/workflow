@@ -25,7 +25,7 @@ class Budget:
         if self.used>self.limit:raise IncompleteScan('aggregate producer output limit exceeded')
 
 
-def bounded_run(argv, cwd, env, timeout, budget=None, stdout_limit=STDOUT_LIMIT, stderr_limit=STDERR_LIMIT):
+def bounded_run(argv, cwd, env, timeout, budget=None, stdout_limit=STDOUT_LIMIT, stderr_limit=STDERR_LIMIT, *, observer=None):
     """Read both pipes incrementally, kill only this owned process group on failure."""
     budget=Budget() if budget is None else budget
     end=time.monotonic()+min(timeout,budget.left())
@@ -38,6 +38,7 @@ def bounded_run(argv, cwd, env, timeout, budget=None, stdout_limit=STDOUT_LIMIT,
         while selector.get_map():
             remaining=min(end-time.monotonic(),budget.left())
             if remaining<=0:raise IncompleteScan('producer process deadline exceeded')
+            if observer is not None:observer(proc)
             for key,_ in selector.select(min(remaining,0.25)):
                 chunk=os.read(key.fileobj.fileno(),65536)
                 if not chunk:selector.unregister(key.fileobj);continue

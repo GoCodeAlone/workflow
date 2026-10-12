@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from osv_completion import IncompleteScan, parse_analysis, parse_report_text, validate
 from osv_trusted import CONFIG, GO_VERSION, catalog, database, strict_json, check_database_applicability
 from osv_io import bounded_run, Budget, STDOUT_LIMIT
@@ -65,6 +66,145 @@ def protocol(text):
 CGROUP_ROOT = Path('/sys/fs/cgroup')
 PROC_CGROUP = Path('/proc/self/cgroup')
 PROC_STATUS = Path('/proc/self/status')
+
+PROC_ROOT=Path('/proc')
+
+def proc_bytes(path):
+    """Single bounded owned FD; no command line or environment reads."""
+    before=path.lstat()
+    def key(s):return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_mtime_ns,s.st_ctime_ns)
+    if not stat.S_ISREG(before.st_mode) or before.st_uid!=os.getuid() or before.st_nlink!=1:
+        raise IncompleteScan('native diagnostic requires owned regular proc file')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    with os.fdopen(fd,'rb') as stream:
+        if key(os.fstat(fd))!=key(before):raise IncompleteScan('native proc changed during open')
+        raw=stream.read(16385)
+        if len(raw)>16384 or key(os.fstat(fd))!=key(before) or key(path.lstat())!=key(before):
+            raise IncompleteScan('native proc identity or bound changed during read')
+    return raw
+
+def proc_stat(raw,pid):
+    text=raw.decode('ascii');start=text.find(' (');end=text.rfind(') ');fields=text[end+2:].split()
+    if (start<0 or end<start or text[:start]!=str(pid) or len(fields)<20 or
+        not re.fullmatch('[A-Za-z]',fields[0]) or any(not re.fullmatch('[0-9]{1,20}',fields[i]) for i in (1,2,3,19))):
+        raise IncompleteScan('invalid native proc stat identity')
+    return dict(pid=pid,ppid=int(fields[1]),pgrp=int(fields[2]),session=int(fields[3]),
+        starttime_ticks=int(fields[19]),state=fields[0],comm=text[start+2:end])
+
+class NativeMemorySamples:
+    """Bounded sampled owned session; RSS is neither heap nor victim proof."""
+    LIMIT=1024*1024
+    def __init__(self,out,label,witness,budget,before):
+        self.path=out/(label+'.native-memory.jsonl');self.file=self.path.open('xb');os.fchmod(self.file.fileno(),0o600)
+        self.witness=witness;self.budget=budget;self.before=before;self.started=time.monotonic();self.next_sample=0
+        self.pid=None;self.leader=None;self.samples=0;self.bytes=0;self.truncated=False;self.closed=False;self.hashed=hashlib.sha256()
+        self.stop_reason=None;self.unobserved_intervals=0;self.observed_leader_memory=False
+        try:self.emit(dict(schema='workflow.offline-scanner.owned-native-memory.v1',record='header',accepted=False,
+            label=label,before_sha256=before['_receipt_sha256'],manager_pid=os.getpid(),interval_seconds=2,
+            maximum_bytes=self.LIMIT,maximum_recorded_processes=20,
+            scope='sampled owned session only; RSS includes shared pages; no heap, continuous peak or OOM victim claim'))
+        except Exception:self.file.close();raise
+
+    def emit(self,value,*,footer=False):
+        raw=(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
+        if len(raw)>65536:raise IncompleteScan('native memory record bound exceeded')
+        if not footer and value.get('record')=='sample':
+            reason=('phase-diagnostic-byte-limit' if self.bytes+len(raw)>self.LIMIT-4096 else
+                'existing-aggregate-budget-native-stream-reserve' if self.budget.limit-self.budget.used-len(raw)<20*1024*1024+4096 else None)
+            if reason:
+                self.truncated=True;self.stop_reason=reason
+                self.emit(dict(record='stop',accepted=False,reason=reason,samples=self.samples,
+                    native_execution_and_deadline_unchanged=True),footer=True)
+                return False
+        if self.bytes+len(raw)>self.LIMIT:raise IncompleteScan('native diagnostic metadata exceeded reserved bound')
+        info=os.fstat(self.file.fileno());path=self.path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode)!=0o600 or info.st_uid!=os.getuid() or info.st_nlink!=1 or
+            (info.st_dev,info.st_ino)!=(path.st_dev,path.st_ino) or info.st_size!=self.bytes):
+            raise IncompleteScan('native sample output ownership changed')
+        self.budget.left();self.budget.charge(len(raw));self.file.write(raw);self.file.flush()
+        self.hashed.update(raw);self.bytes+=len(raw);return True
+
+    def __call__(self,proc):
+        if self.closed or proc.returncode is not None:raise IncompleteScan('native memory sampling after reap is forbidden')
+        if type(proc.pid) is not int or proc.pid<=0 or proc.pid==os.getpid():raise IncompleteScan('native sample lacks owned child PID')
+        if self.pid is None:self.pid=proc.pid
+        if self.pid!=proc.pid:raise IncompleteScan('native sampler rebound to another child')
+        now=time.monotonic()
+        if now<self.next_sample:return
+        self.next_sample=now+2
+        if self.truncated:self.unobserved_intervals+=1;return
+        self.budget.left();snapshot=memory_event_snapshot(self.witness,self.budget)
+        if snapshot['cgroup_identity']!=self.before['cgroup_identity'] or snapshot['limits']!=self.before['limits']:
+            raise IncompleteScan('native sampling escaped witnessed quota')
+        fd=os.open(CGROUP_ROOT/'cgroup.procs',os.O_RDONLY|os.O_NOFOLLOW)
+        with os.fdopen(fd,'rb') as stream:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):raise IncompleteScan('invalid sampled cgroup membership')
+            membership=stream.read(16385)
+        pieces=membership.decode('ascii').split()
+        if len(membership)>16384 or len(pieces)>256 or len(set(pieces))!=len(pieces) or any(not re.fullmatch('[1-9][0-9]{0,9}',p) for p in pieces):
+            raise IncompleteScan('native membership exceeds existing pids contract')
+        records=[];gone=0;other=0
+        for pid in sorted(map(int,pieces)):
+            self.budget.left()
+            if pid==os.getpid():other+=1;continue
+            root=PROC_ROOT/str(pid)
+            try:
+                first=proc_bytes(root/'stat');identity=proc_stat(first,pid)
+                if pid==self.pid:
+                    if identity['ppid']!=os.getpid() or identity['pgrp']!=self.pid or identity['session']!=self.pid:
+                        raise IncompleteScan('native leader is not owned direct-child session')
+                    start=(pid,identity['starttime_ticks'])
+                    if self.leader is None:self.leader=start
+                    if self.leader!=start:raise IncompleteScan('native leader PID reused')
+                elif identity['pgrp']!=self.pid or identity['session']!=self.pid:other+=1;continue
+                group=proc_bytes(root/'cgroup')
+                if group.decode('ascii')!=snapshot['group']:raise IncompleteScan('native process left owned cgroup')
+                raw=proc_bytes(root/'status');memory={}
+                for line in raw.decode('ascii').splitlines():
+                    field,sep,value=line.partition(':')
+                    if field not in {'VmRSS','VmHWM','RssAnon'}:continue
+                    parts=value.split()
+                    if not sep or field in memory or len(parts)!=2 or parts[1]!='kB' or not re.fullmatch('[0-9]{1,20}',parts[0]):
+                        raise IncompleteScan('invalid native process memory status')
+                    memory[field]=int(parts[0])*1024
+                final=proc_stat(proc_bytes(root/'stat'),pid)
+                if any(identity[k]!=final[k] for k in ('pid','ppid','pgrp','session','starttime_ticks')):
+                    raise IncompleteScan('native process identity changed during sample')
+                if set(memory)!={'VmRSS','VmHWM','RssAnon'}:
+                    if final['state'] not in {'Z','X','x'}:raise IncompleteScan('live native memory fields missing')
+                    gone+=1;continue
+                if memory['VmHWM']<memory['VmRSS']:raise IncompleteScan('native HWM contradicts RSS')
+                if pid==self.pid:self.observed_leader_memory=True
+                role='native-leader' if pid==self.pid else {'go':'go-driver','compile':'go-compiler','asm':'go-assembler','link':'go-linker'}.get(identity['comm'],'other-owned-descendant')
+                records.append({**{k:identity[k] for k in ('pid','ppid','pgrp','session','starttime_ticks')},'role':role,'memory_bytes':memory,
+                    'stat_sha256':hashlib.sha256(first).hexdigest(),'status_sha256':hashlib.sha256(raw).hexdigest(),'cgroup_sha256':hashlib.sha256(group).hexdigest()})
+            except (FileNotFoundError,ProcessLookupError):gone+=1
+        records.sort(key=lambda r:(r['pid']!=self.pid,-r['memory_bytes']['VmRSS'],r['pid']))
+        if self.emit(dict(record='sample',elapsed_seconds=round(now-self.started,3),owned_child_pid=self.pid,
+            leader_starttime_ticks=None if self.leader is None else self.leader[1],snapshot=snapshot,
+            membership_sha256=hashlib.sha256(membership).hexdigest(),sampled_owned_processes=len(records),
+            omitted_process_records=max(0,len(records)-20),gone_during_sample=gone,other_cgroup_processes=other,processes=records[:20])):self.samples+=1
+
+    def close(self,native_exit,captured):
+        if self.closed:raise IncompleteScan('native samples already finalized')
+        self.closed=True
+        try:
+            if not self.emit(dict(record='footer',accepted=False,samples=self.samples,truncated=self.truncated,
+                observed_leader=self.leader is not None,owned_child_pid=self.pid,native_exit=native_exit,native_capture_complete=captured,
+                stop_reason=self.stop_reason,unobserved_intervals_after_stop=self.unobserved_intervals,
+                diagnostic_status='HOLD' if self.truncated or not self.observed_leader_memory else 'SAMPLED_ONLY',
+                prefix_sha256=self.hashed.hexdigest(),continuous_measurement_or_victim_attribution=False),footer=True):
+                raise IncompleteScan('native footer bound exceeded')
+            self.file.flush();os.fsync(self.file.fileno());info=os.fstat(self.file.fileno());path=self.path.lstat()
+            if info.st_size!=self.bytes or info.st_nlink!=1 or (info.st_dev,info.st_ino)!=(path.st_dev,path.st_ino):
+                raise IncompleteScan('native final output binding changed')
+            if hashlib.sha256(read_owned(self.path,self.LIMIT)).hexdigest()!=self.hashed.hexdigest():
+                raise IncompleteScan('native memory bytes changed after capture')
+            return dict(file=self.path.name,bytes=self.bytes,sha256=self.hashed.hexdigest(),samples=self.samples,
+                truncated=self.truncated,stop_reason=self.stop_reason,accepted=False,
+                diagnostic_status='HOLD' if self.truncated or not self.observed_leader_memory else 'SAMPLED_ONLY')
+        finally:self.file.close()
+
 
 def memory_event_snapshot(witness, budget):
     """Readonly evidence in the existing witnessed private aggregate group."""
@@ -158,12 +298,13 @@ def begin_memory(out, label, witness, budget, argv):
     return before
 
 
-def end_memory(out, label, witness, budget, before, native_exit, captured):
+def end_memory(out, label, witness, budget, before, native_exit, captured, native_samples=None):
     if before is None:return
     result={'schema':'workflow.offline-scanner.memory-after.v1','complete':False,'accepted':False,
         'label':label,'native_exit':native_exit,'native_capture_complete':captured,
         'before_sha256':before['_receipt_sha256'],
         'scope':'aggregate container counters; a specific killed PID is not established'}
+    if native_samples is not None:result['native_samples']=native_samples
     try:
         if hashlib.sha256(read_owned(out/(label+'.memory-before.json'),65536)).hexdigest()!=before['_receipt_sha256']:
             raise IncompleteScan('memory before receipt changed')
@@ -194,10 +335,12 @@ def validation_memory(out, witness, budget):
 
 def execute(argv, cwd, env, out, label, timeout=240, budget=None, *, memory_witness=None):
     """Fresh producer-owned stdout/stderr/rc, never candidate supplied files."""
-    before=begin_memory(out,label,memory_witness,budget,argv);run=None;captured=False
+    before=begin_memory(out,label,memory_witness,budget,argv);run=None;captured=False;samples=None
+    if before is not None and re.fullmatch(r'root[0-9]+-(?:source-catalog|govulncheck)|scanner',label):
+        samples=NativeMemorySamples(out,label,memory_witness,budget,before)
     try:
         try:
-            run=bounded_run(argv,cwd,env,timeout,budget)
+            run=bounded_run(argv,cwd,env,timeout,budget,**({'observer':samples} if samples is not None else {}))
         except (OSError,subprocess.TimeoutExpired) as error:
             raise IncompleteScan('producer process unavailable or timed out') from error
         for suffix,text in [('stdout',run.stdout),('stderr',run.stderr),('rc',str(run.returncode)+'\n')]:
@@ -205,7 +348,10 @@ def execute(argv, cwd, env, out, label, timeout=240, budget=None, *, memory_witn
         captured=True
         return run
     finally:
-        end_memory(out,label,memory_witness,budget,before,None if run is None else run.returncode,captured)
+        binding=None
+        try:
+            if samples is not None:binding=samples.close(None if run is None else run.returncode,captured)
+        finally:end_memory(out,label,memory_witness,budget,before,None if run is None else run.returncode,captured,binding)
 
 
 def source_contract(root, go_binary, env, out, label, budget, memory_witness=None):
@@ -400,7 +546,7 @@ def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent
         if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
             raise IncompleteScan('supplier binary pin mismatch')
     required={'GOTOOLCHAIN':'local','GOENV':'off','GOWORK':'off','GOPROXY':'off','GOSUMDB':'off','GOFLAGS':'-mod=readonly',
-              'CGO_ENABLED':'0','GOVCS':'*:off','GOPRIVATE':'','GONOPROXY':'none','GONOSUMDB':'none'}
+              'CGO_ENABLED':'0','GOVCS':'*:off','GOPRIVATE':'','GONOPROXY':'none','GONOSUMDB':'none','GOGC':'50','GOMEMLIMIT':'512MiB','GOMAXPROCS':'2'}
     if any(env.get(k)!=v for k,v in required.items()) or env['PATH'].split(os.pathsep)[0]!=str(Path(go_binary).parent):
         raise IncompleteScan('unbound compiler/network environment')
     budget=Budget()

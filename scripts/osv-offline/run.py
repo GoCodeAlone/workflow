@@ -37,6 +37,8 @@ PHASES = {
 SHA = re.compile(r'^[0-9a-f]{64}$')
 COMMIT = re.compile(r'^[0-9a-f]{40}$')
 MAX_JSON = 16 * 1024 * 1024
+HOST_PROC = Path('/proc')
+HOST_CGROUP = Path('/sys/fs/cgroup')
 TRUSTED_FILES = {'run.py', 'osv_producer.py', 'osv_trusted.py', 'osv_completion.py',
     'osv_io.py', 'scanner-profile.json', 'osv_container.py', 'container-worker.py',
     'container-seccomp.json', 'manual-proof-plan.json', 'run-production-proof.py', 'prepare-supplier.py'}
@@ -468,7 +470,7 @@ def state_path():
         raise Refusal('unbound GitHub execution identity')
     return parent / ('wf-osv-offline-' + run + '-' + attempt + '-' + job)
 
-def env(go, state, runtime, *, online=False):
+def env(go, state, runtime, *, online=False, analysis=False):
     result = {
         'PATH': str(go.parent) + ':/usr/bin:/bin', 'LANG': 'C', 'LC_ALL': 'C',
         'HOME': str(state / 'home'), 'TMPDIR': str(state / 'tmp'),
@@ -485,6 +487,7 @@ def env(go, state, runtime, *, online=False):
     # Caches are existing allocated runner caches, never a new host private Go cache.
     result.update(GOPATH=runtime['existing_gopath'], GOMODCACHE=runtime['existing_module_cache'],
                   GOCACHE=runtime['existing_build_cache'])
+    if analysis:result.update(GOMEMLIMIT='512MiB',GOGC='50')
     return result
 
 def export_source(ref, label, state, child_env, bounded_run, Budget, prepare_budget):
@@ -842,6 +845,68 @@ def write_completion(path, value, budget):
             path.unlink()
         raise
 
+def host_memory_snapshot(budget):
+    """Fixed read-only hosted memory evidence; neither reservation nor authority."""
+    def read(path):
+        budget.left();before=path.lstat()
+        key=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_mtime_ns,s.st_ctime_ns)
+        if not stat.S_ISREG(before.st_mode):raise Refusal('host memory input must be regular')
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+        with os.fdopen(fd,'rb') as stream:
+            if key(os.fstat(fd))!=key(before):raise Refusal('host memory input rebound during open')
+            raw=stream.read(16385)
+            if len(raw)>16384 or key(os.fstat(fd))!=key(before) or key(path.lstat())!=key(before):
+                raise Refusal('host memory input exceeded bound or rebound')
+        return raw.decode('ascii')
+    raw=read(HOST_PROC/'meminfo');physical={}
+    for line in raw.splitlines():
+        field,sep,value=line.partition(':')
+        if field not in {'MemTotal','MemAvailable'}:continue
+        pieces=value.split()
+        if not sep or field in physical or len(pieces)!=2 or pieces[1]!='kB' or not re.fullmatch('[0-9]{1,20}',pieces[0]):
+            raise Refusal('invalid host physical memory fields')
+        physical[field]=int(pieces[0])*1024
+    if set(physical)!={'MemTotal','MemAvailable'} or physical['MemTotal']<=0 or physical['MemAvailable']>physical['MemTotal']:
+        raise Refusal('host physical memory fields absent or contradictory')
+    group=read(HOST_PROC/'self/cgroup');match=re.fullmatch(r'0::(/[^\n]*)\n',group)
+    if not match:raise Refusal('host memory measurement requires unified cgroup')
+    rel=PurePosixPath(match[1])
+    if '..' in rel.parts or rel.as_posix()!=match[1] or len(rel.parts)>32 or HOST_CGROUP.resolve()!=HOST_CGROUP:
+        raise Refusal('unsafe host cgroup memory path')
+    current=HOST_CGROUP.joinpath(*rel.parts[1:])
+    if current.resolve()!=current or str(os.getpid()) not in read(current/'cgroup.procs').split():
+        raise Refusal('host memory snapshot is not current owned job group')
+    levels=[];maxima=[];headroom=[physical['MemAvailable']]
+    while True:
+        try:
+            maximum=read(current/'memory.max');usage=read(current/'memory.current')
+        except FileNotFoundError:
+            if current!=HOST_CGROUP:raise Refusal('nonroot host memory controller fields absent')
+            for name in ('memory.max','memory.current'):
+                try:(current/name).lstat()
+                except FileNotFoundError:continue
+                raise Refusal('partial or substituted root memory controller fields')
+            levels.append({'group':'.','memory_max_bytes':None,'memory_current_bytes':None,
+                'uncontrolled_root_fields_observed_absent':True})
+            break
+        if not re.fullmatch(r'(?:max|[1-9][0-9]{0,19})\n',maximum) or not re.fullmatch(r'[0-9]{1,20}\n',usage):
+            raise Refusal('invalid host cgroup memory fields')
+        limit=None if maximum=='max\n' else int(maximum);used=int(usage)
+        if limit is not None:maxima.append(limit);headroom.append(max(0,limit-used))
+        levels.append({'group':str(current.relative_to(HOST_CGROUP)),'memory_max_bytes':limit,'memory_current_bytes':used,
+            'memory_max_sha256':hashlib.sha256(maximum.encode()).hexdigest(),'memory_current_sha256':hashlib.sha256(usage.encode()).hexdigest()})
+        if current==HOST_CGROUP:break
+        current=current.parent
+    return {'schema':'workflow.offline-scanner.host-memory.v1','accepted':False,
+        'physical_bytes':physical,'physical_meminfo_sha256':hashlib.sha256(raw.encode()).hexdigest(),
+        'group_sha256':hashlib.sha256(group.encode()).hexdigest(),'ancestor_cgroup_memory':levels,
+        'effective_cgroup_memory_max_bytes':min(maxima) if maxima else None,
+        'current_group_memory_current_bytes':levels[0]['memory_current_bytes'],
+        'estimated_physical_and_cgroup_headroom_bytes':min(headroom),
+        'measured_cgroup_scope':'current-runner-process ancestors; Docker parent ancestry is not proved equivalent',
+        'docker_parent_effective_headroom_bytes':None,'docker_parent_headroom_status':'UNKNOWN/HOLD',
+        'scope':'point-in-time host physical/current-runner ancestor observations; no reservation, resource expansion or admission'}
+
 def scan_label(phase):
     return 'baseline' if phase == 'scan-baseline' else 'candidate'
 
@@ -1122,8 +1187,8 @@ def worker(request_path, manifest, profile):
     from osv_io import bounded_run, Budget
     runtime = request['runtime']
     tools, go = supplier(state, manifest, runtime)
-    child_env = env(go, state, runtime)
     phase = request['phase']; label = 'baseline' if phase == 'scan-baseline' else 'candidate'
+    child_env = env(go, state, runtime, analysis=phase.startswith('scan-'))
     if phase.startswith('scan-'):
         out, blocking = run_one(state / (label + '-source'), profile['inputs'], tools, go,
             state / 'public-db', load(state / 'public-database-receipts.json'), datetime.now(timezone.utc), state / 'runs', child_env,
@@ -1238,7 +1303,7 @@ def evidence(state, manifest):
         output = destination / label; output.mkdir(mode=0o700)
         write(output / 'result.json', result)
         for source in proof.iterdir():
-            if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|receipt\.json|results\.json|database-validation\.json', source.name):
+            if not re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.native-memory\.jsonl|receipt\.json|results\.json|database-validation\.json', source.name):
                 continue
             info = regular(source); total += info.st_size
             if total > 128 * 1024 * 1024:
@@ -1388,7 +1453,7 @@ def preserve_incomplete_protocols(phase, destination):
         target = output / proof.name
         target.mkdir(mode=0o700)
         for source in sorted(proof.iterdir()):
-            if re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|receipt\.json|results\.json|database-validation\.json', source.name):
+            if re.fullmatch(r'(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner|database-validation|analysis-validation)\.(?:stdout|stderr|rc|memory-(?:before|after)\.json)|(?:root[0-9]+-(?:source-catalog|govulncheck)|scanner)\.native-memory\.jsonl|receipt\.json|results\.json|database-validation\.json', source.name):
                 copy(source, target / source.name)
     write(output / 'incomplete-publication.json', {'complete': False, 'phase': phase,
         'scope': 'unaccepted retained producer outputs; source slot and completeness cannot be inferred without a verified manager completion receipt',

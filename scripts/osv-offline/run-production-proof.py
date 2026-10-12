@@ -68,6 +68,14 @@ def run(output, supplier_root, compiler_root, gopath, module_cache, build_cache)
     child_env.update(PATH='/usr/bin:/bin',LANG='C',LC_ALL='C',HOME='/nonexistent')
     successes = {}
     try:
+        try:
+            snapshot=m.host_memory_snapshot(deadline)
+            deadline.charge(len(json.dumps(snapshot).encode()))
+            m.write_completion(output/'host-memory-before.json',snapshot,deadline)
+            result['host_memory_before_sha256']=m.digest(output/'host-memory-before.json')
+        except Exception as error:
+            result['host_memory_before_error_type']=type(error).__name__
+            result['host_headroom_for_future_expansion']='HOLD; before observation unavailable'
         for phase in plan['phases']:
             if phase.startswith(('report-','gate-')) and not all(successes.get(label) for label in ('baseline','candidate')):
                 result['phases'].append({'phase': phase, 'executed': False, 'reason': 'required actual scans are incomplete'})
@@ -115,6 +123,14 @@ def run(output, supplier_root, compiler_root, gopath, module_cache, build_cache)
         except Exception as error:
             result['retirement_verified'] = False
             result['retirement_error'] = {'type':type(error).__name__, 'reason':'owned full-ID retirement remains unproved'}
+        try:
+            snapshot=m.host_memory_snapshot(deadline)
+            deadline.charge(len(json.dumps(snapshot).encode()))
+            m.write_completion(output/'host-memory-after.json',snapshot,deadline)
+            result['host_memory_after_sha256']=m.digest(output/'host-memory-after.json')
+        except Exception as error:
+            result['host_memory_after_error_type']=type(error).__name__
+            result['host_headroom_for_future_expansion']='HOLD; after observation unavailable'
     try:
         if result['retirement_verified'] is not True:
             raise m.Refusal('finite proof publication limited to fixed failure metadata')
