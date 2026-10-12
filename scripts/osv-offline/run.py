@@ -26,6 +26,8 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import types
+import ast
 
 HERE = Path(__file__).resolve().parent
 REPOSITORY = HERE.parents[1]
@@ -43,6 +45,8 @@ TRUSTED_FILES = {'run.py', 'osv_producer.py', 'osv_trusted.py', 'osv_completion.
     'osv_io.py', 'scanner-profile.json', 'osv_container.py', 'container-worker.py',
     'container-seccomp.json', 'manual-proof-plan.json', 'run-production-proof.py', 'prepare-supplier.py'}
 TRUSTED_FILES.update({'osv_supplier.py', 'application-metadata-catalog.json'})
+TRUSTED_FILES.add('osv_resources.py')
+TRUSTED_FILES.update({'run-docker-headroom-proof.py','headroom-worker.py','docker-headroom-manifest.json'})
 MANUAL_PHASES = {'prepare-differential', 'scan-baseline', 'scan-candidate', 'report-differential', 'gate-differential'}
 CORE_FIELDS = {'trusted_files', 'linux_pins', 'public_preload_inventory_sha256',
     'prepared_source_refs', 'resource_contract', 'reviewed_protocol_binding_sha256',
@@ -1038,8 +1042,18 @@ def close_all_containers(state, runtime, deadline):
             row.get('carveouts')!=sorted(str(path) for path in writable) or row.get('carveout_parent')!=str(state) or
             row.get('production') is not True or row.get('creation_attempted') is not True):
             raise Refusal('recovery refuses a foreign or altered container ledger')
+        resource_phase=row.get('resource_phase');resource_authority=row.get('resource_authority')
+        if resource_phase is not None:
+            from osv_resources import authorize_phase,requested_memory
+            limits=authorize_phase(resource_phase,resource_authority)
+            if (row.get('kernel_limits')!=limits or row.get('requested_memory_bytes')!=requested_memory(resource_phase) or
+                resource_authority is not None and resource_authority['core_contract_sha256']!=load(HERE/'bootstrap-manifest.json')['core_contract_sha256']):
+                raise Refusal('recovery resource authority or quota differs')
+        elif resource_authority is not None:
+            raise Refusal('default recovery has no expansion authority')
         container=Container(private,HERE,mounts=mounts,seconds=row['seconds'],production=True,
-            carveouts=writable,carveout_parent=state,deadline=deadline)
+            carveouts=writable,carveout_parent=state,deadline=deadline,
+            resource_phase=resource_phase,resource_authority=resource_authority)
         container.name=name;container.nonce=nonce;container.labels=labels;container.creation_attempted=True
         created_path=ledger.with_name(ledger.name+'.created')
         if created_path.exists():
@@ -1101,9 +1115,11 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
     total = 240 if phase.startswith('report-') else load(HERE / 'scanner-profile.json')['resource_envelope']['total_seconds']
     budget = Budget(total)
     prepared_sha = verify_prepared_inputs(state, manifest, runtime)
+    selection = resource_phase_selection(phase,manifest,state,budget)
     private = Path(tempfile.mkdtemp(prefix='worker-', dir=state));private.chmod(0o700)
     mounts, writable = worker_mounts(state, private, runtime)
     request = {'phase': phase, 'state': str(state), 'private': str(private), 'runtime': runtime,
+        'resource_phase':selection['phase'],'resource_authority':selection['authority'],
         'core_contract_sha256': manifest['core_contract_sha256'], 'prepared_sha256': prepared_sha,
         'identity': {key: os.environ[key] for key in ('GITHUB_REPOSITORY','GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','GITHUB_JOB')},
         'uid': os.getuid(), 'gid': os.getgid(),
@@ -1115,16 +1131,22 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
     if phase.startswith('report-'):
         labels = ['candidate','baseline'] if phase=='report-differential' else ['candidate']
         request['scan_tokens'] = {label: step_scan_identity(label) for label in labels}
-    write(private / 'request.json', request)
     ledgers=state/'container-ledgers'
     if not ledgers.exists():ledgers.mkdir(mode=0o700)
     owned(ledgers)
     container = Container(private, HERE, mounts=mounts, seconds=max(1,int(budget.left())-180),
                           production=True, carveouts=writable, carveout_parent=state,
-                          deadline=budget.deadline, ledger=ledgers/private.name)
+                          deadline=budget.deadline, ledger=ledgers/private.name,
+                          resource_phase=selection['phase'],resource_authority=selection['authority'])
+    request['resource_nonce']=container.nonce
     try:
         container.create()
-        code, row = container.start_wait()
+        request['resource_container_id']=container.identifier
+        request_sha=write_request_resource(private/'request.json',request)
+        observer=None
+        if selection['authority'] is not None:
+            observer=lambda row: resource_startup_observer(container,row,private,request,request_sha,selection,manifest,budget)
+        code, row = container.start_wait(live_observer=observer) if observer is not None else container.start_wait()
     finally:
         try:
             cleanup = container.cleanup()
@@ -1132,6 +1154,8 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
                 'labels':container.labels,'retired':True,'cleanup':cleanup})
         finally:
             write(private / 'container-lifecycle.json', container.lifecycle_evidence())
+            if selection['authority'] is not None and container.retired:
+                resource_probe_export(Path(selection['probe']['output']),phase,headroom_module(manifest))
     if not container.retired or cleanup.get('absent') is not True:
         raise Refusal('production container retirement is unproved')
     trusted();budget.left()
@@ -1141,6 +1165,11 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
         witness.get('identity') != request['identity'] or witness.get('core_contract_sha256') != manifest['core_contract_sha256'] or
         witness.get('complete') is not True):
         raise Refusal('actual production container did not complete its witnessed scan')
+    from osv_resources import validate_witness
+    validate_witness(selection['phase'],selection['authority'],witness['witness'])
+    if selection['authority'] is not None and (not SHA.fullmatch(str(witness.get('resource_ready_sha256',''))) or
+        result.get('resource_authority')!=selection['authority'] or result.get('resource_phase')!=phase):
+        raise Refusal('completed expanded worker/ready authority differs')
     if phase.startswith('scan-'):
         proof = Path(result['proof'])
         if proof.parent != state / 'runs' or proof.is_symlink():
@@ -1162,6 +1191,7 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
     if verify_prepared_inputs(state, manifest, runtime) != prepared_sha:
         raise Refusal('prepared input changed after container retirement')
     result.update(container_id=container.identifier, container_retired=True,
+        resource_phase=selection['phase'],resource_authority=selection['authority'],kernel_limits=selection['limits'],
         runtime_witness_sha256=digest(private / 'runtime-witness.json'),
         lifecycle_sha256=digest(private / 'container-lifecycle.json'))
     trusted();budget.left()
@@ -1169,19 +1199,275 @@ def boundary(phase, state, manifest, runtime, bounded_run, Budget):
     trusted();budget.left()
     return code, result, budget
 
+def resource_phase_selection(phase,manifest,state=None,budget=None):
+    from osv_resources import source_proposal,authorize_phase,authorize_owner,requested_memory,SCAN_MEMORY,OWNER_APPROVAL_SHA256
+    plan=load(HERE/'manual-proof-plan.json');profile=load(HERE/'scanner-profile.json')
+    expected=source_proposal()
+    if plan.get('phase_memory_proposal') != expected or profile.get('phase_memory_proposal') != expected:
+        raise Refusal('immutable source/plan/profile phase proposal differs')
+    owner=plan.get('phase_resource_owner_approval_sha256') if phase in ('scan-baseline','scan-candidate') else None
+    selected=authorize_owner(phase,owner)
+    if requested_memory(phase)==SCAN_MEMORY:
+        if state is None or budget is None:raise Refusal('enlarged phase lacks fresh owned controller context')
+        authority,probe=resource_probe(phase,manifest,state,budget)
+        authorize_phase(phase,authority)
+        return {'phase':phase,'authority':authority,'limits':selected,'probe':probe}
+    return {'phase':phase,'authority':None,'limits':selected}
+
+def headroom_module(manifest):
+    path=HERE/'run-docker-headroom-proof.py'
+    # Trusted read-only source; compile the exact bounded buffer being hashed.
+    info=regular(path,1048576)
+    with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as stream:
+        raw=stream.read(1048577)
+    if len(raw)!=info.st_size or hashlib.sha256(raw).hexdigest()!=manifest['trusted_files'][path.name]:raise Refusal('headroom guard source differs')
+    module=types.ModuleType('owned_resource_headroom');module.__file__=str(path)
+    exec(compile(raw,str(path),'exec'),module.__dict__);return module
+
+def resource_source_guard(raw,headroom_sha):
+    # AST supplies only stable source locations; no version-dependent AST dump or fields.
+    if type(raw) is not bytes or len(raw)>1048576 or type(headroom_sha) is not str or not SHA.fullmatch(headroom_sha):
+        raise Refusal('invalid bounded resource source frame')
+    text=raw.decode('utf-8');tree=ast.parse(text);lines=raw.splitlines(keepends=True)
+    names={'headroom_module','resource_source_guard','resource_guard_digest','write_request_resource','resource_headroom',
+        'resource_host_identity','resource_probe_export','validate_resource_probe','resource_probe','resource_startup_observer','wait_resource_ready'}
+    blocks={};intervals=[]
+    for node in tree.body:
+        if not isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef)) or node.name not in names:continue
+        if not isinstance(node,ast.FunctionDef) or node.name in blocks or node.col_offset!=0:
+            raise Refusal('duplicate or unsupported resource source definition')
+        locations=[node.lineno]+[decorator.lineno for decorator in node.decorator_list]
+        first=min(locations);last=node.end_lineno
+        if (type(first) is not int or type(last) is not int or not 1<=first<=node.lineno<=last<=len(lines) or
+            any(type(line) is not int or not first<=line<=node.lineno for line in locations) or
+            any(not (last<lo or first>hi) for lo,hi in intervals)):
+            raise Refusal('ambiguous resource source location bounds')
+        intervals.append((first,last));blocks[node.name]=b''.join(lines[first-1:last])
+    if set(blocks)!=names:raise Refusal('incomplete resource startup source guard')
+    framed=hashlib.sha256();framed.update(b'workflow.osv.resource-guard.source-bytes.v1\0')
+    framed.update(len(names).to_bytes(4,'big'))
+    for name in sorted(names):
+        label=name.encode('ascii');block=blocks[name]
+        framed.update(len(label).to_bytes(2,'big'));framed.update(label)
+        framed.update(len(block).to_bytes(8,'big'));framed.update(block)
+    framed.update(bytes.fromhex(headroom_sha));return framed.hexdigest()
+
+def resource_guard_digest(manifest):
+    helper=headroom_module(manifest)
+    raw,_=helper.file_bytes(HERE/'run.py',1048576,uid=os.getuid())
+    if hashlib.sha256(raw).hexdigest()!=manifest['trusted_files']['run.py']:
+        raise Refusal('authenticated resource guard source differs')
+    return resource_source_guard(raw,manifest['trusted_files']['run-docker-headroom-proof.py'])
+
+def write_request_resource(path,value,*,committed=False):
+    raw=(json.dumps(value,sort_keys=True,indent=2)+'\n').encode()
+    if len(raw)>MAX_JSON:raise Refusal('request byte bound exceeded')
+    with path.open('xb') as stream:
+        os.fchmod(stream.fileno(),0o600);stream.write(raw);stream.flush();os.fsync(stream.fileno())
+    if committed:
+        fd=os.open(path.with_name(path.name+'.committed'),os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+        os.close(fd)
+    return hashlib.sha256(raw).hexdigest()
+
+def resource_headroom(observation,helper,expected_limits):
+    from osv_resources import REQUIRED_HOST_PARENT_HEADROOM,require_page_size,SCAN_KERNEL_MEMORY,SCAN_MEMORY,DEFAULT_MEMORY
+    require_page_size()
+    physical=observation.get('physical_bytes',{});parents=observation.get('docker_parent_ancestors',[])
+    if (type(physical) is not dict or set(physical)!={'MemTotal','MemAvailable'} or
+        type(physical['MemTotal']) is not int or type(physical['MemAvailable']) is not int or
+        not 0<=physical['MemAvailable']<=physical['MemTotal'] or physical['MemTotal']==0 or
+        type(parents) is not list or not 1<=len(parents)<=32 or parents[-1].get('group')!='.' or
+        observation.get('own_container_memory_cap_excluded_from_parent_estimate') is not True or
+        observation.get('memory_page_size')!=4096 or
+        observation.get('requested_memory_bytes')!=(SCAN_MEMORY if expected_limits['memory.max']==str(SCAN_KERNEL_MEMORY) else DEFAULT_MEMORY) or
+        {key:observation.get('own_container_limits',{}).get(key) for key in expected_limits}!=expected_limits):
+        raise Refusal('actual Docker-parent/physical/quota witness differs')
+    cpu=observation['own_container_limits'].get('cpu.max','').split()
+    if len(cpu)!=2 or not all(x.isdecimal() for x in cpu) or int(cpu[0])!=2*int(cpu[1]) or int(cpu[1])<=0:
+        raise Refusal('actual resource CPU quota differs')
+    groups=[]
+    for parent in parents:
+        group=parent.get('group');identity=parent.get('identity')
+        if (type(group) is not str or group in groups or type(identity) is not list or len(identity)!=2 or
+            any(type(x) is not int or x<0 for x in identity)):
+            raise Refusal('actual Docker ancestry identity differs')
+        groups.append(group)
+    relative=PurePosixPath(observation.get('host_init_cgroup',''))
+    if relative.is_absolute() or '..' in relative.parts or [PurePosixPath(x) for x in groups]!=list(relative.parents):
+        raise Refusal('actual Docker ancestry path differs')
+    for name in ('host_init','host_init_final'):
+        native=observation.get(name,{})
+        if native.get('state') not in helper.STAT_STATES-helper.DEAD_STAT_STATES or type(native.get('pid')) is not int or native['pid']<=0:
+            raise Refusal('actual live init witness differs')
+    if helper.process_identity(observation['host_init'])!=helper.process_identity(observation['host_init_final']):
+        raise Refusal('actual init rebound within observation')
+    estimate,maximum=helper.capacity(physical['MemAvailable'],parents)
+    if (estimate!=observation.get('estimated_physical_and_docker_parent_headroom_bytes') or
+        maximum!=observation.get('docker_parent_effective_memory_max_bytes') or estimate<REQUIRED_HOST_PARENT_HEADROOM):
+        raise Refusal('actual Docker parent has insufficient requested3GB plus2GiB reserve')
+    return [(x['group'],x['identity']) for x in parents]
+
+def resource_host_identity(helper,output,name):
+    raw,identity=helper.file_bytes(Path('/proc/sys/kernel/random/boot_id'),64,uid=0,pseudo=True)
+    if not re.fullmatch(b'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\n',raw):raise Refusal('host boot identity malformed')
+    helper.retain(output/'raw',name+'-host-boot-id.raw',raw,'/proc/sys/kernel/random/boot_id',identity)
+    return hashlib.sha256(raw).hexdigest()
+
+def resource_probe_export(output,phase,helper):
+    # This evidence is host-owned and outside every writable scan carveout.
+    raw,_=helper.file_bytes(output/'docker-parent-headroom-proof.json',1048576,uid=os.getuid());proof=helper.decode(raw)
+    if proof.get('retirement_verified') is not True or proof.get('lifecycle',{}).get('retired') is not True:
+        raise Refusal('resource probe cannot publish before owned retirement')
+    destination=REPOSITORY/'offline-evidence'
+    if not destination.exists():destination.mkdir(mode=0o700)
+    owned(destination);target=destination/('resource-guard-'+phase);target.mkdir(mode=0o700)
+    total=0;count=0;queue=[(output,target)]
+    while queue:
+        source,out=queue.pop();owned(source)
+        entries=list(source.iterdir())
+        if len(entries)>64:raise Refusal('resource evidence directory count limit')
+        for item in sorted(entries):
+            count+=1
+            if count>128:raise Refusal('resource evidence file count limit')
+            if item.is_symlink():raise Refusal('resource evidence symlink')
+            dest=out/item.name
+            if item.is_dir():dest.mkdir(mode=0o700);queue.append((item,dest));continue
+            raw,_=helper.file_bytes(item,1048576,uid=os.getuid());total+=len(raw)
+            if total>8*1048576:raise Refusal('resource evidence aggregate byte limit')
+            with dest.open('xb') as stream:os.fchmod(stream.fileno(),0o600);stream.write(raw)
+    return {'files_and_directories':count,'bytes':total}
+
+def validate_resource_probe(value,phase,manifest,identity,guard):
+    from osv_resources import ACTUAL_PARENT_STARTUP_GUARD_SHA256,limits_for_phase
+    helper=headroom_module(manifest)
+    if (value.get('accepted') is not False or value.get('measurement_complete') is not True or
+        value.get('retirement_verified') is not True or value.get('exit')!=0 or value.get('actual_exit')!=0 or
+        value.get('parent_phase')!=phase or value.get('identity')!=identity or
+        identity.get('GITHUB_JOB')!='osv-production-proof' or value.get('input_retired') is not True or
+        value.get('source_manifest_sha256')!=manifest['trusted_files']['docker-headroom-manifest.json'] or
+        not SHA.fullmatch(str(value.get('container_id',''))) or not re.fullmatch('[0-9a-f]{32}',str(value.get('nonce',''))) or
+        value.get('lifecycle',{}).get('retired') is not True or value.get('lifecycle',{}).get('container_id')!=value['container_id']):
+        raise Refusal('fresh same-job owned2GiB headroom proof differs')
+    moments=value.get('observations',[])
+    if len(moments)!=2 or [x.get('moment') for x in moments]!=['before','after']:raise Refusal('partial resource parent observations')
+    keys=[]
+    for row in moments:
+        if row.get('container_id')!=value['container_id'] or row.get('nonce')!=value['nonce']:
+            raise Refusal('owned probe CID/nonce differs')
+        helper.cgroup_path(('0::/'+row.get('host_init_cgroup','')+'\n').encode(),value['container_id'])
+        keys.append(resource_headroom(row,helper,limits_for_phase()))
+    if (keys[0]!=keys[1] or helper.process_identity(moments[0]['host_init'])!=helper.process_identity(moments[1]['host_init']) or
+        moments[0]['own_container_cgroup_identity']!=moments[1]['own_container_cgroup_identity']):
+        raise Refusal('owned probe parent or init rebound')
+    if guard!=ACTUAL_PARENT_STARTUP_GUARD_SHA256 or guard!=resource_guard_digest(manifest):raise Refusal('startup guard source binding differs')
+    return moments[-1]
+
+def resource_probe(phase,manifest,state,budget):
+    from osv_resources import OWNER_APPROVAL_SHA256,ACTUAL_PARENT_STARTUP_GUARD_SHA256,SCAN_MEMORY
+    helper=headroom_module(manifest);owned(state)
+    output=Path(tempfile.mkdtemp(prefix='osv-headroom-',dir=Path(os.environ['RUNNER_TEMP'])));output.chmod(0o700)
+    started=time.monotonic();budget.left();code=helper.run(output,True,parent_phase=phase,phase_deadline=budget.deadline);budget.left()
+    try:
+        if code!=0:raise Refusal('fresh owned headroom probe did not pass')
+        raw,_=helper.file_bytes(output/'docker-parent-headroom-proof.json',1048576,uid=os.getuid());value=helper.decode(raw)
+        guard=ACTUAL_PARENT_STARTUP_GUARD_SHA256
+        observation=validate_resource_probe(value,phase,manifest,{key:os.environ[key] for key in helper.IDENTITY},guard)
+        host_identity=resource_host_identity(helper,output,'probe')
+        if time.monotonic()-started>=180:raise Refusal('headroom probe exceeded existing phase budget')
+        return {'phase':phase,'memory_bytes':SCAN_MEMORY,'owner_approval_sha256':OWNER_APPROVAL_SHA256,
+            'startup_guard_sha256':guard,'actual_headroom_receipt_sha256':hashlib.sha256(raw).hexdigest(),
+            'core_contract_sha256':manifest['core_contract_sha256']}, {'output':str(output),'observation':observation,
+            'host_identity_sha256':host_identity,'recorded_monotonic':time.monotonic(),'receipt_sha256':hashlib.sha256(raw).hexdigest()}
+    except Exception:
+        resource_probe_export(output,phase,helper);raise
+
+def resource_startup_observer(container,row,private,request,request_sha,selection,manifest,budget):
+    helper=headroom_module(manifest);probe=selection['probe'];ready=private/'resource-ready.json'
+    if ready.exists() or ready.is_symlink() or ready.with_name(ready.name+'.committed').exists():raise Refusal('resource handoff was precreated')
+    waiting=private/'resource-waiting.json';waiting_commit=waiting.with_name(waiting.name+'.committed');until=time.monotonic()+10
+    while not waiting_commit.exists():
+        budget.left()
+        if time.monotonic()>=until:raise Refusal('resource worker readiness deadline exceeded')
+        time.sleep(0.05)
+    helper.file_bytes(waiting_commit,0,uid=os.getuid())
+    raw,_=helper.file_bytes(waiting,65536,uid=os.getuid());value=helper.decode(raw)
+    if (value.get('schema')!='workflow.offline-scanner.resource-waiting.v1' or value.get('nonce')!=container.nonce or
+        value.get('request_sha256')!=request_sha or value.get('resource_phase')!=selection['phase'] or
+        value.get('resource_authority')!=selection['authority'] or value.get('container_id')!=container.identifier or
+        request.get('resource_container_id')!=container.identifier or value.get('core_contract_sha256')!=manifest['core_contract_sha256'] or
+        selection['authority']['core_contract_sha256']!=manifest['core_contract_sha256'] or
+        value.get('native_started') is not False or type(value.get('worker_private_pid')) is not int or value['worker_private_pid']<=0):
+        raise Refusal('worker waiting source/request binding differs')
+    if not 0<=time.monotonic()-probe['recorded_monotonic']<=30:raise Refusal('resource probe is stale before actual startup')
+    host=Path(probe['output'])/'scan-start';host.mkdir(mode=0o700);(host/'raw').mkdir(mode=0o700)
+    if resource_host_identity(helper,host,'startup')!=probe['host_identity_sha256']:raise Refusal('resource proof belongs to a different VM')
+    current=container.live_identity()
+    if current['State']['Pid']!=row['State']['Pid']:raise Refusal('resource init PID rebound')
+    observed=helper.capture(container,current,host,'before')
+    after=container.live_identity()
+    if after['State']['Pid']!=current['State']['Pid']:raise Refusal('resource init PID rebound after observation')
+    original=probe['observation']
+    if (resource_headroom(observed,helper,container.limits)!=resource_headroom(original,helper,{'memory.max':'2147483648','memory.swap.max':'0','pids.max':'256'}) or
+        observed['container_id']!=container.identifier or observed['nonce']!=container.nonce or
+        observed['host_init']['pid']!=current['State']['Pid']):
+        raise Refusal('enlarged actual Docker parent identity/headroom differs from fresh probe')
+    helper.cgroup_path(('0::/'+observed['host_init_cgroup']+'\n').encode(),container.identifier)
+    observed_sha=helper.write(host/'actual-parent.json',observed);budget.left()
+    handoff={'schema':'workflow.offline-scanner.resource-ready.v1','resource_phase':selection['phase'],
+        'resource_authority':selection['authority'],'core_contract_sha256':manifest['core_contract_sha256'],
+        'nonce':container.nonce,'container_id':container.identifier,'request_sha256':request_sha,
+        'actual_parent_observation_sha256':observed_sha,'actual_kernel_limits':container.limits,
+        'requested_memory_bytes':container.requested_memory,'native_execution_permitted':True}
+    write_request_resource(ready,handoff,committed=True);budget.left()
+
+def wait_resource_ready(request,request_sha,manifest):
+    from osv_resources import SCAN_MEMORY,authorize_phase,requested_memory
+    expected=authorize_phase(request['resource_phase'],request.get('resource_authority'))
+    if requested_memory(request['resource_phase'])!=SCAN_MEMORY:return None
+    if request['resource_authority']['core_contract_sha256']!=manifest['core_contract_sha256']:raise Refusal('worker phase/core authority differs')
+    helper=headroom_module(manifest);ready=Path('/out/resource-ready.json');waiting=Path('/out/resource-waiting.json')
+    ready_commit=ready.with_name(ready.name+'.committed');waiting_commit=waiting.with_name(waiting.name+'.committed')
+    if any(p.exists() or p.is_symlink() for p in (ready,waiting,ready_commit,waiting_commit)):raise Refusal('resource startup handoff was precreated')
+    write_request_resource(waiting,{'schema':'workflow.offline-scanner.resource-waiting.v1','nonce':request['resource_nonce'],
+        'request_sha256':request_sha,'container_id':request['resource_container_id'],
+        'resource_phase':request['resource_phase'],'resource_authority':request['resource_authority'],
+        'core_contract_sha256':manifest['core_contract_sha256'],'native_started':False,'worker_private_pid':os.getpid()},committed=True)
+    until=time.monotonic()+30
+    while not ready_commit.exists():
+        if time.monotonic()>=until:raise Refusal('resource host-ready deadline exceeded')
+        time.sleep(0.05)
+    helper.file_bytes(ready_commit,0,uid=os.getuid())
+    raw,_=helper.file_bytes(ready,65536,uid=os.getuid());value=helper.decode(raw)
+    if (value.get('schema')!='workflow.offline-scanner.resource-ready.v1' or value.get('nonce')!=request['resource_nonce'] or
+        value.get('request_sha256')!=request_sha or value.get('resource_phase')!=request['resource_phase'] or
+        value.get('resource_authority')!=request['resource_authority'] or value.get('core_contract_sha256')!=manifest['core_contract_sha256'] or
+        value.get('container_id')!=request['resource_container_id'] or
+        value.get('actual_kernel_limits')!=expected or value.get('requested_memory_bytes')!=SCAN_MEMORY or value.get('native_execution_permitted') is not True or
+        not SHA.fullmatch(str(value.get('container_id',''))) or not SHA.fullmatch(str(value.get('actual_parent_observation_sha256','')))):
+        raise Refusal('resource host-ready binding differs')
+    return hashlib.sha256(raw).hexdigest()
+
 def worker(request_path, manifest, profile):
-    request = load(request_path); state = owned(Path(request['state']))
+    helper=headroom_module(manifest)
+    request_raw,_=helper.file_bytes(request_path,MAX_JSON,uid=os.getuid());request=helper.decode(request_raw)
+    request_sha=hashlib.sha256(request_raw).hexdigest();state = owned(Path(request['state']))
     private = owned(Path(request['private']))
     if (request_path != Path('/out/request.json') or private.parent != state or not private.name.startswith('worker-') or
         request['core_contract_sha256'] != manifest['core_contract_sha256'] or
         request['prepared_sha256'] != digest(state / 'prepared.json')):
         raise Refusal('production worker request binding differs')
+    from osv_resources import authorize_phase,source_proposal
+    if profile.get('phase_memory_proposal')!=source_proposal() or request.get('resource_phase')!=request['phase']:
+        raise Refusal('worker immutable phase resource proposal differs')
+    selected_limits=authorize_phase(request['resource_phase'],request.get('resource_authority'))
+    ready_sha=wait_resource_ready(request,request_sha,manifest)
+    selection={'phase':request['resource_phase'],'authority':request.get('resource_authority'),'limits':selected_limits}
     import importlib.util
     spec = importlib.util.spec_from_file_location('container_worker', HERE / 'container-worker.py')
     witness_module = importlib.util.module_from_spec(spec);spec.loader.exec_module(witness_module)
     observed = witness_module.witness(request)
     write(private / 'runtime-witness.json', {'complete': True, 'identity': request['identity'],
-        'core_contract_sha256': manifest['core_contract_sha256'], 'witness': observed})
+        'core_contract_sha256': manifest['core_contract_sha256'], 'witness': observed,'resource_ready_sha256':ready_sha})
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_JSON, MAX_JSON))
     from osv_producer import run_one
     from osv_io import bounded_run, Budget
@@ -1196,7 +1482,8 @@ def worker(request_path, manifest, profile):
             core_contract_sha256=manifest['core_contract_sha256'])
         write(private / 'worker-result.json', {'complete': True, 'proof': str(out),
             'blocking': sorted(blocking), 'label': label, 'exit': 1 if blocking else 0,
-            'socket_denial': 'EPERM', 'kernel_limits': observed['kernel_limits']})
+            'socket_denial': 'EPERM', 'kernel_limits': observed['kernel_limits'],
+            'resource_phase':selection['phase'],'resource_authority':selection['authority']})
         return 1 if blocking else 0
     if phase in {'report-scheduled', 'report-differential'}:
         _, new = complete_result(state, 'candidate', manifest, request['scan_tokens']['candidate'])

@@ -69,6 +69,29 @@
     "go 1.27.2",
     "golang.org/x/net v0.60.0; append authenticated two sum rows; retain all original rows"
   ],
+  "phase_memory_proposal": {
+    "actual_parent_startup_guard_sha256": "ba58180c97506aad0463280f5a75cd2c79fc99bc021bf6b68a718a5866bb5a86",
+    "default_probe_controls_memory_bytes": 2147483648,
+    "freeform_resource_values_permitted": false,
+    "owner_approval_sha256": "a39bcb6cbbefe722afa7ea21916d786c7e6073f1f5122ab86cabb921a0e783b4",
+    "phase_memory_bytes": {
+      "gate-differential": 2147483648,
+      "gate-scheduled": 2147483648,
+      "prepare-differential": 2147483648,
+      "prepare-scheduled": 2147483648,
+      "report-differential": 2147483648,
+      "report-scheduled": 2147483648,
+      "scan-baseline": 3000000000,
+      "scan-candidate": 3000000000,
+      "scan-scheduled": 2147483648
+    },
+    "required_memory_page_size_bytes": 4096,
+    "required_observed_host_parent_headroom_bytes": 5147483648,
+    "resource_expansion_authorized": true,
+    "scan_effective_kernel_memory_bytes": 2999996416,
+    "source_readiness_and_actual_execution_acceptance_inferred": false,
+    "status": "OWNER_APPROVED_SCOPE_FRESH_ACTUAL_PARENT_STARTUP_REQUIRED"
+  },
   "producer_python": "Python >=3.11; actual local 3.14.6; compatible RFC3339 submicrosecond parsing; hosted actual version admission required",
   "protocol_projection": {
     "authoritative_called_boundary": "Independent function traces become authoritative called findings only after exact trusted module/SBOM inventory and emitted-to-complete-raw typed metadata joins, for the exact Go ecosystem/module/advisory ID having nonempty supported raw imports symbols anywhere across every same-module slice. Unsupported symbol semantics remain strict before classification. No-symbol traces are retained as unverified diagnostic observations with module, advisory ID and count; they do not establish package-version applicability or an uncalled/clean result. Every advisory-only finding actually reported by the authenticated native OSV engine still blocks, including called:false and baseline-existing findings. No new SemVer evaluator, advisory ID allowlist, alias waiver or metadata normalization.",

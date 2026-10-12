@@ -96,7 +96,7 @@ def command(argv, seconds=15, *, stdout_limit=1024*1024):
 class Container:
     def __init__(self, output, helper_root, *, mounts=(), seconds=150, runner=command,
                  production=False, carveouts=(), carveout_parent=None, deadline=None, ledger=None,
-                 measurement_only=False):
+                 measurement_only=False, resource_phase=None, resource_authority=None):
         eligible()
         self.output, self.helper_root = Path(output), Path(helper_root)
         self.runner = runner
@@ -107,6 +107,19 @@ class Container:
         if type(seconds) is not int or not 1 <= seconds <= 1800:
             raise BoundaryError('unbound container phase budget')
         self.production = production
+        if resource_phase is not None and not production:
+            raise BoundaryError('resource phase selection is production-only')
+        self.resource_phase = resource_phase
+        self.resource_authority = resource_authority
+        self.limits = dict(LIMITS)
+        self.requested_memory = int(LIMITS['memory.max'])
+        if resource_phase is not None:
+            from osv_resources import authorize_phase,requested_memory,require_page_size
+            self.limits = authorize_phase(resource_phase,resource_authority)
+            self.requested_memory = requested_memory(resource_phase)
+            require_page_size()
+        elif resource_authority is not None:
+            raise BoundaryError('default2GiB envelope has no expansion authority')
         if type(measurement_only) is not bool or measurement_only and (production or seconds != 25 or carveouts or
             len(mounts) != 1 or tuple(mounts[0][1:]) != ('/fixture', True)):
             raise BoundaryError('measurement requires the fixed25s plus5s termination envelope')
@@ -180,7 +193,7 @@ class Container:
         if r.returncode:
             if absent:return None
             raise BoundaryError('Docker inspection failed; absence is unproved')
-        if self.measurement_only:
+        if self.measurement_only or self.limits['memory.max'] != LIMITS['memory.max']:
             self.last_inspection_raw = r.stdout.encode()
         rows = json.loads(r.stdout)
         if len(rows) != 1:
@@ -228,7 +241,7 @@ class Container:
             '--cgroupns', 'private', '--user', str(uid)+':'+str(gid),
             '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges=true',
             '--security-opt', 'seccomp='+str(self.helper_root/'container-seccomp.json'),
-            '--read-only', '--memory', '2147483648', '--memory-swap', '2147483648',
+            '--read-only', '--memory', str(self.requested_memory), '--memory-swap', str(self.requested_memory),
             '--pids-limit', '256', '--cpus', '2', '--restart', 'no', '--no-healthcheck',
             '--shm-size', '67108864',
             '--log-driver', 'none', '--entrypoint', self.payload[0],
@@ -247,7 +260,8 @@ class Container:
             'mounts':[(str(source),target,ro) for source,target,ro in self.mounts],
             'carveouts':sorted(str(path) for path in self.carveouts),
             'carveout_parent':str(self.carveout_parent) if self.carveout_parent is not None else None,
-            'production':self.production,'creation_attempted':True})
+            'production':self.production,'creation_attempted':True,
+            'resource_phase':self.resource_phase,'resource_authority':self.resource_authority,'kernel_limits':self.limits,'requested_memory_bytes':self.requested_memory})
         self.creation_attempted = True
         self.creation_response={'response_observed':False,'target':self.name,'image':IMAGE,
             'argv_sha256':hashlib.sha256(json.dumps(argv,separators=(',',':')).encode()).hexdigest()}
@@ -279,8 +293,8 @@ class Container:
         self.owned(row)
         h, c = row['HostConfig'], row['Config']
         expected = {'NetworkMode':'none','IpcMode':'private','CgroupnsMode':'private',
-            'ReadonlyRootfs':True,'Privileged':False,'Memory':2147483648,
-            'MemorySwap':2147483648,'PidsLimit':256,'NanoCpus':2000000000,
+            'ReadonlyRootfs':True,'Privileged':False,'Memory':self.requested_memory,
+            'MemorySwap':self.requested_memory,'PidsLimit':256,'NanoCpus':2000000000,
             'PidMode':'','UTSMode':'','UsernsMode':'','ShmSize':67108864,
             'Tmpfs':{'/tmp':self.tmpfs.split(':',1)[1]}}
         if any(h.get(k) != v for k,v in expected.items()):
@@ -311,8 +325,8 @@ class Container:
             raise BoundaryError('unexpected writable container mount')
 
     def start_wait(self, *, live_observer=None):
-        if (live_observer is not None) != self.measurement_only:
-            raise BoundaryError('live observation is restricted to the fixed measurement worker')
+        if (live_observer is not None) != (self.measurement_only or self.limits['memory.max'] != LIMITS['memory.max']):
+            raise BoundaryError('live observation requires the fixed measurement or approved enlarged phase')
         self.validate(self.inspect(self.identifier))
         r = self.run(['start', self.identifier], 15)
         if r.returncode or r.stdout.strip() != self.identifier:
@@ -332,8 +346,8 @@ class Container:
         return row['State']['ExitCode'], row
 
     def live_identity(self):
-        if not self.measurement_only:
-            raise BoundaryError('live PID observation is measurement-only')
+        if not (self.measurement_only or self.limits['memory.max'] != LIMITS['memory.max']):
+            raise BoundaryError('live PID observation requires an owned measured phase')
         row = self.owned(self.inspect(self.identifier)); self.validate(row)
         state = row['State']
         if (state.get('Running') is not True or type(state.get('Pid')) is not int or state['Pid'] <= 0 or

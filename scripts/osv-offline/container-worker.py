@@ -44,6 +44,14 @@ def abi_denials():
     return exits
 
 def witness(request):
+    phase=request.get('resource_phase');authority=request.get('resource_authority')
+    expected=dict(LIMITS)
+    if phase is not None:
+        from osv_resources import authorize_phase
+        expected=authorize_phase(phase,authority)
+        from osv_resources import require_page_size
+        require_page_size()
+    elif authority is not None:raise RuntimeError('default witness has no expansion authority')
     require(platform.system()=='Linux' and platform.machine()=='x86_64','wrong native platform')
     require(os.getuid()==request['uid'] and os.getgid()==request['gid'] and os.geteuid()!=0,'wrong nonroot identity')
     require(sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode,'unsealed Python startup')
@@ -53,8 +61,8 @@ def witness(request):
     namespaces={n:os.readlink('/proc/self/ns/'+n) for n in ('net','mnt','pid','ipc','cgroup','user')}
     require(all(namespaces[n]!=request['host_namespaces'][n] for n in ('net','mnt','pid','ipc','cgroup')),'host namespace inherited')
     cg=Path('/sys/fs/cgroup')
-    actual={n:(cg/n).read_text().strip() for n in LIMITS}
-    require(actual==LIMITS,'actual aggregate cgroup quota mismatch')
+    actual={n:(cg/n).read_text().strip() for n in expected}
+    require(actual==expected,'actual aggregate cgroup quota mismatch')
     require(str(os.getpid()) in (cg/'cgroup.procs').read_text().split(),'manager outside quota group')
     cpu=(cg/'cpu.max').read_text().split();require(len(cpu)==2 and int(cpu[0])==2*int(cpu[1]),'actual CPU quota mismatch')
     fds={}
@@ -98,7 +106,7 @@ def witness(request):
         'import os,json;from pathlib import Path;print(json.dumps({"pid":os.getpid(),"group":Path("/proc/self/cgroup").read_text(),"memory":Path("/sys/fs/cgroup/memory.max").read_text().strip()}))'],
         stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=10,check=True,start_new_session=True)
     child=json.loads(child.stdout)
-    require(child['group']==Path('/proc/self/cgroup').read_text() and child['memory']==LIMITS['memory.max'],'child escaped aggregate quota')
+    require(child['group']==Path('/proc/self/cgroup').read_text() and child['memory']==expected['memory.max'],'child escaped aggregate quota')
     abi=abi_denials()
     go=Path(request.get('compiler_path','/go/bin/go'));require(hashlib.sha256(go.read_bytes()).hexdigest()==request['compiler_sha256'],'compiler digest differs')
     version=subprocess.run([str(go),'version'],env={'PATH':str(go.parent)+':/usr/bin:/bin','GOTOOLCHAIN':'local','GOENV':'off','GOWORK':'off','GOPROXY':'off','GOSUMDB':'off','GOVCS':'*:off','GOMAXPROCS':'2'},
@@ -106,6 +114,9 @@ def witness(request):
     require(version.stdout.strip()=='go version go1.27.2 linux/amd64' and not version.stderr,'actual compiler/thread witness failed')
     return {'uid':os.getuid(),'gid':os.getgid(),'manager_pid':os.getpid(),'namespaces':namespaces,
         'fresh_user_namespace_required':False,'kernel_limits':actual,'cpu_max':cpu,
+        'resource_phase':phase,'resource_authority':authority,
+        'requested_memory_bytes':2147483648 if phase is None else __import__('osv_resources').requested_memory(phase),
+        'memory_page_size':os.sysconf('SC_PAGE_SIZE'),
         'aggregate_scope':'container manager, scanner workers and all descendants',
         'child':child,'descriptors':fds,'socket_denial':'EPERM','escape_denial':'EPERM',
         'abi_exits':abi,'compiler':version.stdout.strip(),'compiler_sha256':request['compiler_sha256'],

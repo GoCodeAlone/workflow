@@ -2,8 +2,8 @@
   "files": {
     "container-seccomp.json": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9",
     "headroom-worker.py": "246a9af8075e11eb2b2d3bf72f44e4ceea7e2d9d33bce5786743c5ca7e27547c",
-    "osv_container.py": "bd79e30fd10e2eb8ec8d1bc262df1c5ac57b330e26b4a1a1d76511e89c5f80b9",
-    "run-docker-headroom-proof.py": "53ac30b4bc40bf33041e0064500a25b4cc8b78048a1a819786f153035673cb4d"
+    "osv_container.py": "fac4f07474e4053d8752f2063a6f9579184f13386e7dd6dc015acf2bc1fcf509",
+    "run-docker-headroom-proof.py": "afdf66773bef8ca6dee3cb3069d3db5c594e617c40b290c9a2b69f087a158650"
   },
   "image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
   "image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",

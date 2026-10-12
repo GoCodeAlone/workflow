@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -143,6 +144,7 @@ def capacity(available, parents):
 def capture(container, row, output, moment, *, proc_root=Path('/proc'), cgroup_root=Path('/sys/fs/cgroup')):
     started = time.monotonic(); require(moment in ('before','after'),'unbound observation moment')
     container.owned(row); container.validate(row)
+    page_size=os.sysconf('SC_PAGE_SIZE');require(page_size==4096,'unsupported actual kernel page size')
     pid = row['State']['Pid']; require(type(pid) is int and pid > 0 and row['State']['Running'] is True,'owned live init absent')
     live_raw = container.last_inspection_raw
     require(live_raw is not None and digest(live_raw) == container.inspection_receipts[-1]['stdout_sha256'] and
@@ -163,8 +165,8 @@ def capture(container, row, output, moment, *, proc_root=Path('/proc'), cgroup_r
                 raw,identity = leaf.read(field)
                 rows.append(retain(output/'raw',moment+'-leaf-'+field+'.raw',raw,cgroup_root/relative/field,identity))
                 limits[field] = raw.decode('ascii').strip()
-            require({k:limits[k] for k in ('memory.max','memory.swap.max','pids.max')} ==
-                {'memory.max':'2147483648','memory.swap.max':'0','pids.max':'256'},'actual owned2GiB probe quota differs')
+            require({k:limits[k] for k in ('memory.max','memory.swap.max','pids.max')} == container.limits,
+                'actual owned closed-phase quota differs')
             cpu = limits['cpu.max'].split(); require(len(cpu) == 2 and int(cpu[0]) == 2*int(cpu[1]),'actual owned CPU quota differs')
             leaf_identity = [leaf.opened.st_dev,leaf.opened.st_ino]
         finally: leaf.close()
@@ -207,15 +209,16 @@ def capture(container, row, output, moment, *, proc_root=Path('/proc'), cgroup_r
             'recorded_at':datetime.now(timezone.utc).isoformat(),'moment':moment,'container_id':container.identifier,
             'nonce':container.nonce,'image':container.spec['Image'],'host_init':first,'host_init_final':last,
             'host_init_cgroup':relative.as_posix(),'own_container_cgroup_identity':leaf_identity,
-            'own_container_limits':limits,'own_container_memory_cap_excluded_from_parent_estimate':True,
+            'own_container_limits':limits,'requested_memory_bytes':container.requested_memory,'memory_page_size':page_size,'own_container_memory_cap_excluded_from_parent_estimate':True,
             'physical_bytes':physical,'docker_parent_ancestors':parents,'docker_parent_effective_memory_max_bytes':maximum,
             'estimated_physical_and_docker_parent_headroom_bytes':estimated,
             'observed_4_5GiB_prerequisite':estimated >= MINIMUM_OBSERVED_HEADROOM,'required_observed_bytes':MINIMUM_OBSERVED_HEADROOM,
             'raw_custody':rows,'scope':'point-in-time observed physical/Docker-init-parent capacity estimate; no runner equivalence, reservation, minimum/sufficient fit, resource expansion or installation authority'}
     finally: directory.close()
 
-def run(output, execute=False):
+def run(output, execute=False, *, parent_phase=None, phase_deadline=None):
     started = time.monotonic(); container = None; fixture = None; code = 2
+    deadline=started+180
     result = {'schema':'workflow.offline-scanner.docker-parent-headroom-proof.v1','accepted':False,
         'measurement_only':True,'measurement_complete':False,'headroom_prerequisite_observed':False,
         'resource_expansion_authorized':False,'scanner_or_compiler_execution':False,'retirement_verified':False}
@@ -223,8 +226,20 @@ def run(output, execute=False):
         require(execute,'explicit reviewed measurement execution required')
         module,source_sha,manifest = sources(); module.eligible()
         identity = {key:os.environ[key] for key in IDENTITY}
+        job='osv-docker-parent-headroom'
+        if parent_phase is not None:
+            from osv_resources import authorize_owner,OWNER_APPROVAL_SHA256
+            require(parent_phase in ('scan-baseline','scan-candidate'),'unknown probe parent phase')
+            authorize_owner(parent_phase,OWNER_APPROVAL_SHA256)
+            require(type(phase_deadline) in (int,float) and math.isfinite(phase_deadline) and
+                180 <= phase_deadline-started <= 1800,'inherited phase deadline lacks fixed probe/cleanup reserve')
+            deadline=min(deadline,phase_deadline)
+            result['inherited_phase_deadline_monotonic']=phase_deadline
+            result['effective_probe_deadline_monotonic']=deadline
+            job='osv-production-proof'
+        else:require(phase_deadline is None,'standalone probe deadline is fixed')
         require(identity['GITHUB_REPOSITORY'] == 'GoCodeAlone/workflow' and identity['GITHUB_EVENT_NAME'] == 'workflow_dispatch' and
-            identity['GITHUB_REF'] == 'refs/heads/prep/osv-prerequisites-20261011-r1' and identity['GITHUB_JOB'] == 'osv-docker-parent-headroom' and
+            identity['GITHUB_REF'] == 'refs/heads/prep/osv-prerequisites-20261011-r1' and identity['GITHUB_JOB'] == job and
             re.fullmatch(r'[0-9a-f]{40}',identity['GITHUB_SHA']) and identity['GITHUB_RUN_ID'].isdecimal() and identity['GITHUB_RUN_ATTEMPT'] == '1','unbound finite measurement identity')
         parent = Path(os.environ['RUNNER_TEMP']); info = output.lstat()
         require(output.resolve() == output and output.parent == parent.resolve() == parent and output.name.startswith('osv-headroom-') and
@@ -232,12 +247,12 @@ def run(output, execute=False):
         (output/'raw').mkdir(mode=0o700); worker_output = output/'worker'; worker_output.mkdir(mode=0o700)
         fixture = parent/(output.name+'-inputs'); fixture.mkdir(mode=0o700)
         container = module.Container(worker_output,HERE,mounts=[(fixture,'/fixture',True)],seconds=25,
-            measurement_only=True,deadline=started+180,ledger=output/'ownership.json')
+            measurement_only=True,deadline=deadline,ledger=output/'ownership.json')
         request = {'schema':'workflow.offline-scanner.headroom-request.v1','measurement_only':True,
             'uid':os.getuid(),'gid':os.getgid(),'identity':identity,'nonce':container.nonce,
             'host_namespaces':{n:os.readlink('/proc/self/ns/'+n) for n in ('net','mnt','pid','ipc','cgroup','user')}}
         request_sha = write(fixture/'request.json',request)
-        result.update(identity=identity,source_manifest_sha256=source_sha,image=manifest['image'],image_config=manifest['image_config'],
+        result.update(identity=identity,parent_phase=parent_phase,source_manifest_sha256=source_sha,image=manifest['image'],image_config=manifest['image_config'],
             request_sha256=request_sha,probe_seconds=25,kill_after_seconds=5)
         container.create(); result['container_id'] = container.identifier; result['nonce'] = container.nonce
         def observe(row):
@@ -276,9 +291,9 @@ def run(output, execute=False):
             try: (fixture/'request.json').unlink(); fixture.rmdir(); result['input_retired'] = True
             except Exception as error: result['input_retirement_failure_type'] = type(error).__name__; code = 2
     result['elapsed_seconds'] = round(time.monotonic()-started,3)
-    if not result['retirement_verified'] or result['elapsed_seconds'] >= 180: code = 2
+    if not result['retirement_verified'] or result['elapsed_seconds'] >= 180 or time.monotonic()>=deadline: code = 2
     result['exit'] = code; write(output/'docker-parent-headroom-proof.json',result)
-    if time.monotonic()-started >= 180: return 2
+    if time.monotonic()>=deadline: return 2
     return code
 
 if __name__ == '__main__':

@@ -89,3 +89,13 @@ probe's own2GiB cap from the capacity estimate. Source controls are mocked, not
 hosted evidence. The observed4.5GiB comparison is a proposed2.5GiB allocation
 plus2GiB reserve; it proves no minimum/sufficient fit, reservation, resource
 expansion or installation authority. Actual full-ID retirement remains required.
+
+The finite paired scans bind the owner-approved decimal3GB limit: Docker
+requests and inspects3000000000 bytes, while4096B pages give the exact lower
+kernel cap2999996416. Probes, scheduled scans, preparation and reporting remain
+2147483648 bytes. Before each paired scan, a fresh same-job2GiB probe and the
+enlarged container’s actual Docker parent must both show at least5147483648
+bytes of physical/parent headroom. A checked host-ready handoff precedes Go;
+failure retires the owned container. This point-in-time check reserves no
+capacity and proves no fit or scanner acceptance. All finding, coverage,
+isolation, byte and deadline rules remain in force; admission pins remain null.

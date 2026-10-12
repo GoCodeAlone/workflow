@@ -164,7 +164,7 @@ class HeadroomControls(unittest.TestCase):
             def mocked_file(path,limit,**kwargs):
                 if kwargs.get('uid')==0:kwargs['uid']=os.getuid()
                 return real_file(path,limit,**kwargs)
-            with patch.object(m,'Directory',MockRootUID),patch.object(m,'file_bytes',side_effect=mocked_file):
+            with patch.object(m,'Directory',MockRootUID),patch.object(m,'file_bytes',side_effect=mocked_file),patch.object(m.os,'sysconf',return_value=4096):
                 value=m.capture(c,row,out,'before',proc_root=proc,cgroup_root=cg)
                 next_state['value']='D'
                 after=m.capture(c,row,out,'after',proc_root=proc,cgroup_root=cg)

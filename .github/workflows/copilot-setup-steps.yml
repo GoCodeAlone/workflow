@@ -138,7 +138,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/container-source-bindings.json)"
-          test "${actual%% *}" = 682cb359fcfce48b1a209c1f04cbb805f4779578dcb8146fe1a9caa8fbfad8f8
+          test "${actual%% *}" = 453d3c61e0b7d6f863e780f6a9df21aea96aa0045f9e0c168bc7290e71122421
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-container-proof.py)"
           test "${actual%% *}" = c4db39f78f0555396dde81a444d88f73ea7d95dca0090d61e4bbe6545b7ec4a5
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-container-proof-XXXXXXXXXX")"
@@ -238,7 +238,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/bootstrap-manifest.json)"
-          test "${actual%% *}" = 8638b703c9b81e4511be3954c9c5f7996507d28d1d7a2b438c4cd9c7f592e276
+          test "${actual%% *}" = c4abf1ac4c4abab57462bd6b7bcd97734c5bf294e13f5524f8a3ec8a3250513f
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-production-proof.py)"
           test "${actual%% *}" = bcfc2c4e30fb988281244333ca3504a5e498bface54db3e9df75e310856b04d0
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-XXXXXXXXXX")"
@@ -268,7 +268,7 @@ jobs:
           actual="$(/usr/bin/sha256sum scripts/osv-offline/check-readonly-fixtures.py)"
           test "${actual%% *}" = 6a19b5bf414ee9aff165de8decc6f3f67b311e7e0366d19f939fa9e27df1137a
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run.py)"
-          test "${actual%% *}" = f6083b1f249238895ad141afe77d285f0edab948373525d2e79d525a741f1792
+          test "${actual%% *}" = b2f18a1108c7c8d6cf646a704654a326492d14a3db4886cc9d7135fd0329da51
           fixture_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-fixture-proof-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-fixture-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$fixture_dir" >> "$GITHUB_OUTPUT"
@@ -592,9 +592,9 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/docker-headroom-manifest.json)"
-          test "${actual%% *}" = 1046ef09bbf46366d7a74a5f9f67b13fff09d5676eb8313d5e73d312236c864b
+          test "${actual%% *}" = 9e429206bdede8f3e51adf34409ce3c0f6d0137d019be96cc72cb2043ccca71f
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-docker-headroom-proof.py)"
-          test "${actual%% *}" = 53ac30b4bc40bf33041e0064500a25b4cc8b78048a1a819786f153035673cb4d
+          test "${actual%% *}" = afdf66773bef8ca6dee3cb3069d3db5c594e617c40b290c9a2b69f087a158650
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-headroom-XXXXXXXXXX")"
           startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-headroom-startup-XXXXXXXXXX")"
           printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"

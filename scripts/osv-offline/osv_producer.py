@@ -208,8 +208,12 @@ class NativeMemorySamples:
 
 def memory_event_snapshot(witness, budget):
     """Readonly evidence in the existing witnessed private aggregate group."""
+    expected={'memory.max':'2147483648','memory.swap.max':'0','pids.max':'256'}
+    if witness.get('resource_phase') is not None:
+        from osv_resources import validate_witness
+        expected=validate_witness(witness['resource_phase'],witness.get('resource_authority'),witness)
     if (witness.get('manager_pid') != os.getpid() or
-        witness.get('kernel_limits') != {'memory.max':'2147483648','memory.swap.max':'0','pids.max':'256'}):
+        witness.get('kernel_limits') != expected):
         raise IncompleteScan('memory diagnostic lacks exact owned container witness')
     info = CGROUP_ROOT.lstat()
     if not stat.S_ISDIR(info.st_mode) or CGROUP_ROOT.resolve(strict=True) != CGROUP_ROOT:
@@ -454,6 +458,8 @@ def database_worker(request_path, core_contract):
         raise IncompleteScan('database child request shape/budget differs')
     budget=Budget();budget.deadline=request['deadline'];budget.limit=request['remaining_bytes'];budget.left()
     witness=request['memory_witness']
+    if witness is not None and witness.get('resource_authority') is not None and witness['resource_authority'].get('core_contract_sha256')!=core_contract:
+        raise IncompleteScan('database child phase/core authority differs')
     if witness is not None:
         witness=dict(witness,manager_pid=os.getpid())
         observed=memory_event_snapshot(witness,budget)
@@ -522,6 +528,9 @@ def deferred_capture(out, label, binding):
 
 
 def run_one(root, paths, tools, go_binary, db_base, receipts, now, output_parent, env, *, admitted_supplier=None, cgroup_witness=None, core_contract_sha256=None):
+    if (cgroup_witness is not None and cgroup_witness.get('resource_authority') is not None and
+        cgroup_witness['resource_authority'].get('core_contract_sha256')!=core_contract_sha256):
+        raise IncompleteScan('producer phase/core authority differs')
     """Execute only after the caller verifies authority for this exact source root.
 
     No command-line entrypoint intentionally: the approved profile supplies the

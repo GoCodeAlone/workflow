@@ -1055,6 +1055,30 @@
   "job": "osv-production-proof",
   "native_gc_trial_authorization_sha256": "2812aa31aa773081bf7e66f923c1f7cee77e68a646ebb471356c385591931b00",
   "normal_event_delivery_proved": false,
+  "phase_memory_proposal": {
+    "actual_parent_startup_guard_sha256": "ba58180c97506aad0463280f5a75cd2c79fc99bc021bf6b68a718a5866bb5a86",
+    "default_probe_controls_memory_bytes": 2147483648,
+    "freeform_resource_values_permitted": false,
+    "owner_approval_sha256": "a39bcb6cbbefe722afa7ea21916d786c7e6073f1f5122ab86cabb921a0e783b4",
+    "phase_memory_bytes": {
+      "gate-differential": 2147483648,
+      "gate-scheduled": 2147483648,
+      "prepare-differential": 2147483648,
+      "prepare-scheduled": 2147483648,
+      "report-differential": 2147483648,
+      "report-scheduled": 2147483648,
+      "scan-baseline": 3000000000,
+      "scan-candidate": 3000000000,
+      "scan-scheduled": 2147483648
+    },
+    "required_memory_page_size_bytes": 4096,
+    "required_observed_host_parent_headroom_bytes": 5147483648,
+    "resource_expansion_authorized": true,
+    "scan_effective_kernel_memory_bytes": 2999996416,
+    "source_readiness_and_actual_execution_acceptance_inferred": false,
+    "status": "OWNER_APPROVED_SCOPE_FRESH_ACTUAL_PARENT_STARTUP_REQUIRED"
+  },
+  "phase_resource_owner_approval_sha256": "a39bcb6cbbefe722afa7ea21916d786c7e6073f1f5122ab86cabb921a0e783b4",
   "phases": [
     "prepare-differential",
     "scan-baseline",

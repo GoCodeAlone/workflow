@@ -1,7 +1,7 @@
 {
   "container_image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
   "container_image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
-  "core_contract_sha256": "f26d02a28a0cfe80f70058c5c3826bdc866f45cf424e7ce31756d79f132afc60",
+  "core_contract_sha256": "1fbb0ae1dcfee8b42ac1947a0de91a0ac5510f2ddd0185312bde9587d219259c",
   "finite_baseline_projection_sha256": "e2ee5bc06a8308a19e3a875bd5324c04218d42b4c63fc2a459cbe45921be5bc8",
   "first_install_execution_receipt_sha256": null,
   "hosted_job_timing_acceptance_sha256": null,
@@ -17,7 +17,7 @@
     "candidate": "81b9b1df2386f7d44c8464c999a4ea0919813526"
   },
   "public_preload_inventory_sha256": "55f56e27e6b9cf6b5b497f2618494e5cec65f69ecc41255ffe169d058bf400fc",
-  "resource_contract": "Exact aggregate container memory2147483648/swap0/pids256/CPU2; scan total1800/native720/source240/manifest30; reporter240. Immutable core and independent actual admission index; fresh same-job supplier paths. Finite manual proof is provisional and never supplies missing normal-event evidence. Finite one-trial application GOGC50/GOMEMLIMIT512MiB; hard quotas/deadlines unchanged; bounded owned-native and host-headroom diagnostics within existing byte budgets.",
+  "resource_contract": "Closed phase policy: only finite scan-baseline/candidate request decimal3000000000 bytes with exact owner approval a39bcb6cbbefe722afa7ea21916d786c7e6073f1f5122ab86cabb921a0e783b4; kernel memory.max2999996416 requires4096B pages (lower3584B), Docker memory/swap3000000000, actualswap0. All other phases/probes/report/controls remain2147483648. Fresh same-job owned2GiB probe and enlarged actual-CID parent/host-ready guard require observed headroom5147483648, with2GiB reserve; no reservation or fit inferred. Unchanged pids256/CPU2/networknone/nonroot/security/mount/FD protections; total1800/native720/source240/manifest30/reporter240 including guard overhead. Official supplier and all-source/full-symbol/finding/readonly rules remain mandatory; scan GOGC50/GOMEMLIMIT512MiB unchanged. Five actual admission decisions remain null.",
   "reviewed_protocol_binding_sha256": "4197aa92770c04bbf8e349cc3672b02fae157ebbf28da816773414861dbb888f",
   "source_object_delivery_acceptance_sha256": null,
   "status": "PRODUCTION CONTAINER SOURCE PREPARATION; FIVE ACTUAL ADMISSION DECISIONS UNBOUND",
@@ -25,18 +25,22 @@
   "trusted_files": {
     "application-metadata-catalog.json": "13a73207ad91ef10c6279cf714cbb758c75116261b345c599275789dacef0ee5",
     "container-seccomp.json": "160f9c06c3533fa7361d5d2b7d1c9c79030dff721449b91940618d1235ab5ab9",
-    "container-worker.py": "3a2cc039af7485f5f18fd0465d6e6b443cdf21a0a922ea1ae34f94c2eb4178db",
-    "manual-proof-plan.json": "896f6dd7b7d983ef9d4efc50b1d0fa947deafd74d8e556e6500bbf622f0c3644",
+    "container-worker.py": "7a9a0f3cd9aedffb6ff22bed14f149f82c7255680de0458082684cea59019ca1",
+    "docker-headroom-manifest.json": "9e429206bdede8f3e51adf34409ce3c0f6d0137d019be96cc72cb2043ccca71f",
+    "headroom-worker.py": "246a9af8075e11eb2b2d3bf72f44e4ceea7e2d9d33bce5786743c5ca7e27547c",
+    "manual-proof-plan.json": "373b931119e17be4ef162fc1f26e148048b102c3e1fdb605e6d7fa9224997377",
     "osv_completion.py": "dcd8e844370464b1b4e7b4c061a9b4f0ca3b746b211cf705dc520e8d400ae045",
-    "osv_container.py": "bd79e30fd10e2eb8ec8d1bc262df1c5ac57b330e26b4a1a1d76511e89c5f80b9",
+    "osv_container.py": "fac4f07474e4053d8752f2063a6f9579184f13386e7dd6dc015acf2bc1fcf509",
     "osv_io.py": "dacb84479059f630793c116af6c09eeacd34b7eb1bfdfd7c7a8a5840b1b58a9f",
-    "osv_producer.py": "b7ac4fb9fb01395acd3071ba3a36815e61f15fd85d6eb673cf3f2824fe4fb239",
+    "osv_producer.py": "2b91d18cf63c3637294ba2f6db9c0224271e065f386b274a88f6459423aad03c",
+    "osv_resources.py": "194c6b3109ceaf30c45c752d72e38b53b0b197ab8b3c2534931ab182134d96a8",
     "osv_supplier.py": "c485eb0620959219e0f5c65d502431c467704d24e78270ee8f028fdf0aef349e",
     "osv_trusted.py": "2148339ccbaefdcb81396affa481ce3643a491b95228ddd61507eccdcca11bcc",
     "prepare-supplier.py": "7f729027a8b2dd299ae64dbfe7028cc58b9590b55ae30d58b6d473947e35cf0b",
+    "run-docker-headroom-proof.py": "afdf66773bef8ca6dee3cb3069d3db5c594e617c40b290c9a2b69f087a158650",
     "run-production-proof.py": "bcfc2c4e30fb988281244333ca3504a5e498bface54db3e9df75e310856b04d0",
-    "run.py": "f6083b1f249238895ad141afe77d285f0edab948373525d2e79d525a741f1792",
-    "scanner-profile.json": "d4cd9db6e8cf79ae1112c2daaa3f61fe047843d07dfb43827c599ecbb7a94a40"
+    "run.py": "b2f18a1108c7c8d6cf646a704654a326492d14a3db4886cc9d7135fd0329da51",
+    "scanner-profile.json": "12c0e4b17cda850a3ed02de65d45417a365bfb0efa70ea15374b4f36edd8a73d"
   },
   "version": 2
 }
