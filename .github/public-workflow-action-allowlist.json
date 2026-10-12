@@ -656,30 +656,6 @@
     "rationale": "Pinned action for reviewed credential-free contract wire validation."
   },
   {
-    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
-    "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
-    "state": "active",
-    "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
-  },
-  {
-    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
-    "nodeSHA256": "65d08e860e0e0ba32c867339a375a514ee8887326bb4cff3543aec359932ac1a",
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
-    "state": "active",
-    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
-  },
-  {
-    "contextSHA256": "5e3ee7768ef2d57b0c1e15e6b27b1efbb892454db4b762cfc56806e7985248af",
-    "nodeSHA256": "a280f2ecccaed15b220dc27221b587c4285d6fad210ce7683db38a5eaa555cb4",
-    "path": ".github/workflows/public-workflow-policy.yml",
-    "rationale": "Stage the public-workflow Go 1.27.1 bridge frozen at 667a58a396b7c80af0ae7fb7bbb3a0b1c8b0c95e: bind only this exact action actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff to the parser-derived hashes and workflow context. Adoption and promotion remain separate; no secret or provider authority is added.",
-    "state": "active",
-    "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
-  },
-  {
     "path": ".github/workflows/benchmark.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
@@ -740,7 +716,7 @@
     "nodeSHA256": "8ddc920b847e5e03515a92d8be49290bd9039f458fffcdeea7ad0a30f48e15dc",
     "path": ".github/workflows/public-workflow-policy.yml",
     "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
-    "state": "staged",
+    "state": "active",
     "uses": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
   },
   {
@@ -748,7 +724,7 @@
     "nodeSHA256": "d170cf6c1b95b868d42e4c7a91c661d8835d3ffd59d4c0ffc23dd3aec2ac8a20",
     "path": ".github/workflows/public-workflow-policy.yml",
     "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
-    "state": "staged",
+    "state": "active",
     "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
   },
   {
@@ -756,7 +732,7 @@
     "nodeSHA256": "c0b7090d0fe415fcaa265a9c715741653779117d033009a8cf99def40466ad9d",
     "path": ".github/workflows/public-workflow-policy.yml",
     "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
-    "state": "staged",
+    "state": "active",
     "uses": "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff"
   }
 ]
