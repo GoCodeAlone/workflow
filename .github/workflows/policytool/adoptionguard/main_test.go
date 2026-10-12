@@ -926,9 +926,13 @@ func validatePinnedSetup(step bridgeStep) error {
 	if step.ContinueOnError {
 		return fmt.Errorf("%s must fail closed", step.ID)
 	}
+	compiler := step.With["go-version"]
+	if compiler != "1.27.1" && compiler != "1.27.2" {
+		return fmt.Errorf("%s compiler must be exact reviewed Go1.27.1 or Go1.27.2", step.ID)
+	}
 	expectedWith := map[string]any{
 		"cache":      false,
-		"go-version": "1.27.1",
+		"go-version": compiler,
 	}
 	if !reflect.DeepEqual(step.With, expectedWith) {
 		return fmt.Errorf("%s inputs = %v, want exact reviewed inputs", step.ID, step.With)
@@ -1199,6 +1203,9 @@ printf '%s\n' "$authorization" >> "$GITHUB_OUTPUT"
 	if err := validatePinnedSetup(candidateSetup); err != nil {
 		return err
 	}
+	if trustedSetup.With["go-version"] != candidateSetup.With["go-version"] {
+		return errors.New("trusted and candidate compiler pins must match")
+	}
 	candidateScan, candidateIndex, err := bridgeStepByID(job.Steps, "candidate-policy")
 	if err != nil {
 		return err
@@ -1334,14 +1341,17 @@ func TestPublicWorkflowPolicyGuardRejectsMalformedOutputWithoutCandidateExecutio
 
 func TestPublicWorkflowPolicyBridgeGo127Pins(t *testing.T) {
 	workflow := readBridgeWorkflow(t)
+	if err := validateBridgeWorkflow(workflow); err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{"trusted-toolchain", "candidate-toolchain"} {
 		t.Run(id, func(t *testing.T) {
 			step, _, err := bridgeStepByID(workflow.Jobs["policy"].Steps, id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := step.With["go-version"]; got != "1.27.1" {
-				t.Errorf("%s compiler pin = %v, want 1.27.1 (not the isolated module floor)", id, got)
+			if got := step.With["go-version"]; got != "1.27.1" && got != "1.27.2" {
+				t.Errorf("%s compiler pin = %v, want exact reviewed1.27.1 or1.27.2", id, got)
 			}
 			if _, present := step.With["go-version-file"]; present {
 				t.Error("setup must not select the isolated module's minimum compiler")
@@ -1352,8 +1362,95 @@ func TestPublicWorkflowPolicyBridgeGo127Pins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(module, []byte("\ngo 1.26.5\n")) {
-		t.Fatal("isolated module minimum must remain Go 1.26.5")
+	if err := validateBridgeModuleFloor(workflow, module); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateBridgeModuleFloor(workflow bridgeWorkflow, module []byte) error {
+	trusted, _, err := bridgeStepByID(workflow.Jobs["policy"].Steps, "trusted-toolchain")
+	if err != nil {
+		return err
+	}
+	candidate, _, err := bridgeStepByID(workflow.Jobs["policy"].Steps, "candidate-toolchain")
+	if err != nil {
+		return err
+	}
+	if err := validatePinnedSetup(trusted); err != nil {
+		return err
+	}
+	if err := validatePinnedSetup(candidate); err != nil {
+		return err
+	}
+	if trusted.With["go-version"] != candidate.With["go-version"] {
+		return errors.New("compiler pins must match")
+	}
+	floor, count := "", 0
+	for _, line := range strings.Split(string(module), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "go" {
+			count++
+			if len(fields) == 2 {
+				floor = fields[1]
+			}
+		}
+	}
+	if count != 1 || !(floor == "1.26.5" || floor == "1.27.2" && trusted.With["go-version"] == "1.27.2") {
+		return fmt.Errorf("unreviewed compiler/module pair: %v/%s", trusted.With["go-version"], floor)
+	}
+	return nil
+}
+
+func TestGroupedBridgeCompilerFloorPairs(t *testing.T) {
+	for _, tc := range []struct {
+		compiler, floor string
+		reject          bool
+	}{
+		{"1.27.1", "1.26.5", false}, {"1.27.2", "1.26.5", false}, {"1.27.2", "1.27.2", false},
+		{"1.27.1", "1.27.2", true}, {"1.27.2", "1.27.1", true}, {"1.27.2", "1.27.3", true},
+		{"1.27.3", "1.26.5", true}, {"1.27.2", "1.27.2\ngo 1.26.5", true},
+	} {
+		t.Run(tc.compiler+"/"+tc.floor, func(t *testing.T) {
+			workflow := readBridgeWorkflow(t)
+			for index, step := range workflow.Jobs["policy"].Steps {
+				if step.ID == "trusted-toolchain" || step.ID == "candidate-toolchain" {
+					workflow.Jobs["policy"].Steps[index].With["go-version"] = tc.compiler
+				}
+			}
+			err := validateBridgeModuleFloor(workflow, []byte("module fixture\n\ngo "+tc.floor+"\n"))
+			if (err != nil) != tc.reject {
+				t.Fatalf("floor pair err=%v reject=%v", err, tc.reject)
+			}
+		})
+	}
+}
+
+func TestGroupedBridgeCompilerPins(t *testing.T) {
+	for _, tc := range []struct {
+		name, trusted, candidate string
+		reject                   bool
+	}{
+		{"legacy", "1.27.1", "1.27.1", false},
+		{"fixed", "1.27.2", "1.27.2", false},
+		{"mixed", "1.27.1", "1.27.2", true},
+		{"reversed mixed", "1.27.2", "1.27.1", true},
+		{"arbitrary", "1.27.3", "1.27.3", true},
+		{"older", "1.26.5", "1.26.5", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workflow := readBridgeWorkflow(t)
+			for index, step := range workflow.Jobs["policy"].Steps {
+				if step.ID == "trusted-toolchain" {
+					workflow.Jobs["policy"].Steps[index].With["go-version"] = tc.trusted
+				}
+				if step.ID == "candidate-toolchain" {
+					workflow.Jobs["policy"].Steps[index].With["go-version"] = tc.candidate
+				}
+			}
+			if err := validateBridgeWorkflow(workflow); (err != nil) != tc.reject {
+				t.Fatalf("bridge compiler boundary err=%v reject=%v", err, tc.reject)
+			}
+		})
 	}
 }
 

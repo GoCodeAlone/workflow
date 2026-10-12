@@ -158,7 +158,6 @@
       "state": "active"
     },
     {
-      "state": "staged",
       "files": [
         {
           "path": ".github/workflows/policytool/adoptionguard/main.go",
@@ -166,7 +165,7 @@
         },
         {
           "path": ".github/workflows/policytool/adoptionguard/main_test.go",
-          "sha256": "f4220c8924a6feb96d124c06032cdced62342fe39165f8a0e96f6b2b397e7f17"
+          "sha256": "b146ba9688e6aa2d4d72879263875e1a189768894552efeb3087179e5c0651cd"
         },
         {
           "path": ".github/workflows/policytool/adoptionguard/run.sh",
@@ -186,7 +185,7 @@
         },
         {
           "path": ".github/workflows/policytool/main_test.go",
-          "sha256": "6b198d0ac211a22f39e65a885c903c5a956ed2e5642a2f0b599496efdaa2ad5c"
+          "sha256": "a88f4ec70a2736e54bf887594da855fb6d25d2cecb35321cd5fa8a2455304212"
         },
         {
           "path": ".github/workflows/scripts/verify-public-workflow-branch-protection.sh",
@@ -194,7 +193,7 @@
         },
         {
           "path": "scripts/check-public-workflow-policy.sh",
-          "sha256": "5af4e6ae8b5b0ae1b7557253c398fc4c40b1f329a45ccd13639dd0b89bc9dc46"
+          "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c"
         },
         {
           "path": "scripts/fixtures/public-workflow-policy/lifecycle-future.yml",
@@ -310,9 +309,10 @@
         },
         {
           "path": "scripts/test-check-public-workflow-policy.sh",
-          "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b"
+          "sha256": "7d209bb35ff3a7a46b22f9a10a920eb30218c3403726d1dac72e0bffd1d914a4"
         }
-      ]
+      ],
+      "state": "staged"
     }
   ],
   "version": 1
