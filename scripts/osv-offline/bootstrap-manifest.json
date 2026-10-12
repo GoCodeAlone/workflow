@@ -1,7 +1,7 @@
 {
   "container_image": "docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a",
   "container_image_config": "sha256:4143a73d5a9804c1bb2f93cc823a7c173dbc62964d4a5ccabcb1167229b0e2b9",
-  "core_contract_sha256": "ad0b4348b59632fb838a95bf920331382c1c3954c2e118fdd728555804aa371d",
+  "core_contract_sha256": "f26d02a28a0cfe80f70058c5c3826bdc866f45cf424e7ce31756d79f132afc60",
   "finite_baseline_projection_sha256": "e2ee5bc06a8308a19e3a875bd5324c04218d42b4c63fc2a459cbe45921be5bc8",
   "first_install_execution_receipt_sha256": null,
   "hosted_job_timing_acceptance_sha256": null,
@@ -28,7 +28,7 @@
     "container-worker.py": "3a2cc039af7485f5f18fd0465d6e6b443cdf21a0a922ea1ae34f94c2eb4178db",
     "manual-proof-plan.json": "896f6dd7b7d983ef9d4efc50b1d0fa947deafd74d8e556e6500bbf622f0c3644",
     "osv_completion.py": "dcd8e844370464b1b4e7b4c061a9b4f0ca3b746b211cf705dc520e8d400ae045",
-    "osv_container.py": "97cbc201703c217d942bc5a0b9de76b1bb3b5e7e0cbb56d278508d77360f742e",
+    "osv_container.py": "bd79e30fd10e2eb8ec8d1bc262df1c5ac57b330e26b4a1a1d76511e89c5f80b9",
     "osv_io.py": "dacb84479059f630793c116af6c09eeacd34b7eb1bfdfd7c7a8a5840b1b58a9f",
     "osv_producer.py": "b7ac4fb9fb01395acd3071ba3a36815e61f15fd85d6eb673cf3f2824fe4fb239",
     "osv_supplier.py": "c485eb0620959219e0f5c65d502431c467704d24e78270ee8f028fdf0aef349e",

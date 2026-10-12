@@ -19,7 +19,7 @@ for helper in run.py bootstrap-manifest.json; do
   fi
 done
 runner_sha256='f6083b1f249238895ad141afe77d285f0edab948373525d2e79d525a741f1792'
-manifest_sha256='c755195325ceb5254eae4828ca9e5929789fe5be4055ce54f8a218b5dd8326a9'
+manifest_sha256='8638b703c9b81e4511be3954c9c5f7996507d28d1d7a2b438c4cd9c7f592e276'
 if [[ ! "$runner_sha256" =~ ^[0-9a-f]{64}$ || ! "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]]; then
   echo "offline scanner exact source hashes are unresolved" >&2
   exit 2

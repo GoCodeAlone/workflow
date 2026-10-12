@@ -31,7 +31,7 @@ class ProductionTests(unittest.TestCase):
         for file,pin in manifest['trusted_files'].items():
             self.assertEqual(hashlib.sha256((HERE/file).read_bytes()).hexdigest(),pin,file)
         guards=re.findall(r'actual="\$\(/usr/bin/sha256sum (scripts/osv-offline/[^ )]+)\)"\n\s+test "\$\{actual%% \*\}" = ([0-9a-f]{64})',workflow)
-        expected={'scripts/osv-offline/'+file for file in ('container-source-bindings.json','run-container-proof.py','prepare-supplier.py','bootstrap-manifest.json','run-production-proof.py','check-readonly-fixtures.py','run.py')}
+        expected={'scripts/osv-offline/'+file for file in ('container-source-bindings.json','run-container-proof.py','prepare-supplier.py','bootstrap-manifest.json','run-production-proof.py','check-readonly-fixtures.py','run.py','docker-headroom-manifest.json','run-docker-headroom-proof.py')}
         self.assertEqual({file for file,pin in guards},expected)
         self.assertEqual(Counter(file for file,pin in guards),
             Counter({file:1 for file in expected}))

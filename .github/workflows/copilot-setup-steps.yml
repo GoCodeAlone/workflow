@@ -5,6 +5,11 @@ name: "Copilot Setup Steps"
 on:
   workflow_dispatch:
     inputs:
+      osv_docker_parent_headroom_proof:
+        description: 'Run only the fixed2GiB Python Docker-parent headroom observation'
+        type: boolean
+        required: false
+        default: false
       osv_container_proof:
         description: 'Run the approved pinned container boundary proof on the disposable runner'
         type: boolean
@@ -54,7 +59,7 @@ defaults:
 jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
-    if: github.ref != 'refs/heads/prep/osv-prerequisites-20261011-r1'
+    if: github.ref != 'refs/heads/prep/osv-prerequisites-20261011-r1' && !(github.event_name == 'workflow_dispatch' && inputs.osv_docker_parent_headroom_proof == true)
     runs-on: ubuntu-latest
 
     # Set the permissions to the lowest permissions possible needed for your steps.
@@ -104,7 +109,7 @@ jobs:
 
   # Separately approved proof on the owned ref; no legacy namespace retry.
   osv-container-prerequisite:
-    if: github.event_name == 'workflow_dispatch' && inputs.osv_container_proof == true && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+    if: github.event_name == 'workflow_dispatch' && inputs.osv_container_proof == true && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && inputs.osv_docker_parent_headroom_proof == false
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -133,7 +138,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/container-source-bindings.json)"
-          test "${actual%% *}" = cfb86b6b2b92b52e8da37a0d0c522f3b0ad7d8abe279d335f1c4f3dfaffc7045
+          test "${actual%% *}" = 682cb359fcfce48b1a209c1f04cbb805f4779578dcb8146fe1a9caa8fbfad8f8
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-container-proof.py)"
           test "${actual%% *}" = c4db39f78f0555396dde81a444d88f73ea7d95dca0090d61e4bbe6545b7ec4a5
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-container-proof-XXXXXXXXXX")"
@@ -160,7 +165,7 @@ jobs:
         run: test '${{ steps.proof.outcome }}' = success
 
   osv-production-proof:
-    if: github.event_name == 'workflow_dispatch' && inputs.osv_production_proof == true && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow'
+    if: github.event_name == 'workflow_dispatch' && inputs.osv_production_proof == true && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && inputs.osv_docker_parent_headroom_proof == false
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
@@ -233,7 +238,7 @@ jobs:
           set -euo pipefail
           umask 077
           actual="$(/usr/bin/sha256sum scripts/osv-offline/bootstrap-manifest.json)"
-          test "${actual%% *}" = c755195325ceb5254eae4828ca9e5929789fe5be4055ce54f8a218b5dd8326a9
+          test "${actual%% *}" = 8638b703c9b81e4511be3954c9c5f7996507d28d1d7a2b438c4cd9c7f592e276
           actual="$(/usr/bin/sha256sum scripts/osv-offline/run-production-proof.py)"
           test "${actual%% *}" = bcfc2c4e30fb988281244333ca3504a5e498bface54db3e9df75e310856b04d0
           proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-production-XXXXXXXXXX")"
@@ -309,7 +314,7 @@ jobs:
           test '${{ steps.fixtures.outcome }}' = success
 
   exact-candidate-acquisition:
-    if: github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1
+    if: github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1 && inputs.osv_docker_parent_headroom_proof == false
     runs-on: ubuntu-latest
     timeout-minutes: 6
     permissions:
@@ -449,7 +454,7 @@ jobs:
 
   exact-candidate-runtime:
     needs: exact-candidate-acquisition
-    if: needs.exact-candidate-acquisition.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1
+    if: needs.exact-candidate-acquisition.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.exact_candidate_runtime_proof == true && inputs.osv_production_proof == false && inputs.osv_container_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1 && inputs.osv_docker_parent_headroom_proof == false
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions: {}
@@ -561,3 +566,53 @@ jobs:
           test "$RECEIVER" = success
           test "$IMAGE" = success
           test "$RUNTIME" = success
+
+  osv-docker-parent-headroom:
+    if: github.event_name == 'workflow_dispatch' && inputs.osv_docker_parent_headroom_proof == true && inputs.osv_container_proof == false && inputs.osv_production_proof == false && inputs.exact_candidate_runtime_proof == false && github.ref == 'refs/heads/prep/osv-prerequisites-20261011-r1' && github.repository == 'GoCodeAlone/workflow' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the exact reviewed measurement source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Supply the existing pinned Python container
+        run: |
+          set -euo pipefail
+          /usr/bin/timeout --signal=TERM --kill-after=10s 120s /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C \
+            /usr/bin/docker pull docker.io/library/python@sha256:f040863673aea2570c3ff6a5c3fb4c673a016cbc5375005ad145915922b6b78a
+      - name: Observe the owned Docker init parent headroom without scanning
+        id: headroom
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          umask 077
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/docker-headroom-manifest.json)"
+          test "${actual%% *}" = 1046ef09bbf46366d7a74a5f9f67b13fff09d5676eb8313d5e73d312236c864b
+          actual="$(/usr/bin/sha256sum scripts/osv-offline/run-docker-headroom-proof.py)"
+          test "${actual%% *}" = 53ac30b4bc40bf33041e0064500a25b4cc8b78048a1a819786f153035673cb4d
+          proof_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-headroom-XXXXXXXXXX")"
+          startup_dir="$(/usr/bin/mktemp -d "${RUNNER_TEMP}/osv-headroom-startup-XXXXXXXXXX")"
+          printf 'evidence=%s\n' "$proof_dir" >> "$GITHUB_OUTPUT"
+          /usr/bin/timeout --signal=TERM --kill-after=10s 210s /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C RUNNER_TEMP="$RUNNER_TEMP" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" GITHUB_SHA="$GITHUB_SHA" GITHUB_REF="$GITHUB_REF" \
+            GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GITHUB_JOB="$GITHUB_JOB" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            /usr/bin/python3 -I -S -B -X "pycache_prefix=$startup_dir/absent-cache" \
+            scripts/osv-offline/run-docker-headroom-proof.py "$proof_dir" --execute
+      - name: Retain actual headroom and full-ID retirement evidence
+        if: ${{ !cancelled() && steps.headroom.outputs.evidence != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-docker-parent-headroom-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.headroom.outputs.evidence }}
+          if-no-files-found: error
+          retention-days: 5
+      - name: Enforce actual observation and retirement
+        if: ${{ !cancelled() }}
+        run: test '${{ steps.headroom.outcome }}' = success

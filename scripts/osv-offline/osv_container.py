@@ -95,7 +95,8 @@ def command(argv, seconds=15, *, stdout_limit=1024*1024):
 
 class Container:
     def __init__(self, output, helper_root, *, mounts=(), seconds=150, runner=command,
-                 production=False, carveouts=(), carveout_parent=None, deadline=None, ledger=None):
+                 production=False, carveouts=(), carveout_parent=None, deadline=None, ledger=None,
+                 measurement_only=False):
         eligible()
         self.output, self.helper_root = Path(output), Path(helper_root)
         self.runner = runner
@@ -106,6 +107,10 @@ class Container:
         if type(seconds) is not int or not 1 <= seconds <= 1800:
             raise BoundaryError('unbound container phase budget')
         self.production = production
+        if type(measurement_only) is not bool or measurement_only and (production or seconds != 25 or carveouts or
+            len(mounts) != 1 or tuple(mounts[0][1:]) != ('/fixture', True)):
+            raise BoundaryError('measurement requires the fixed25s plus5s termination envelope')
+        self.measurement_only = measurement_only
         self.carveouts = {Path(p) for p in carveouts}
         self.carveout_parent = Path(carveout_parent) if carveout_parent is not None else None
         self.ledger = Path(ledger) if ledger is not None else None
@@ -113,6 +118,7 @@ class Container:
         self.creation_attempted = False
         self.creation_response = None
         self.inspection_receipts = []
+        self.last_inspection_raw = None
         self.nonce = secrets.token_hex(16)
         self.name = 'wf-osv-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'] + '-' + self.nonce
         self.labels = {'workflow.osv.owner': self.nonce, 'workflow.osv.commit': os.environ['GITHUB_SHA']}
@@ -174,6 +180,8 @@ class Container:
         if r.returncode:
             if absent:return None
             raise BoundaryError('Docker inspection failed; absence is unproved')
+        if self.measurement_only:
+            self.last_inspection_raw = r.stdout.encode()
         rows = json.loads(r.stdout)
         if len(rows) != 1:
             raise BoundaryError('ambiguous container identity')
@@ -198,6 +206,8 @@ class Container:
         self.validate_mounts()
         if self.production and tuple(worker_args) != ():
             raise BoundaryError('production worker takes only its fixed request')
+        if self.measurement_only and tuple(worker_args) != ():
+            raise BoundaryError('measurement worker takes only its fixed request')
         if self.inspect(self.name) is not None:
             raise BoundaryError('fresh container name already exists')
         uid, gid = os.getuid(), os.getgid()
@@ -211,6 +221,8 @@ class Container:
                 raise BoundaryError('production helpers require their exact absolute mount')
             self.payload[-1] = str(self.helper_root/'run.py')
             self.payload += ['--worker', '/out/request.json']
+        if self.measurement_only:
+            self.payload[-1] = '/wf/headroom-worker.py'
         argv = ['create', '--name', self.name, '--cidfile', str(self.cidfile),
             '--platform', 'linux/amd64', '--network', 'none', '--ipc', 'private',
             '--cgroupns', 'private', '--user', str(uid)+':'+str(gid),
@@ -298,11 +310,19 @@ class Container:
                (r['Type']=='tmpfs' and r['Destination']!='/tmp') for r in row['Mounts']):
             raise BoundaryError('unexpected writable container mount')
 
-    def start_wait(self):
+    def start_wait(self, *, live_observer=None):
+        if (live_observer is not None) != self.measurement_only:
+            raise BoundaryError('live observation is restricted to the fixed measurement worker')
         self.validate(self.inspect(self.identifier))
         r = self.run(['start', self.identifier], 15)
         if r.returncode or r.stdout.strip() != self.identifier:
             raise BoundaryError('owned container did not start')
+        if live_observer is not None:
+            row = self.live_identity()
+            live_observer(row)
+            after = self.live_identity()
+            if after['State']['Pid'] != row['State']['Pid']:
+                raise BoundaryError('owned live init PID rebound')
         r = self.run(['wait', self.identifier], self.seconds+10)
         if r.returncode or not r.stdout.strip().isdecimal():
             raise BoundaryError('owned container wait did not complete')
@@ -310,6 +330,16 @@ class Container:
         if row['State']['Running'] or row['State']['Pid'] != 0 or row['State']['ExitCode'] != int(r.stdout.strip()) or row.get('RestartCount') != 0:
             raise BoundaryError('container termination/exit mismatch')
         return row['State']['ExitCode'], row
+
+    def live_identity(self):
+        if not self.measurement_only:
+            raise BoundaryError('live PID observation is measurement-only')
+        row = self.owned(self.inspect(self.identifier)); self.validate(row)
+        state = row['State']
+        if (state.get('Running') is not True or type(state.get('Pid')) is not int or state['Pid'] <= 0 or
+            state.get('Paused') or state.get('Restarting') or state.get('Dead') or row.get('RestartCount') != 0):
+            raise BoundaryError('owned live init PID is not established')
+        return row
 
     def cleanup(self):
         self.cleanup_mode = True

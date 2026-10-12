@@ -79,3 +79,13 @@ Host preparation/preload and report workers retain GOMEMLIMIT768MiB/default GOGC
 supplier compilation and exact candidate schema paths remain unchanged.
 The host receipt describes current runner ancestors. Docker-parent ancestry may
 differ and remains UNKNOWN/HOLD; these values cannot prove Docker headroom.
+
+A separate manual-only Docker-parent measurement uses the same fixed2GiB
+nonroot envelope with a single Python worker,25s plus5s termination limit,
+no Go/supplier/cache mounts and no scanner execution. The host binds the live
+full-CID init PID/starttime/cgroup through owned inspect and checked buffers,
+records physical memory and Docker parent ancestor limits, and excludes the
+probe's own2GiB cap from the capacity estimate. Source controls are mocked, not
+hosted evidence. The observed4.5GiB comparison is a proposed2.5GiB allocation
+plus2GiB reserve; it proves no minimum/sufficient fit, reservation, resource
+expansion or installation authority. Actual full-ID retirement remains required.
