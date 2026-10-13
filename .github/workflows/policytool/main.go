@@ -499,6 +499,15 @@ func validateTrustTransition(base, candidate trustPolicy, baseContexts, candidat
 		findings = append(findings, "public workflow secret manifest must remain exactly empty")
 	}
 	if trustPoliciesEqual(base, candidate) {
+		for _, group := range base.Presence {
+			if group.State == "staged" && realizesTrustGroup(group, baseContexts, basePresent) && !realizesTrustGroup(group, candidateContexts, candidatePresent) {
+				findings = append(findings, "realized staged trust context cannot be reversed before promotion")
+			}
+		}
+		sort.Strings(findings)
+		return findings
+	}
+	if unusedStagedExecutableCorrection(base, candidate, baseContexts, candidateContexts, basePresent, candidatePresent) {
 		return findings
 	}
 
@@ -506,38 +515,207 @@ func validateTrustTransition(base, candidate trustPolicy, baseContexts, candidat
 	executableAdditions, executableRemoved := semanticAdditions(base.Executables, candidate.Executables)
 	commandAdditions, commandRemoved := semanticAdditions(base.Commands, candidate.Commands)
 	actionAdditions, actionRemoved := semanticAdditions(base.Actions, candidate.Actions)
-	if !presenceRemoved && !executableRemoved && !commandRemoved && !actionRemoved && len(presenceAdditions) == 1 {
-		staged := presenceAdditions[0]
-		additions := trustPolicy{Executables: executableAdditions, Commands: commandAdditions, Actions: actionAdditions}
-		var active trustGroup
-		for _, group := range base.Presence {
-			if group.Path == staged.Path && group.State == "active" {
-				active = group
-			}
+	if !presenceRemoved && !executableRemoved && !commandRemoved && !actionRemoved && len(presenceAdditions) > 0 {
+		additions := trustPolicy{Presence: presenceAdditions, Executables: executableAdditions, Commands: commandAdditions, Actions: actionAdditions}
+		if validTrustStage(base, candidate, additions, baseContexts, candidateContexts, basePresent, candidatePresent) {
+			return findings
 		}
-		if validTrustGroupShape(staged) && staged.State == "staged" && active.State == "active" && stagedAuthorityMatches(staged, additions) &&
-			realizesTrustGroup(active, baseContexts, basePresent) &&
-			!(active.Presence == staged.Presence && active.ContextSHA256 == staged.ContextSHA256) {
-			if realizesTrustGroup(staged, candidateContexts, candidatePresent) {
+		for _, staged := range presenceAdditions {
+			if staged.State == "staged" && realizesTrustGroup(staged, candidateContexts, candidatePresent) {
 				findings = append(findings, "trust context cannot be staged and adopted in the same pull request")
-			} else if realizesTrustGroup(active, candidateContexts, candidatePresent) {
-				return findings
 			}
 		}
 	}
 
+	expected := base
+	promotions := 0
 	for _, staged := range base.Presence {
-		if staged.State != "staged" || !realizesTrustGroup(staged, baseContexts, basePresent) || !realizesTrustGroup(staged, candidateContexts, candidatePresent) {
+		if staged.State != "staged" || !validTrustGroupShape(staged) || !realizesTrustGroup(staged, baseContexts, basePresent) || !realizesTrustGroup(staged, candidateContexts, candidatePresent) {
 			continue
 		}
-		expected := promotedTrustPolicy(base, staged)
-		if trustPoliciesEqual(expected, candidate) {
-			return findings
+		_, retainedStage, baseValid := trustStatesForPath(base, staged.Path)
+		active, candidateStage, candidateValid := trustStatesForPath(candidate, staged.Path)
+		promoted := staged
+		promoted.State = "active"
+		if baseValid && retainedStage == staged && candidateValid && candidateStage.State == "" && active == promoted {
+			expected = promotedTrustPolicy(expected, staged)
+			promotions++
 		}
 	}
-	findings = append(findings, "trust manifest change does not match unchanged, stage-only, or promotion-only lifecycle")
+	if promotions > 0 && trustPoliciesEqual(expected, candidate) {
+		return findings
+	}
+	findings = append(findings, "trust manifest change does not match unchanged, unused staged executable SHA correction, stage-only, or promotion-only lifecycle")
 	sort.Strings(findings)
 	return findings
+}
+
+func trustStatesForPath(policy trustPolicy, workflowPath string) (active, staged trustGroup, valid bool) {
+	valid = true
+	for _, group := range policy.Presence {
+		if group.Path != workflowPath {
+			continue
+		}
+		if !validTrustGroupShape(group) {
+			return active, staged, false
+		}
+		switch group.State {
+		case "active":
+			if active.State != "" {
+				return active, staged, false
+			}
+			active = group
+		case "staged":
+			if staged.State != "" {
+				return active, staged, false
+			}
+			staged = group
+		}
+	}
+	return active, staged, valid && active.State == "active"
+}
+
+func trustRowsForGroup(policy trustPolicy, group trustGroup) trustPolicy {
+	rows := trustPolicy{}
+	for _, entry := range policy.Executables {
+		if entry.WorkflowPath == group.Path && entry.ContextSHA256 == group.ContextSHA256 {
+			rows.Executables = append(rows.Executables, entry)
+		}
+	}
+	for _, entry := range policy.Commands {
+		if entry.Path == group.Path && entry.ContextSHA256 == group.ContextSHA256 {
+			rows.Commands = append(rows.Commands, entry)
+		}
+	}
+	for _, entry := range policy.Actions {
+		if entry.Path == group.Path && entry.ContextSHA256 == group.ContextSHA256 {
+			rows.Actions = append(rows.Actions, entry)
+		}
+	}
+	return rows
+}
+
+// A correction cannot authorize a new executable, context, metadata field or
+// selected execution. Only SHA fields of one retained unused staged group change.
+func unusedStagedExecutableCorrection(base, candidate trustPolicy, baseContexts, candidateContexts map[string]string, basePresent, candidatePresent map[string]bool) bool {
+	if !reflect.DeepEqual(base.Secrets, candidate.Secrets) || !reflect.DeepEqual(base.Presence, candidate.Presence) || !reflect.DeepEqual(base.Commands, candidate.Commands) || !reflect.DeepEqual(base.Actions, candidate.Actions) || len(base.Executables) != len(candidate.Executables) {
+		return false
+	}
+	workflowPath, context := "", ""
+	changed := false
+	for index, before := range base.Executables {
+		after := candidate.Executables[index]
+		if before == after {
+			continue
+		}
+		if before.State != "staged" || !validSHA256Hex(before.SHA256) || !validSHA256Hex(after.SHA256) {
+			return false
+		}
+		if changed && (workflowPath != before.WorkflowPath || context != before.ContextSHA256) {
+			return false
+		}
+		workflowPath, context, changed = before.WorkflowPath, before.ContextSHA256, true
+		after.SHA256 = before.SHA256
+		if before != after {
+			return false
+		}
+	}
+	if !changed {
+		return false
+	}
+	active, staged, valid := trustStatesForPath(base, workflowPath)
+	return valid && staged.State == "staged" && staged.ContextSHA256 == context && staged.Presence == "present" &&
+		realizesTrustGroup(active, baseContexts, basePresent) && realizesTrustGroup(active, candidateContexts, candidatePresent) &&
+		!realizesTrustGroup(staged, baseContexts, basePresent) && !realizesTrustGroup(staged, candidateContexts, candidatePresent) &&
+		stagedAuthorityMatches(staged, trustRowsForGroup(base, staged)) && stagedAuthorityMatches(staged, trustRowsForGroup(candidate, staged))
+}
+
+func retainsEntryPrefix[T comparable](base, candidate []T) bool {
+	if len(candidate) < len(base) {
+		return false
+	}
+	for index, entry := range base {
+		if entry != candidate[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func validTrustStage(base, candidate, additions trustPolicy, baseContexts, candidateContexts map[string]string, basePresent, candidatePresent map[string]bool) bool {
+	if len(additions.Presence) > 1 && (!retainsEntryPrefix(base.Presence, candidate.Presence) || !retainsEntryPrefix(base.Executables, candidate.Executables) || !retainsEntryPrefix(base.Commands, candidate.Commands) || !retainsEntryPrefix(base.Actions, candidate.Actions)) {
+		return false
+	}
+	byKey := make(map[string]trustPolicy)
+	seenPaths := make(map[string]bool)
+	for _, staged := range additions.Presence {
+		active, priorStage, valid := trustStatesForPath(base, staged.Path)
+		if !validTrustGroupShape(staged) || staged.State != "staged" || !valid || priorStage.State != "" || seenPaths[staged.Path] ||
+			!realizesTrustGroup(active, baseContexts, basePresent) || !realizesTrustGroup(active, candidateContexts, candidatePresent) ||
+			(active.Presence == staged.Presence && active.ContextSHA256 == staged.ContextSHA256) || realizesTrustGroup(staged, candidateContexts, candidatePresent) {
+			return false
+		}
+		seenPaths[staged.Path] = true
+		byKey[staged.Path+"\x00"+staged.ContextSHA256] = trustPolicy{}
+	}
+	for _, entry := range additions.Executables {
+		key := entry.WorkflowPath + "\x00" + entry.ContextSHA256
+		rows, ok := byKey[key]
+		if !ok {
+			return false
+		}
+		rows.Executables = append(rows.Executables, entry)
+		byKey[key] = rows
+	}
+	for _, entry := range additions.Commands {
+		key := entry.Path + "\x00" + entry.ContextSHA256
+		rows, ok := byKey[key]
+		if !ok {
+			return false
+		}
+		rows.Commands = append(rows.Commands, entry)
+		byKey[key] = rows
+	}
+	for _, entry := range additions.Actions {
+		key := entry.Path + "\x00" + entry.ContextSHA256
+		rows, ok := byKey[key]
+		if !ok {
+			return false
+		}
+		rows.Actions = append(rows.Actions, entry)
+		byKey[key] = rows
+	}
+	for _, group := range additions.Presence {
+		if !stagedAuthorityMatches(group, byKey[group.Path+"\x00"+group.ContextSHA256]) {
+			return false
+		}
+	}
+	return true
+}
+
+func repositoryWorkflowBytes(repoRoot string) (map[string]string, error) {
+	files := make(map[string]string)
+	for _, pattern := range []string{"*.yml", "*.yaml"} {
+		matches, err := filepath.Glob(filepath.Join(repoRoot, ".github", "workflows", pattern))
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range matches {
+			info, err := os.Lstat(file)
+			if err != nil {
+				return nil, err
+			}
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("non-regular public workflow %s", filepath.Base(file))
+			}
+			data, err := os.ReadFile(file)
+			if err != nil {
+				return nil, err
+			}
+			files[filepath.Base(file)] = fmt.Sprintf("%o:%x", info.Mode(), sha256.Sum256(data))
+		}
+	}
+	return files, nil
 }
 
 func loadTrustPolicy(repoRoot string) (trustPolicy, error) {
@@ -679,6 +857,19 @@ func validateRepositoryAuthority(repoRoot, scanRoot string, bootstrap bool) ([]s
 		return nil, fmt.Errorf("inspect candidate trust paths: %w", err)
 	}
 	findings = append(findings, validateTrustTransition(basePolicy, candidatePolicy, baseContexts, candidateContexts, basePresent, candidatePresent)...)
+	if !trustPoliciesEqual(basePolicy, candidatePolicy) {
+		baseFiles, err := repositoryWorkflowBytes(repoRoot)
+		if err != nil {
+			return nil, fmt.Errorf("read base public workflow bytes: %w", err)
+		}
+		candidateFiles, err := repositoryWorkflowBytes(scanRoot)
+		if err != nil {
+			return nil, fmt.Errorf("read candidate public workflow bytes: %w", err)
+		}
+		if !reflect.DeepEqual(baseFiles, candidateFiles) {
+			findings = append(findings, "trust-only transition must preserve every public workflow byte and mode")
+		}
+	}
 	sort.Strings(findings)
 	return findings, nil
 }

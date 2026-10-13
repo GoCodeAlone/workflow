@@ -12,7 +12,7 @@
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
     "state": "active",
-    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
+    "sha256": "2cf3f0461ceed4a3e32265ccad7fd3ac1ae4e162d1f2cb19ba9b8737405db02a",
     "rationale": "Enforces the credential-free public workflow boundary in CI."
   },
   {
@@ -20,7 +20,7 @@
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
     "state": "active",
-    "sha256": "7d209bb35ff3a7a46b22f9a10a920eb30218c3403726d1dac72e0bffd1d914a4",
+    "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b",
     "rationale": "Exercises fail-closed public workflow policy mutations in CI."
   },
   {
@@ -36,7 +36,7 @@
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
     "state": "staged",
-    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
+    "sha256": "2cf3f0461ceed4a3e32265ccad7fd3ac1ae4e162d1f2cb19ba9b8737405db02a",
     "rationale": "Staged v0.86 CI authority. Enforces the credential-free public workflow boundary in CI."
   },
   {
@@ -52,7 +52,7 @@
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
     "state": "staged",
-    "sha256": "7d209bb35ff3a7a46b22f9a10a920eb30218c3403726d1dac72e0bffd1d914a4",
+    "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b",
     "rationale": "Staged v0.86 CI authority. Exercises fail-closed public workflow policy mutations in CI."
   },
   {
@@ -83,7 +83,7 @@
     "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
     "path": "scripts/check-public-workflow-policy.sh",
     "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
-    "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c",
+    "sha256": "2cf3f0461ceed4a3e32265ccad7fd3ac1ae4e162d1f2cb19ba9b8737405db02a",
     "state": "active",
     "workflowPath": ".github/workflows/public-workflow-policy.yml"
   },
