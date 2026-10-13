@@ -1,12 +1,17 @@
 package external
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
 	"testing"
 
+	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/module"
 	"github.com/GoCodeAlone/workflow/plugin"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"google.golang.org/grpc"
@@ -21,6 +26,271 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestScopedConfigLookupWarnings(t *testing.T) {
+	global := module.GetConfigRegistry()
+	global.Reset()
+	t.Cleanup(global.Reset)
+	_ = global.Set("client.token", "dummy_private_a", false)
+	global.Freeze()
+	a, _, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy_private_a"}, nil)
+	step := scopedFactoryStep(t, a, app, map[string]any{"auth_ref": "config:client.token", "composed": `{{ .${ config("client.token") } }}`})
+	var logs bytes.Buffer
+	pc := module.NewPipelineContext(nil, nil)
+	pc.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	pc.Metadata["pipeline"] = "dummy_private_a"
+	if _, err := step.Execute(context.Background(), pc); err != nil {
+		t.Fatal("composed missing field execution failed")
+	}
+	if !strings.Contains(logs.String(), "WARN") {
+		t.Fatal("missing-field warning absent")
+	}
+	if strings.Contains(logs.String(), "dummy_private_a") || strings.Contains(logs.String(), `"error"`) || strings.Contains(logs.String(), `"pipeline"`) {
+		t.Fatal("scoped warning contains execution/context-derived data")
+	}
+	logs.Reset()
+	if _, err := module.NewTemplateEngine().Resolve(`{{ .${ config("client.token") } }}`, pc); err != nil {
+		t.Fatal("legacy control failed")
+	}
+	if !strings.Contains(logs.String(), "WARN") || !strings.Contains(logs.String(), "dummy_private_a") {
+		t.Fatal("legacy diagnostic control changed")
+	}
+}
+
+type scopedStepRecorder struct {
+	adapterTestPluginServiceClient
+	executeCalls int
+	execute      func(context.Context, *pb.ExecuteStepRequest) (*pb.ExecuteStepResponse, error)
+}
+
+func (c *scopedStepRecorder) ExecuteStep(ctx context.Context, req *pb.ExecuteStepRequest, opts ...grpc.CallOption) (*pb.ExecuteStepResponse, error) {
+	c.executeCalls++
+	c.lastRequest = req
+	if c.execute != nil {
+		return c.execute(ctx, req)
+	}
+	return c.stubPluginServiceClient.ExecuteStep(ctx, req, opts...)
+}
+
+func scopedCredentialGrant() interfaces.StepCredentialGrant {
+	return interfaces.StepCredentialGrant{Plugin: "trusted-plugin", StepType: "step.generic", StepName: "transfer", Field: "auth_ref", Ref: "config:client.token", Scope: "application"}
+}
+
+func scopedCredentialFixture(t *testing.T, values map[string]string, contract *pb.ContractDescriptor) (*ExternalPluginAdapter, *scopedStepRecorder, modular.Application) {
+	t.Helper()
+	r := module.NewConfigRegistry()
+	for k, v := range values {
+		if err := r.Set(k, v, false); err != nil {
+			t.Fatal("fixture registry failed")
+		}
+	}
+	r.Freeze()
+	binder, err := module.NewStepCredentialBinder(r, []interfaces.StepCredentialGrant{scopedCredentialGrant()})
+	if err != nil {
+		t.Fatal("fixture binder failed")
+	}
+	app := modular.NewStdApplication(modular.NewStdConfigProvider(nil), nil)
+	if err := app.RegisterService(module.StepCredentialsService, binder); err != nil {
+		t.Fatal("fixture registration failed")
+	}
+	registry := &pb.ContractRegistry{}
+	if contract != nil {
+		registry.Contracts = []*pb.ContractDescriptor{contract}
+	}
+	c := &scopedStepRecorder{adapterTestPluginServiceClient: adapterTestPluginServiceClient{
+		manifest: &pb.Manifest{Name: "trusted-plugin"}, registry: registry, stepTypes: []string{"step.generic"},
+	}}
+	a, err := NewExternalPluginAdapter("trusted-plugin", &PluginClient{client: c}, nil)
+	if err != nil {
+		t.Fatal("fixture adapter failed")
+	}
+	return a, c, app
+}
+
+func scopedFactoryStep(t *testing.T, a *ExternalPluginAdapter, app modular.Application, cfg map[string]any) *RemoteStep {
+	t.Helper()
+	v, err := a.StepFactories()["step.generic"]("transfer", cfg, app)
+	if err != nil {
+		t.Fatal("scoped step construction failed")
+	}
+	return v.(*RemoteStep)
+}
+
+func TestScopedConfigLookup(t *testing.T) {
+	global := module.GetConfigRegistry()
+	global.Reset()
+	t.Cleanup(global.Reset)
+	_ = global.Set("server_url", "http://app-b.invalid", false)
+	_ = global.Set("global_only", "foreign-value", false)
+	_ = global.Set("client.token", "dummy-global-b", false)
+	global.Freeze()
+	for _, tc := range []struct {
+		name, template, want string
+		spoof                bool
+	}{
+		{"composed Go", `{{ config "server_url" | default "" }}/tasks`, "http://app-a.invalid/tasks", false},
+		{"expression", `${ config("server_url") }/tasks`, "http://app-a.invalid/tasks", false},
+		{"Current config spoof", `${ config("server_url") }/tasks`, "http://app-a.invalid/tasks", true},
+		{"missing Go scoped key", `{{ config "global_only" | default "" }}`, "", false},
+		{"missing expr scoped key", `${ config("global_only") }`, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c, app := scopedCredentialFixture(t, map[string]string{"server_url": "http://app-a.invalid", "client.token": "dummy-private-a"}, nil)
+			cfg := map[string]any{"auth_ref": "config:client.token", "url": tc.template}
+			step := scopedFactoryStep(t, a, app, cfg)
+			pc := module.NewPipelineContext(nil, nil)
+			if tc.spoof {
+				pc.Current["config"] = "spoof"
+			}
+			_, err := step.Execute(context.Background(), pc)
+			if err != nil {
+				t.Fatal("same-app config evaluation failed")
+			}
+			if c.lastRequest == nil || c.lastRequest.Config.AsMap()["url"] != tc.want {
+				t.Fatal("wrong app endpoint or global fallback selected")
+			}
+		})
+	}
+}
+
+type trackingCredentialBinder struct {
+	delegate                            interfaces.StepCredentialBinder
+	binds, resolves, validates, lookups int
+	resolveErr                          error
+	validateErrAt                       int
+	resolved                            []interfaces.ResolvedStepCredential
+}
+
+func (b *trackingCredentialBinder) BindStep(target interfaces.StepCredentialTarget, cfg map[string]any) (*interfaces.BoundStepCredentials, error) {
+	b.binds++
+	bound, err := b.delegate.BindStep(target, cfg)
+	if err != nil || bound == nil {
+		return bound, err
+	}
+	return &interfaces.BoundStepCredentials{
+		ConfigLookup: func(key string) (string, bool) { b.lookups++; return bound.ConfigLookup(key) },
+		ValidateConfig: func(cfg map[string]any) error {
+			b.validates++
+			if b.validates == b.validateErrAt {
+				return errors.New("dummy-private-a")
+			}
+			return bound.ValidateConfig(cfg)
+		},
+		Resolve: func(ctx context.Context) ([]interfaces.ResolvedStepCredential, error) {
+			b.resolves++
+			if b.resolveErr != nil {
+				return nil, b.resolveErr
+			}
+			if b.resolved != nil {
+				return b.resolved, nil
+			}
+			return bound.Resolve(ctx)
+		},
+	}, nil
+}
+
+func trackedCredentialApp(t *testing.T, app modular.Application) (modular.Application, *trackingCredentialBinder) {
+	t.Helper()
+	var binder interfaces.StepCredentialBinder
+	if err := app.GetService(module.StepCredentialsService, &binder); err != nil {
+		t.Fatal("fixture binder unavailable")
+	}
+	b := &trackingCredentialBinder{delegate: binder}
+	tracked := modular.NewStdApplication(modular.NewStdConfigProvider(nil), nil)
+	if err := tracked.RegisterService(module.StepCredentialsService, b); err != nil {
+		t.Fatal("fixture binder registration failed")
+	}
+	return tracked, b
+}
+
+func TestRemoteStepScopedBinding(t *testing.T) {
+	t.Run("no grant retains legacy config ownership", func(t *testing.T) {
+		a, c, app := scopedCredentialFixture(t, nil, nil)
+		a.name = "foreign-plugin"
+		cfg := map[string]any{"auth_ref": "config:client.token", "value": "original"}
+		step := scopedFactoryStep(t, a, app, cfg)
+		cfg["value"] = "legacy-mutation"
+		if _, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil)); err != nil {
+			t.Fatal("ungranted execute failed")
+		}
+		if c.lastRequest.Config.AsMap()["value"] != "legacy-mutation" {
+			t.Fatal("nil binding changed legacy ownership")
+		}
+	})
+	t.Run("typed container construction copy", func(t *testing.T) {
+		a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, nil)
+		m := map[string]string{"value": "original"}
+		items := []map[string]any{{"value": "original"}}
+		cfg := map[string]any{"auth_ref": "config:client.token", "typed_map": m, "typed_items": items}
+		step := scopedFactoryStep(t, a, app, cfg)
+		m["value"] = "mutated"
+		items[0]["value"] = "mutated"
+		if _, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil)); err != nil {
+			t.Fatal("typed container execute failed")
+		}
+		sent := c.lastRequest.Config.AsMap()
+		if sent["typed_map"].(map[string]any)["value"] != "original" || sent["typed_items"].([]any)[0].(map[string]any)["value"] != "original" {
+			t.Fatal("typed config containers alias caller")
+		}
+	})
+	t.Run("trusted registration survives public rename", func(t *testing.T) {
+		a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, nil)
+		a.manifest.Name = "foreign-plugin"
+		step := scopedFactoryStep(t, a, app, map[string]any{"auth_ref": "config:client.token"})
+		if _, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil)); err != nil {
+			t.Fatal("trusted binding failed")
+		}
+		if _, ok := c.lastRequest.Config.AsMap()["config"]; !ok {
+			t.Fatal("public name replaced trusted identity")
+		}
+	})
+	t.Run("manifest spoof cannot grant", func(t *testing.T) {
+		a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, nil)
+		a.name = "foreign-plugin"
+		step := scopedFactoryStep(t, a, app, map[string]any{"auth_ref": "config:client.token"})
+		if _, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil)); err != nil {
+			t.Fatal("ungranted step failed")
+		}
+		if _, ok := c.lastRequest.Config.AsMap()["config"]; ok {
+			t.Fatal("manifest spoof acquired credentials")
+		}
+	})
+	t.Run("mismatch rejects before RPC", func(t *testing.T) {
+		a, c, app := scopedCredentialFixture(t, nil, nil)
+		_, err := a.StepFactories()["step.generic"]("transfer", map[string]any{"auth_ref": "config:other.token"}, app)
+		if err == nil || c.lastCreateStepReq != nil {
+			t.Fatal("binding mismatch reached CreateStep")
+		}
+	})
+	for _, mode := range []pb.ContractMode{pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT, pb.ContractMode_CONTRACT_MODE_STRICT_PROTO, 99, -99} {
+		t.Run(mode.String(), func(t *testing.T) {
+			contract := &pb.ContractDescriptor{Kind: pb.ContractKind_CONTRACT_KIND_STEP, StepType: "step.generic", Mode: mode, ConfigMessage: "workflow.plugin.v1.Manifest", InputMessage: "workflow.plugin.v1.Manifest", OutputMessage: "workflow.plugin.v1.Manifest"}
+			if mode == 99 || mode == -99 {
+				contract.ConfigMessage, contract.InputMessage, contract.OutputMessage = "google.protobuf.Struct", "google.protobuf.Struct", "google.protobuf.Struct"
+			}
+			a, c, app := scopedCredentialFixture(t, nil, contract)
+			app, b := trackedCredentialApp(t, app)
+			_, err := a.StepFactories()["step.generic"]("transfer", map[string]any{"auth_ref": "config:client.token"}, app)
+			if err == nil || c.lastCreateStepReq != nil || c.executeCalls != 0 || b.binds != 1 || b.resolves != 0 || b.lookups != 0 {
+				t.Fatal("granted typed mode did not reject before lookup/Create RPC")
+			}
+		})
+	}
+	t.Run("deep construction copy", func(t *testing.T) {
+		a, c, app := scopedCredentialFixture(t, map[string]string{"client.token": "dummy-private-a"}, nil)
+		cfg := map[string]any{"auth_ref": "config:client.token", "nested": map[string]any{"items": []any{map[string]any{"value": "original"}}}}
+		step := scopedFactoryStep(t, a, app, cfg)
+		cfg["auth_ref"] = "config:other.token"
+		cfg["nested"].(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "mutated"
+		if _, err := step.Execute(context.Background(), module.NewPipelineContext(nil, nil)); err != nil {
+			t.Fatal("caller mutation changed bound config")
+		}
+		sent := c.lastRequest.Config.AsMap()
+		if sent["auth_ref"] != "config:client.token" || sent["nested"].(map[string]any)["items"].([]any)[0].(map[string]any)["value"] != "original" {
+			t.Fatal("construction config aliases caller")
+		}
+	})
+}
 
 // newTestAdapter builds an ExternalPluginAdapter with a populated manifest
 // and optional config fragment without a real gRPC connection.

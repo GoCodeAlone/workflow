@@ -3,24 +3,31 @@ package external
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/module"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
+	"github.com/GoCodeAlone/workflow/secrets"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // RemoteStep implements module.PipelineStep by delegating to a gRPC plugin.
 type RemoteStep struct {
-	name     string
-	handleID string
-	config   map[string]any
-	client   pb.PluginServiceClient
-	contract *pb.ContractDescriptor
-	types    protoregistry.MessageTypeResolver
-	tmpl     *module.TemplateEngine
+	name        string
+	handleID    string
+	config      map[string]any
+	client      pb.PluginServiceClient
+	contract    *pb.ContractDescriptor
+	types       protoregistry.MessageTypeResolver
+	tmpl        *module.TemplateEngine
+	credentials *interfaces.BoundStepCredentials
 }
+
+var errStepCredentialExecution = errors.New("remote step credential execution rejected")
 
 // NewRemoteStep creates a remote step proxy.
 // config holds the raw (possibly template-containing) step configuration that
@@ -49,7 +56,49 @@ func (s *RemoteStep) Name() string {
 	return s.name
 }
 
-func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*module.StepResult, error) {
+func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (result *module.StepResult, err error) {
+	var detector *secrets.Redactor
+	var carrier map[string]any
+	if s.credentials != nil {
+		if ctx == nil || !stepCredentialContractAllowed(s.contract) {
+			return nil, errStepCredentialExecution
+		}
+		if err := s.credentials.ValidateConfig(s.config); err != nil {
+			return nil, errStepCredentialExecution
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resolved, resolveErr := s.credentials.Resolve(ctx)
+		if resolveErr != nil || len(resolved) == 0 {
+			return nil, errStepCredentialExecution
+		}
+		detector = secrets.NewRedactor()
+		carrier = make(map[string]any, len(resolved))
+		for i, credential := range resolved {
+			if !strings.HasPrefix(credential.Ref, "config:") || credential.Value == "" {
+				return nil, errStepCredentialExecution
+			}
+			key := strings.TrimPrefix(credential.Ref, "config:")
+			if key == "" {
+				return nil, errStepCredentialExecution
+			}
+			if _, duplicate := carrier[key]; duplicate {
+				return nil, errStepCredentialExecution
+			}
+			carrier[key] = credential.Value
+			detector.AddValue(fmt.Sprintf("credential%d", i), credential.Value)
+		}
+		// Arm the guard before evaluating any ordinary templates or encoding data.
+		defer func() {
+			if err != nil && detector.ContainsValue(err.Error()) {
+				result, err = nil, errStepCredentialExecution
+			}
+		}()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	// Resolve template expressions in the step config against the current
 	// pipeline context so that dynamic values (e.g. outputs of earlier steps)
 	// are available to the plugin. When no config was provided, skip resolution
@@ -60,6 +109,20 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 		resolvedConfig, err = s.tmpl.ResolveMap(s.config, pc)
 		if err != nil {
 			return nil, fmt.Errorf("remote step %q (handle %s) config resolve: %w", s.name, s.handleID, err)
+		}
+	}
+	if s.credentials != nil {
+		if err := s.credentials.ValidateConfig(resolvedConfig); err != nil {
+			return nil, errStepCredentialExecution
+		}
+		if _, collision := resolvedConfig["config"]; collision {
+			return nil, errStepCredentialExecution
+		}
+		// ResolveMap creates a fresh map; the private namespace is never merged
+		// with caller data or copied back into the step or pipeline context.
+		resolvedConfig["config"] = carrier
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	}
 
@@ -82,6 +145,9 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 	if err != nil {
 		return nil, fmt.Errorf("remote step execute: %w", err)
 	}
+	if resp == nil {
+		return nil, errors.New("remote step execute: empty response")
+	}
 	if resp.Error != "" {
 		return nil, fmt.Errorf("remote step execute: %s", resp.Error)
 	}
@@ -98,11 +164,37 @@ func (s *RemoteStep) Execute(ctx context.Context, pc *module.PipelineContext) (*
 			return nil, fmt.Errorf("remote step %q typed output decode: %w", s.name, err)
 		}
 	}
+	if containsStepCredential(output, detector) {
+		return nil, errStepCredentialExecution
+	}
 
 	return &module.StepResult{
 		Output: output,
 		Stop:   resp.StopPipeline,
 	}, nil
+}
+
+func containsStepCredential(value any, detector *secrets.Redactor) bool {
+	if detector == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case string:
+		return detector.ContainsValue(v)
+	case map[string]any:
+		for key, item := range v {
+			if detector.ContainsValue(key) || containsStepCredential(item, detector) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if containsStepCredential(item, detector) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *RemoteStep) executeRequest(pc *module.PipelineContext, resolvedConfig map[string]any, stepOutputs map[string]*structpb.Struct) (*pb.ExecuteStepRequest, error) {
