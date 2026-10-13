@@ -490,6 +490,12 @@
           "placeholder": "workflow"
         },
         {
+          "key": "audience",
+          "label": "Audience",
+          "type": "string",
+          "description": "Token audience. When configured, must be a nonempty string; every JWT entry point requires this audience and the configured issuer."
+        },
+        {
           "key": "seedFile",
           "label": "Seed Users File",
           "type": "string",

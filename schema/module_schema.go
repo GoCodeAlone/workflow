@@ -707,6 +707,7 @@ func (r *ModuleSchemaRegistry) registerBuiltins() {
 			{Key: "secret", Label: "JWT Secret", Type: FieldTypeString, Required: true, Description: "Secret key for signing JWT tokens (supports $ENV_VAR expansion)", Placeholder: "$JWT_SECRET", Sensitive: true},
 			{Key: "tokenExpiry", Label: "Token Expiry", Type: FieldTypeDuration, DefaultValue: "24h", Description: "Token expiration duration (e.g. 1h, 24h, 7d)", Placeholder: "24h"},
 			{Key: "issuer", Label: "Issuer", Type: FieldTypeString, DefaultValue: "workflow", Description: "Token issuer claim", Placeholder: "workflow"},
+			{Key: "audience", Label: "Audience", Type: FieldTypeString, Description: "Token audience. When configured, must be a nonempty string; every JWT entry point requires this audience and the configured issuer."},
 			{Key: "seedFile", Label: "Seed Users File", Type: FieldTypeString, Description: "Path to JSON file with initial user accounts", Placeholder: "data/users.json"},
 			{Key: "responseFormat", Label: "Response Format", Type: FieldTypeSelect, Options: []string{"standard", "oauth2"}, Description: "Format of authentication response payloads"},
 			{Key: "allowRegistration", Label: "Allow Open Registration", Type: FieldTypeBool, DefaultValue: false, Description: "When true, any visitor may register without admin intervention"},
