@@ -1,93 +1,5 @@
 [
   {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-    "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-    "nodeSHA256": "61a9c4331757d229152c8c6a40e1b270fcbcb695694e5b97beb517698440f0cc",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-    "nodeSHA256": "e0a34c4180126cc79b5f308b63ad466e437d7e94ecceaa168f96cb94e149468b",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
-    "nodeSHA256": "8d49bc397aa5d9d2df3db9e1f3bfefd79f4e4aa5c95f87a795912dec86b3750c",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/setup-go for the reviewed module-file CI toolchain."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
-    "nodeSHA256": "c0d85fe8f94bd2187fb4d2a57310b75cf4561a018bc15a11b5fbea0baa13f07a",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/setup-go for the reviewed Go 1.26.5 CI toolchain."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
-    "nodeSHA256": "dacbb57e259c6953091e4aa96a49ad1588d2d15932d979e18fc2fe76a8e956c0",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/setup-go for the reviewed cloud-SDK audit toolchain."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
-    "nodeSHA256": "d6511486d7f0d7044978b8c71828add2508e72a9897718b7a91fdf151ffb3c49",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "nodeSHA256": "ca91e4ba0f44424faa0e3ae9defdf91020f32ab2c7db3037bbd0eacb201d863e",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe",
-    "nodeSHA256": "ab5622108de60639f5c212053069c6d25973e77217a2041449482b2a27946dff",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee",
-    "nodeSHA256": "7b19a0cedb652d7edf63d3cf166019ba1381eb67732ad528faa80968b0cf7607",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
-  },
-  {
-    "path": ".github/workflows/ci.yml",
-    "uses": "golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee",
-    "nodeSHA256": "b321ed17902672948adab7ee7bb4adbdb4773afaf0d9650c644b50dcd5d2cec1",
-    "contextSHA256": "532f4356f1104b87bb64c51db920bcf28c9fdceabcacad84d189522a3de014bc",
-    "state": "active",
-    "rationale": "Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
-  },
-  {
     "path": ".github/workflows/codeql.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "ce86ea22c3fe1b6ca8059cb204398b44c1700e22b3f4d85d9987d31352b96295",
@@ -468,7 +380,7 @@
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed ci.yml automation."
   },
   {
@@ -476,7 +388,7 @@
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "61a9c4331757d229152c8c6a40e1b270fcbcb695694e5b97beb517698440f0cc",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed ci.yml automation."
   },
   {
@@ -484,7 +396,7 @@
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "e0a34c4180126cc79b5f308b63ad466e437d7e94ecceaa168f96cb94e149468b",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed ci.yml automation."
   },
   {
@@ -492,7 +404,7 @@
     "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
     "nodeSHA256": "8d49bc397aa5d9d2df3db9e1f3bfefd79f4e4aa5c95f87a795912dec86b3750c",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/setup-go for the reviewed module-file CI toolchain."
   },
   {
@@ -500,7 +412,7 @@
     "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
     "nodeSHA256": "c0d85fe8f94bd2187fb4d2a57310b75cf4561a018bc15a11b5fbea0baa13f07a",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/setup-go for the reviewed Go 1.26.5 CI toolchain."
   },
   {
@@ -508,7 +420,7 @@
     "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
     "nodeSHA256": "dacbb57e259c6953091e4aa96a49ad1588d2d15932d979e18fc2fe76a8e956c0",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/setup-go for the reviewed cloud-SDK audit toolchain."
   },
   {
@@ -516,7 +428,7 @@
     "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
     "nodeSHA256": "d6511486d7f0d7044978b8c71828add2508e72a9897718b7a91fdf151ffb3c49",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e for reviewed ci.yml automation."
   },
   {
@@ -524,7 +436,7 @@
     "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "nodeSHA256": "ca91e4ba0f44424faa0e3ae9defdf91020f32ab2c7db3037bbd0eacb201d863e",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed ci.yml automation."
   },
   {
@@ -532,7 +444,7 @@
     "uses": "codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe",
     "nodeSHA256": "ab5622108de60639f5c212053069c6d25973e77217a2041449482b2a27946dff",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe for reviewed ci.yml automation."
   },
   {
@@ -540,7 +452,7 @@
     "uses": "golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee",
     "nodeSHA256": "7b19a0cedb652d7edf63d3cf166019ba1381eb67732ad528faa80968b0cf7607",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
   },
   {
@@ -548,7 +460,7 @@
     "uses": "golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee",
     "nodeSHA256": "b321ed17902672948adab7ee7bb4adbdb4773afaf0d9650c644b50dcd5d2cec1",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "staged",
+    "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
   },
   {
