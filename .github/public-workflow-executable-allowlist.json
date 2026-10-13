@@ -44,7 +44,7 @@
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
     "state": "staged",
-    "sha256": "c34e97508897df49adcda3dce70a759f418d8dd7d0539ded06156c225baff281",
+    "sha256": "42322514e16c01f473d3170d95ae39556a09aa06c93c3ab3c97da17b19e2d1c3",
     "rationale": "Runs the credential-free cloud/Kubernetes boundary audit mutation suite."
   },
   {
