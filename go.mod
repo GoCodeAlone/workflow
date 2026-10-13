@@ -16,7 +16,7 @@ require (
 	github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0
 	github.com/GoCodeAlone/yaegi v0.17.2
 	github.com/IBM/sarama v1.50.3
-	github.com/alicebob/miniredis/v2 v2.38.0
+	github.com/alicebob/miniredis/v2 v2.39.0
 	github.com/cucumber/godog v0.15.1
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
