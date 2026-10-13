@@ -1,19 +1,282 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/syntax"
 )
+
+func groupedClonePolicy(t *testing.T, policy trustPolicy) trustPolicy {
+	t.Helper()
+	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result trustPolicy
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func groupedPolicyFixtures() (trustPolicy, trustPolicy, trustPolicy, map[string]string, map[string]string, map[string]bool) {
+	base := trustPolicy{}
+	oldContexts, newContexts, present := map[string]string{}, map[string]string{}, map[string]bool{}
+	paths := []string{".github/workflows/ci.yml", ".github/workflows/benchmark.yml"}
+	for index, workflow := range paths {
+		oldContext := strings.Repeat(strconv.Itoa(index*2+1), 64)
+		oldContexts[workflow], present[workflow] = oldContext, true
+		newContexts[workflow] = strings.Repeat(strconv.Itoa(index*2+2), 64)
+		base.Presence = append(base.Presence, trustGroup{workflow, oldContext, "active", "present"})
+		base.Executables = append(base.Executables, executableEntry{"scripts/check-" + strconv.Itoa(index) + ".sh", workflow, oldContext, strings.Repeat("a", 64), "active", "Reviewed executable."})
+		base.Commands = append(base.Commands, commandEntry{workflow, "go", strings.Repeat("b", 64), oldContext, "active", "Reviewed command."})
+		base.Actions = append(base.Actions, actionEntry{workflow, "actions/checkout@" + strings.Repeat("c", 40), strings.Repeat("d", 64), oldContext, "active", "Reviewed action."})
+	}
+	staged := trustPolicy{Presence: append([]trustGroup(nil), base.Presence...), Executables: append([]executableEntry(nil), base.Executables...), Commands: append([]commandEntry(nil), base.Commands...), Actions: append([]actionEntry(nil), base.Actions...)}
+	for index, workflow := range paths {
+		context := newContexts[workflow]
+		staged.Presence = append(staged.Presence, trustGroup{workflow, context, "staged", "present"})
+		staged.Executables = append(staged.Executables, executableEntry{"scripts/check-" + strconv.Itoa(index) + ".sh", workflow, context, strings.Repeat("e", 64), "staged", "Replacement executable."})
+		staged.Commands = append(staged.Commands, commandEntry{workflow, "go", strings.Repeat("f", 64), context, "staged", "Replacement command."})
+		staged.Actions = append(staged.Actions, actionEntry{workflow, "actions/checkout@" + strings.Repeat("c", 40), strings.Repeat("9", 64), context, "staged", "Replacement action."})
+	}
+	promoted := staged
+	for _, group := range staged.Presence {
+		if group.State == "staged" {
+			promoted = promotedTrustPolicy(promoted, group)
+		}
+	}
+	return base, staged, promoted, oldContexts, newContexts, present
+}
+
+func TestGroupedTrustLifecycle(t *testing.T) {
+	base, staged, promoted, oldContexts, newContexts, present := groupedPolicyFixtures()
+	for _, tc := range []struct {
+		name            string
+		base, candidate trustPolicy
+		before, after   map[string]string
+		reject          bool
+	}{
+		{"complete distinct-path stage", base, staged, oldContexts, oldContexts, false},
+		{"complete adoption", staged, staged, oldContexts, newContexts, false},
+		{"complete realized promotion", staged, promoted, newContexts, newContexts, false},
+		{"stage and adopt", base, staged, oldContexts, newContexts, true},
+		{"premature promotion", staged, promoted, oldContexts, oldContexts, true},
+		{"drop unused stage", staged, base, oldContexts, oldContexts, true},
+		{"revert adopted bytes before promotion", staged, staged, newContexts, oldContexts, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := validateTrustTransition(tc.base, tc.candidate, tc.before, tc.after, present, present)
+			if (len(findings) > 0) != tc.reject {
+				t.Fatalf("findings=%v reject=%v", findings, tc.reject)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*trustPolicy)
+	}{
+		{"duplicate staged path", func(p *trustPolicy) { p.Presence = append(p.Presence, p.Presence[2]) }},
+		{"existing unused stage", func(p *trustPolicy) {
+			p.Presence = append(p.Presence, trustGroup{p.Presence[2].Path, strings.Repeat("a", 64), "staged", "present"})
+		}},
+		{"drops active row", func(p *trustPolicy) { p.Executables = p.Executables[1:] }},
+		{"changes retained rationale", func(p *trustPolicy) { p.Actions[0].Rationale = "Different metadata." }},
+		{"orphan executable", func(p *trustPolicy) { p.Executables[2].WorkflowPath = ".github/workflows/other.yml" }},
+		{"mixed context", func(p *trustPolicy) { p.Commands[2].ContextSHA256 = strings.Repeat("a", 64) }},
+		{"invalid executable digest", func(p *trustPolicy) { p.Executables[2].SHA256 = "bad" }},
+		{"duplicate executable", func(p *trustPolicy) { p.Executables = append(p.Executables, p.Executables[2]) }},
+		{"mutable action", func(p *trustPolicy) { p.Actions[2].Uses = "actions/checkout@main" }},
+		{"categorical command", func(p *trustPolicy) { p.Commands[2].Command = "eval" }},
+		{"nonempty secrets", func(p *trustPolicy) {
+			p.Secrets = []allowEntry{{Path: p.Presence[2].Path, Secret: "TOKEN", State: "staged"}}
+		}},
+		{"missing group with retained rows", func(p *trustPolicy) { p.Presence = p.Presence[:3] }},
+		{"already active context", func(p *trustPolicy) { p.Presence[2].ContextSHA256 = p.Presence[0].ContextSHA256 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := groupedClonePolicy(t, staged)
+			tc.mutate(&candidate)
+			if findings := validateTrustTransition(base, candidate, oldContexts, oldContexts, present, present); len(findings) == 0 {
+				t.Fatal("malformed batch accepted")
+			}
+		})
+	}
+	t.Run("partial promotion rows", func(t *testing.T) {
+		candidate := groupedClonePolicy(t, promoted)
+		candidate.Executables[0].State = "staged"
+		if findings := validateTrustTransition(staged, candidate, newContexts, newContexts, present, present); len(findings) == 0 {
+			t.Fatal("partial row promotion accepted")
+		}
+	})
+}
+
+func TestUnusedStagedExecutableCorrection(t *testing.T) {
+	_, staged, _, oldContexts, newContexts, present := groupedPolicyFixtures()
+	corrected := groupedClonePolicy(t, staged)
+	corrected.Executables[2].SHA256 = strings.Repeat("7", 64)
+	t.Run("one unused context SHA only", func(t *testing.T) {
+		if findings := validateTrustTransition(staged, corrected, oldContexts, oldContexts, present, present); len(findings) != 0 {
+			t.Fatalf("correction rejected: %v", findings)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		mutate func(*trustPolicy)
+	}{
+		{"active row", func(p *trustPolicy) { p.Executables[0].SHA256 = strings.Repeat("7", 64) }},
+		{"two contexts", func(p *trustPolicy) { p.Executables[3].SHA256 = strings.Repeat("7", 64) }},
+		{"rationale drift", func(p *trustPolicy) { p.Executables[2].Rationale = "Drift." }},
+		{"row order", func(p *trustPolicy) { p.Executables[2], p.Executables[3] = p.Executables[3], p.Executables[2] }},
+		{"membership deletion", func(p *trustPolicy) { p.Executables = p.Executables[:3] }},
+		{"membership addition", func(p *trustPolicy) { p.Executables = append(p.Executables, p.Executables[2]) }},
+		{"path drift", func(p *trustPolicy) { p.Executables[2].Path = "scripts/new.sh" }},
+		{"state drift", func(p *trustPolicy) { p.Executables[2].State = "active" }},
+		{"context drift", func(p *trustPolicy) { p.Executables[2].ContextSHA256 = strings.Repeat("8", 64) }},
+		{"invalid digest", func(p *trustPolicy) { p.Executables[2].SHA256 = "bad" }},
+		{"action drift", func(p *trustPolicy) { p.Actions[2].NodeSHA256 = strings.Repeat("7", 64) }},
+		{"command drift", func(p *trustPolicy) { p.Commands[2].StatementSHA256 = strings.Repeat("7", 64) }},
+		{"presence drift", func(p *trustPolicy) { p.Presence[2].Presence = "absent"; p.Presence[2].ContextSHA256 = "" }},
+		{"secret drift", func(p *trustPolicy) { p.Secrets = []allowEntry{{Secret: "TOKEN"}} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := groupedClonePolicy(t, corrected)
+			tc.mutate(&candidate)
+			if findings := validateTrustTransition(staged, candidate, oldContexts, oldContexts, present, present); len(findings) == 0 {
+				t.Fatal("non-SHA-only correction accepted")
+			}
+		})
+	}
+	t.Run("selected staged context", func(t *testing.T) {
+		if findings := validateTrustTransition(staged, corrected, newContexts, newContexts, present, present); len(findings) == 0 {
+			t.Fatal("realized staged executable correction accepted")
+		}
+	})
+	t.Run("simultaneous adoption", func(t *testing.T) {
+		if findings := validateTrustTransition(staged, corrected, oldContexts, newContexts, present, present); len(findings) == 0 {
+			t.Fatal("correction and adoption accepted")
+		}
+	})
+}
+
+func groupedRepositoryFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	inputs := filepath.Join("..", "..", "..")
+	var manifest authorityManifest
+	data, err := os.ReadFile(filepath.Join(inputs, ".github/public-workflow-authority.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]bool{}
+	for _, bundle := range manifest.Bundles {
+		for _, file := range bundle.Files {
+			paths[file.Path] = true
+		}
+	}
+	for _, pattern := range []string{".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/public-workflow-*.json"} {
+		matches, err := filepath.Glob(filepath.Join(inputs, pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, file := range matches {
+			relative, err := filepath.Rel(inputs, file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths[relative] = true
+		}
+	}
+	for name := range paths {
+		data, err := os.ReadFile(filepath.Join(inputs, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		destination := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(filepath.Join(inputs, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(destination, data, info.Mode().Perm()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inventory, err := authorityInventory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(authorityManifest{Version: 1, Bundles: []authorityBundle{{State: "active", Files: inventory}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".github/public-workflow-authority.json"), encoded, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestTrustOnlyTransitionPreservesRawWorkflowBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(string) error
+		reject bool
+	}{
+		{"unchanged bytes", func(string) error { return nil }, false},
+		{"comment drift", func(root string) error {
+			path := filepath.Join(root, ".github/workflows/ci.yml")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(path, append(data, []byte("\n# unrelated drift\n")...), 0644)
+		}, true},
+		{"mode drift", func(root string) error { return os.Chmod(filepath.Join(root, ".github/workflows/ci.yml"), 0755) }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, candidate := groupedRepositoryFixture(t), groupedRepositoryFixture(t)
+			policy, err := loadTrustPolicy(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policy.Presence = append(policy.Presence, trustGroup{Path: ".github/workflows/public-workflow-policy.yml", ContextSHA256: strings.Repeat("7", 64), State: "staged", Presence: "present"})
+			data, err := json.Marshal(policy.Presence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(candidate, ".github/public-workflow-presence-allowlist.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.mutate(candidate); err != nil {
+				t.Fatal(err)
+			}
+			findings, err := validateRepositoryAuthority(base, candidate, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(findings) > 0) != tc.reject {
+				t.Fatalf("findings=%v reject=%v", findings, tc.reject)
+			}
+		})
+	}
+}
 
 func TestSHA256HexPatternIsCompiledOnce(t *testing.T) {
 	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
@@ -1445,5 +1708,72 @@ func TestAuthorityInventoryRejectsSymlinkedFixedAncestor(t *testing.T) {
 	}
 	if _, err := authorityInventory(root); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("symlinked fixed-file ancestor error = %v", err)
+	}
+}
+
+// Run only the real dependency-fixture function. Calling the full harness from
+// its own policy-tool test would recurse into go test.
+func TestPolicyFetchFixtureOwnsEventBoundary(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	harness, err := os.ReadFile(filepath.Join(root, "scripts", "test-check-public-workflow-policy.sh"))
+	if err != nil {
+		t.Fatalf("read policy mutation harness: %v", err)
+	}
+	const signature = "\nrun_candidate_fetch() {\n"
+	if strings.Count(string(harness), signature) != 1 {
+		t.Fatal("policy mutation harness must define one fetch fixture")
+	}
+	start := strings.Index(string(harness), signature) + 1
+	end := strings.Index(string(harness)[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("fetch fixture closing boundary missing")
+	}
+	fixture := string(harness)[start : start+end+3]
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatalf("find bash: %v", err)
+	}
+	const probe = `set -euo pipefail
+[[ "${EVENT_NAME}:${BASE_REF}:${EVENT_REF}" == pull_request_target:main:refs/heads/main ]] || exit 1
+[[ "$CANDIDATE_REPOSITORY" == example/repo ]] || exit 1
+[[ "$CANDIDATE_SHA" == 0123456789012345678901234567890123456789 ]] || exit 1
+[[ "$GIT_ASKPASS" == /bin/false ]] || exit 1
+[[ "$GIT_CONFIG_GLOBAL" == /dev/null ]] || exit 1
+[[ "$GIT_CONFIG_NOSYSTEM" == 1 ]] || exit 1
+[[ "$GIT_TERMINAL_PROMPT" == 0 ]] || exit 1
+printf 'fixture-event-boundary-ok\n'
+`
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "unset event variables"},
+		{name: "hostile inherited event", env: []string{
+			"EVENT_NAME=workflow_run", "BASE_REF=develop", "EVENT_REF=refs/tags/v0.0.0",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leaf := t.TempDir()
+			probePath := filepath.Join(leaf, "fetch-boundary.sh")
+			if err := os.WriteFile(probePath, []byte(probe), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(leaf, "fake-bin"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			body := "set -euo pipefail\n" + fixture + `
+fake_bin="$1/fake-bin"
+candidate_fetch_script="$2"
+run_candidate_fetch "$1/work" example/repo 0123456789012345678901234567890123456789 "$1/archive"
+`
+			cmd := exec.CommandContext(ctx, bash, "-c", body, "fetch-fixture-test", leaf, probePath)
+			cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, tc.env...)
+			out, err := cmd.CombinedOutput()
+			if err != nil || string(out) != "fixture-event-boundary-ok\n" {
+				t.Fatalf("fetch fixture must own its event tuple: err=%v output=%q", err, out)
+			}
+		})
 	}
 }
