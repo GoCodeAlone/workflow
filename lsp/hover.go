@@ -149,7 +149,7 @@ func hoverConfigField(reg *Registry, moduleType, field string) *protocol.Hover {
 
 	for _, k := range info.ConfigKeys {
 		if k == field {
-			return markdownHover(fmt.Sprintf("**%s** — config key for `%s`", field, moduleType))
+			return markdownHover("**" + field + "** — config key for `" + moduleType + "`")
 		}
 	}
 	return nil
@@ -235,7 +235,7 @@ func hoverStepConfigField(reg *Registry, stepType, field string) *protocol.Hover
 	// Fallback for config keys without rich metadata.
 	for _, k := range info.ConfigKeys {
 		if k == field {
-			return markdownHover(fmt.Sprintf("**%s** — config key for `%s`", field, stepType))
+			return markdownHover("**" + field + "** — config key for `" + stepType + "`")
 		}
 	}
 	return nil
@@ -275,14 +275,14 @@ func hoverTemplateStepOutput(reg *Registry, doc *Document, ctx PositionContext, 
 	}
 
 	if doc == nil {
-		return markdownHover(fmt.Sprintf("**Step:** `%s`\n\nStep output data.", tp.StepName))
+		return markdownHover("**Step:** `" + tp.StepName + "`\n\nStep output data.")
 	}
 
 	pctx := BuildPipelineContext(reg, doc, ctx.Line)
 
 	stepCtx := pctx.Steps[tp.StepName]
 	if stepCtx == nil {
-		return markdownHover(fmt.Sprintf("**Step:** `%s`\n\nNo output info available (step may not precede current position).", tp.StepName))
+		return markdownHover("**Step:** `" + tp.StepName + "`\n\nNo output info available (step may not precede current position).")
 	}
 
 	// Show a specific field if one is targeted.
