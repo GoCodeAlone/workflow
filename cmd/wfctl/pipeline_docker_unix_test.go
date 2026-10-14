@@ -37,6 +37,7 @@ type pipelineDockerFixture struct {
 	HelperBlocks    bool                    `json:"helper_blocks"`
 	Group           pipelineProcessIdentity `json:"group"`
 	LateCreate      bool                    `json:"late_create"`
+	WaitStatus      string                  `json:"wait_status,omitempty"`
 }
 
 type pipelineDockerInvocation struct {
@@ -154,6 +155,8 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 		os.Exit(0)
 	}
 	switch command {
+	case "pull":
+		// Synthetic setup transition only; no image or container is fetched.
 	case "context":
 		fmt.Print(fixture.Context)
 	case "info":
@@ -192,7 +195,11 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 			_ = os.WriteFile(filepath.Join(dir, "fixture.json"), data, 0600)
 		}
 	case "wait":
-		fmt.Println("0")
+		if fixture.WaitStatus != "" {
+			fmt.Println(fixture.WaitStatus)
+		} else {
+			fmt.Println("0")
+		}
 	case "create":
 		id := strings.Repeat("a", 64)
 		for i, arg := range commandArgs {
@@ -215,6 +222,16 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 		fmt.Print("captured output")
 	default:
 		os.Exit(94)
+	}
+	// Rotate only after the preceding command has succeeded. The next real
+	// client's identity preflight then fails before it can start another CLI.
+	if (command == "create" && fixture.Fail == "after-create-server-change") ||
+		(command == "start" && fixture.Fail == "after-start-server-change") {
+		fixture.ServerID = "synthetic-rotated-daemon"
+		updated, err := json.Marshal(fixture)
+		if err != nil || os.WriteFile(filepath.Join(dir, "fixture.json"), updated, 0600) != nil {
+			os.Exit(99)
+		}
 	}
 	os.Exit(0)
 }

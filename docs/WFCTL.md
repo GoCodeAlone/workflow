@@ -1376,6 +1376,20 @@ values, and invalid UTF-8 fail. Represent identifiers and counters as decimal
 strings. Failure emits one generic error record and exits nonzero; its payload
 is defined in `docs/schemas/wfctl-pipeline-record-v1.schema.json`.
 
+For synthetic record-host troubleshooting, `WFCTL_RECORD_DIAGNOSTICS=1` opts
+the parent into one failure-only stderr line prefixed
+`WFCTL_RECORD_DIAGNOSTIC_V1`. Its JSON contains fixed phase/event/cleanup
+names, bounded child/Docker CLI/container exit fields and context flags.
+An unknown exit is `-1`; `docker_operation` names the attempted operation,
+and a Docker CLI exit does not establish a container exit. These operation
+statuses are frozen at the first observed failure, with later child-wait and
+cleanup outcomes reported separately. Success and
+the default mode emit no diagnostic line. This opt-in is removed from the
+isolated child's environment; public stdout records remain unchanged.
+Reports contain no raw errors, workload output, environment values or
+resource identities. The live synthetic test logs only validated statuses,
+fixture digests and bounded cleanup counts on failure.
+
 Before loading application config, the parent locks private cleanup state at
 `$XDG_STATE_HOME/wfctl/pipeline-cleanup` (default
 `~/.local/state/wfctl/pipeline-cleanup`), reconciles retained executions, and

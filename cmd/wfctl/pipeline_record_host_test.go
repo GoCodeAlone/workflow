@@ -145,6 +145,10 @@ func runPipelineRecordHost(t *testing.T, binary, config, pluginDir string, extra
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	if ctx.Err() != nil {
+		if os.Getenv(pipelineRecordDiagnosticEnv) == "1" {
+			logSafePipelineRecordDiagnostic(t, stderr.Bytes())
+			t.Fatalf("built wfctl did not finish within its deadline: host_exit=%d", pipelineRecordHostExit(err))
+		}
 		t.Fatalf("built wfctl did not finish within its deadline: %v\nstdout=%s\nstderr=%s", ctx.Err(), stdout.Bytes(), stderr.Bytes())
 	}
 	return stdout.Bytes(), stderr.Bytes(), err
@@ -556,10 +560,16 @@ func assertPipelineRecordHostJournalEmpty(t *testing.T, root string) {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(root, "state", "wfctl", "pipeline-cleanup"))
 	if err != nil {
+		if os.Getenv(pipelineRecordDiagnosticEnv) == "1" {
+			t.Fatal("host cleanup state unavailable")
+		}
 		t.Fatalf("host never established cleanup state: %v", err)
 	}
 	for _, entry := range entries {
 		if strings.HasSuffix(entry.Name(), ".json") {
+			if os.Getenv(pipelineRecordDiagnosticEnv) == "1" {
+				t.Fatal("host retained a cleanup journal")
+			}
 			t.Fatalf("host retained a journal after its empty fake-daemon cleanup: %s", entry.Name())
 		}
 	}
