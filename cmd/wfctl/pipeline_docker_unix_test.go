@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -835,8 +836,10 @@ func TestPipelineDockerParentSIGKILLStopsLateCreateBeforeEmptyProbe(t *testing.T
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		if data, err := os.ReadFile(filepath.Join(dir, "helper.pid")); err == nil {
-			_, _ = fmt.Sscan(string(data), &helperPID)
-			break
+			if pid, parseErr := strconv.Atoi(string(data)); parseErr == nil && pid > 0 {
+				helperPID = pid
+				break
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
