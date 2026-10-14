@@ -115,7 +115,7 @@ func pipelineRecordHostExit(err error) int {
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ProcessState != nil {
-		return pipelineRecordDiagnosticExit(exit.ProcessState.ExitCode())
+		return pipelineRecordDiagnosticExit(exit.ExitCode())
 	}
 	return -1
 }
@@ -538,12 +538,16 @@ func TestPipelineRecordDiagnosticsImageSetupRedaction(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, executable, "-test.run=^TestPipelineRecordDiagnosticsImageSetupHelper$")
+			command.Dir = directory
 			// This setup path invokes Docker directly, whose test helper records
-			// its environment. Supply only fixture and runtime settings.
+			// its environment. It needs only the fixed Docker wrapper, whose
+			// interpreter and test binary are absolute, and no Go toolchain.
 			command.Env = []string{
-				"PATH=" + strings.Join([]string{directory, "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+				"PATH=" + directory,
 				"HOME=" + directory,
 				"TMPDIR=" + directory,
+				"GOENV=off", "GOWORK=off", "GOTOOLCHAIN=local",
+				"GOPROXY=off", "GOSUMDB=off", "GOVCS=*:off",
 				"GORACE=" + os.Getenv("GORACE"),
 				"WFCTL_RECORD_DIAGNOSTIC_IMAGE_SETUP=1",
 				pipelineRecordDiagnosticEnv + "=",
@@ -570,6 +574,11 @@ func TestPipelineRecordDiagnosticsImageSetupRedaction(t *testing.T) {
 			for _, secret := range []string{ambientCanary, "GITHUB_TOKEN", "NODE_AUTH_TOKEN"} {
 				if bytes.Contains(calls, []byte(secret)) {
 					t.Fatal("image setup copied an ambient credential into its private capture")
+				}
+			}
+			for _, relative := range []string{"go/pkg/mod", ".cache/go-build", "Library/Caches/go-build"} {
+				if _, err := os.Lstat(filepath.Join(directory, filepath.FromSlash(relative))); !os.IsNotExist(err) {
+					t.Fatal("synthetic image setup did not exclude private Go cache creation")
 				}
 			}
 		})
