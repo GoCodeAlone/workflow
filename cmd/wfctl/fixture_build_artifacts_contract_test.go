@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -821,4 +822,25 @@ func TestFixtureBuildArtifactsObservationReuse(t *testing.T) {
 		t.Fatalf("reused canceled observation retained prior phases: %s", observation)
 	}
 	fixtureControlCounts(t, &c, 2, 1, 1)
+}
+
+func TestDiscoveryBuildUsesInvokingToolchain(t *testing.T) {
+	root := fixtureControlSource(t)
+	fixtureControlWrite(t, filepath.Join(root, "main.go"), "package main\nimport (\"embed\"; \"fmt\"; \"runtime\")\nvar _ embed.FS\n//go:embed asset.txt\nvar asset string\nfunc main(){fmt.Printf(\"%s:%s\",runtime.Version(),asset)}\n")
+	fake := t.TempDir()
+	launcher := filepath.Join(fake, "go")
+	fixtureControlWrite(t, launcher, "#!/bin/sh\nprintf '%s\\n' 'wrong-path-go-launcher' >&2\nexit 1\n")
+	if err := os.Chmod(launcher, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output := filepath.Join(t.TempDir(), "executable")
+	discoveryBuild(t, root, output, ".")
+	got, err := exec.CommandContext(t.Context(), output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("actual invoking-compiler artifact: %v", err)
+	}
+	if want := runtime.Version() + ":one"; string(got) != want {
+		t.Fatalf("discovery selected compiler output=%q, want %q", got, want)
+	}
 }
