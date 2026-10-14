@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"debug/buildinfo"
 	"errors"
 	"fmt"
 	"os"
@@ -927,15 +926,20 @@ func TestRegistryFallbackUsesInvokingToolchain(t *testing.T) {
 			}
 			t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
 		}
-		binary := registrySyncActualCLIBinary(t, runtime.GOOS, "http://fixture.invalid")
-		info, err := buildinfo.ReadFile(binary)
+		ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+		defer cancel()
+		build := registrySyncHostBuildCommand(t, ctx, runtime.GOOS, filepath.Join(t.TempDir(), "wfctl"), "http://fixture.invalid")
+		probe := exec.CommandContext(ctx, build.Path, "env", "GOVERSION")
+		probe.Env = build.Env
+		probe.WaitDelay = 5 * time.Second
+		got, err := probe.CombinedOutput()
 		if err != nil {
-			t.Fatalf("read actual registry CLI build metadata: %v", err)
+			t.Fatalf("probe registry build compiler: %v\n%s", err, got)
 		}
-		if info.GoVersion != runtime.Version() {
-			t.Fatalf("registry selected actual CLI compiler=%q, want %q", info.GoVersion, runtime.Version())
+		if version := strings.TrimSpace(string(got)); version != runtime.Version() {
+			t.Fatalf("registry selected compiler probe=%q, want %q", version, runtime.Version())
 		}
-		t.Logf("registry actual CLI compiler=%s", info.GoVersion)
+		t.Logf("registry compiler probe=%s", runtime.Version())
 		return
 	}
 	self, err := os.Executable()
@@ -959,8 +963,8 @@ func TestRegistryFallbackUsesInvokingToolchain(t *testing.T) {
 			if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
 				t.Fatalf("registry compiler control did not finish: %v, %v", ctx.Err(), err)
 			}
-			if err != nil || !strings.Contains(string(got), "registry actual CLI compiler="+runtime.Version()) {
-				t.Fatalf("registry actual CLI compiler subprocess: %v\n%s", err, got)
+			if err != nil || !strings.Contains(string(got), "registry compiler probe="+runtime.Version()) {
+				t.Fatalf("registry compiler subprocess: %v\n%s", err, got)
 			}
 		})
 	}

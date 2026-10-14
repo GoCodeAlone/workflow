@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"debug/buildinfo"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,12 +50,26 @@ func registrySyncActualCLIBinary(t *testing.T, host, apiURL string) string {
 	binary = filepath.Join(t.TempDir(), "wfctl")
 	buildCtx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	build := exec.CommandContext(buildCtx, fixtureInvokingGoBinary(t), registrySyncHostBuildArguments(host, binary, apiURL)...)
-	build.Env = registrySyncHostEnvironment(os.Environ())
+	build := registrySyncHostBuildCommand(t, buildCtx, host, binary, apiURL)
 	if out, err := buildFixtureArtifact(t, buildCtx, build, "../..", binary); err != nil {
 		t.Fatalf("build actual CLI: %v\n%s", err, out)
 	}
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("read actual registry CLI build metadata: %v", err)
+	}
+	if info.GoVersion != runtime.Version() {
+		t.Fatalf("registry selected actual CLI compiler=%q, want %q", info.GoVersion, runtime.Version())
+	}
+	t.Logf("registry actual CLI compiler=%s", info.GoVersion)
 	return binary
+}
+
+func registrySyncHostBuildCommand(t *testing.T, ctx context.Context, host, binary, apiURL string) *exec.Cmd {
+	t.Helper()
+	build := exec.CommandContext(ctx, fixtureInvokingGoBinary(t), registrySyncHostBuildArguments(host, binary, apiURL)...)
+	build.Env = registrySyncHostEnvironment(os.Environ())
+	return build
 }
 
 func registrySyncHostBuildArguments(host, binary, apiURL string) []string {
