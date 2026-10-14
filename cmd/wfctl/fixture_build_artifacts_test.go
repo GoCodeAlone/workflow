@@ -16,7 +16,25 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// Values come only from the existing effective Go probe. No environment,
+// arguments, config or arbitrary error text enters diagnostic output.
+type fixtureBuildObservation struct {
+	goVersion, goRoot, goToolDir, goOS, goArch, toolchain string
+	probeAttempted, probeFailed, keyFailed, failed        bool
+	probeElapsed, keyElapsed, buildElapsed, totalElapsed  time.Duration
+	buildRuns                                             int
+	contextStatus                                         string
+}
+
+func (o fixtureBuildObservation) String() string {
+	return fmt.Sprintf("fixture build diagnostic: compiler=%q goroot=%q tooldir=%q os=%q arch=%q toolchain=%q probe_attempted=%t probe_failed=%t probe=%s key_total=%s build=%s total=%s build_runs=%d key_failed=%t failed=%t context=%s",
+		o.goVersion, o.goRoot, o.goToolDir, o.goOS, o.goArch, o.toolchain,
+		o.probeAttempted, o.probeFailed, o.probeElapsed, o.keyElapsed,
+		o.buildElapsed, o.totalElapsed, o.buildRuns, o.keyFailed, o.failed, o.contextStatus)
+}
 
 type fixtureBuildCounts struct{ builds, hits, bypasses int }
 
@@ -52,10 +70,43 @@ var fixtureNativeOverrideNames = []string{
 // VCS state must remain immutable for this invocation; the suite driver checks
 // them before/after. Unclosed inputs take the original command, unchanged.
 func (c *fixtureBuildArtifacts) build(ctx context.Context, cmd *exec.Cmd, sourceRoot, output string, run func(*exec.Cmd) ([]byte, error)) ([]byte, error) {
+	return c.buildObserved(ctx, cmd, sourceRoot, output, run, nil)
+}
+
+func (c *fixtureBuildArtifacts) buildObserved(ctx context.Context, cmd *exec.Cmd, sourceRoot, output string, run func(*exec.Cmd) ([]byte, error), observation *fixtureBuildObservation) (data []byte, resultErr error) {
+	if observation != nil {
+		*observation = fixtureBuildObservation{}
+		started := time.Now()
+		defer func() {
+			observation.totalElapsed = time.Since(started)
+			observation.failed = resultErr != nil
+			switch {
+			case ctx.Err() == nil:
+				observation.contextStatus = "none"
+			case errors.Is(ctx.Err(), context.Canceled):
+				observation.contextStatus = "canceled"
+			case errors.Is(ctx.Err(), context.DeadlineExceeded):
+				observation.contextStatus = "deadline"
+			default:
+				observation.contextStatus = "other"
+			}
+		}()
+		originalRun := run
+		run = func(cmd *exec.Cmd) ([]byte, error) {
+			observation.buildRuns++
+			started := time.Now()
+			defer func() { observation.buildElapsed += time.Since(started) }()
+			return originalRun(cmd)
+		}
+	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	key, outputIndex, err := fixtureBuildKey(ctx, cmd, sourceRoot)
+	key, outputIndex, err := fixtureBuildKeyObserved(ctx, cmd, sourceRoot, observation)
+	if observation != nil {
+		observation.keyFailed = err != nil
+	}
 	if err != nil {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -188,7 +239,9 @@ func (c *fixtureBuildArtifacts) close() error {
 
 func buildFixtureArtifact(t *testing.T, ctx context.Context, cmd *exec.Cmd, sourceRoot, output string) ([]byte, error) {
 	t.Helper()
-	data, err := invocationFixtureBuilds.build(ctx, cmd, sourceRoot, output, (*exec.Cmd).CombinedOutput)
+	var observation fixtureBuildObservation
+	data, err := invocationFixtureBuilds.buildObserved(ctx, cmd, sourceRoot, output, (*exec.Cmd).CombinedOutput, &observation)
+	t.Logf("%s", observation)
 	counts := invocationFixtureBuilds.stats()
 	t.Logf("fixture artifacts: builds=%d hits=%d bypasses=%d", counts.builds, counts.hits, counts.bypasses)
 	return data, err
@@ -230,6 +283,16 @@ func (r fixtureContextReader) Read(p []byte) (int, error) {
 }
 
 func fixtureBuildKey(ctx context.Context, cmd *exec.Cmd, sourceRoot string) (string, int, error) {
+	return fixtureBuildKeyObserved(ctx, cmd, sourceRoot, nil)
+}
+
+func fixtureBuildKeyObserved(ctx context.Context, cmd *exec.Cmd, sourceRoot string, observation *fixtureBuildObservation) (string, int, error) {
+	if observation != nil {
+		started := time.Now()
+		// Key time includes its probe; build time is a separate interval.
+		defer func() { observation.keyElapsed = time.Since(started) }()
+	}
+
 	root, err := filepath.Abs(sourceRoot)
 	if err != nil {
 		return "", 0, err
@@ -303,13 +366,27 @@ func fixtureBuildKey(ctx context.Context, cmd *exec.Cmd, sourceRoot string) (str
 	}
 	probe := exec.CommandContext(ctx, cmd.Path, "env", "-json")
 	probe.Dir, probe.Env, probe.WaitDelay = cmd.Dir, cmd.Env, cmd.WaitDelay
+	var probeStarted time.Time
+	if observation != nil {
+		observation.probeAttempted = true
+		probeStarted = time.Now()
+	}
 	data, err := probe.Output()
+	if observation != nil {
+		observation.probeElapsed = time.Since(probeStarted)
+		observation.probeFailed = err != nil
+	}
 	if err != nil {
 		return "", 0, err
 	}
 	var effective map[string]string
 	if err := json.Unmarshal(data, &effective); err != nil {
 		return "", 0, err
+	}
+	if observation != nil {
+		observation.goVersion, observation.goRoot = effective["GOVERSION"], effective["GOROOT"]
+		observation.goToolDir, observation.toolchain = effective["GOTOOLDIR"], effective["GOTOOLCHAIN"]
+		observation.goOS, observation.goArch = effective["GOOS"], effective["GOARCH"]
 	}
 	if flags := effective["GOFLAGS"]; flags != "" && flags != "-mod=readonly" {
 		return "", 0, errors.New("unclosed effective Go flags")

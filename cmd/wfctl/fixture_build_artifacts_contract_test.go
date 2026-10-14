@@ -642,3 +642,183 @@ func TestFixtureBuildArtifactsOrdinaryFailureTeardown(t *testing.T) {
 		t.Fatalf("invocation root survived ordinary test failure: %v", err)
 	}
 }
+
+func TestFixtureBuildArtifactsObservation(t *testing.T) {
+	const secret = "private-observation-input-must-not-be-logged"
+	tests := []struct {
+		name           string
+		beforeCancel   bool
+		beforeDeadline bool
+		missingProbe   bool
+		duringCancel   bool
+		bypass         bool
+		fail           bool
+	}{
+		{name: "success-and-cache-reuse"},
+		{name: "build-failure", fail: true},
+		{name: "build-cancellation", duringCancel: true},
+		{name: "already-canceled", beforeCancel: true},
+		{name: "already-expired-deadline", beforeDeadline: true},
+		{name: "failed-probe", missingProbe: true, fail: true},
+		{name: "unobserved-bypass", bypass: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var c fixtureBuildArtifacts
+			t.Cleanup(func() {
+				if err := c.close(); err != nil {
+					t.Error(err)
+				}
+			})
+			root := fixtureControlSource(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			if tt.beforeDeadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(t.Context(), 0)
+			}
+			defer cancel()
+			if tt.beforeCancel {
+				cancel()
+			}
+			output := filepath.Join(t.TempDir(), "executable")
+			cmd := fixtureControlCommand(ctx, root, output)
+			cmd.Env = append(cmd.Env, "FIXTURE_OBSERVATION_SECRET="+secret)
+			if tt.bypass {
+				cmd.Args = append(cmd.Args, "-unknown-fixture-flag")
+			}
+			if tt.missingProbe {
+				cmd.Path = filepath.Join(t.TempDir(), "missing-go")
+			}
+			privateErr := errors.New(secret)
+			calls := 0
+			run := func(cmd *exec.Cmd) ([]byte, error) {
+				calls++
+				if tt.duringCancel {
+					cancel()
+					return []byte("canceled output"), ctx.Err()
+				}
+				if tt.fail {
+					return []byte("original failure output"), privateErr
+				}
+				return fixtureControlSentinel(cmd)
+			}
+			var observation fixtureBuildObservation
+			data, err := c.buildObserved(ctx, cmd, root, output, run, &observation)
+			if tt.fail && (!errors.Is(err, privateErr) || string(data) != "original failure output") {
+				t.Fatalf("original failure bytes/error changed: %q %v", data, err)
+			}
+			if (tt.beforeCancel || tt.duringCancel) && !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation changed: %v", err)
+			}
+			if tt.beforeDeadline && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("deadline changed: %v", err)
+			}
+			if !tt.fail && !tt.beforeCancel && !tt.beforeDeadline && !tt.duringCancel && err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := 1
+			if tt.beforeCancel || tt.beforeDeadline {
+				wantCalls = 0
+			}
+			if calls != wantCalls || observation.buildRuns != wantCalls || observation.failed != (err != nil) {
+				t.Fatalf("run/result observation: calls=%d observation=%s", calls, observation)
+			}
+			wantContext := "none"
+			if tt.beforeCancel || tt.duringCancel {
+				wantContext = "canceled"
+			}
+			if tt.beforeDeadline {
+				wantContext = "deadline"
+			}
+			if observation.contextStatus != wantContext || observation.keyFailed != (tt.bypass || tt.missingProbe) {
+				t.Fatalf("context/key observation: %s", observation)
+			}
+			unobserved := tt.beforeCancel || tt.beforeDeadline || tt.bypass || tt.missingProbe
+			wantProbe := !tt.beforeCancel && !tt.beforeDeadline && !tt.bypass
+			if observation.probeAttempted != wantProbe || observation.probeFailed != tt.missingProbe {
+				t.Fatalf("probe observation: %s", observation)
+			}
+			if unobserved {
+				if observation.goVersion != "" || observation.goRoot != "" || observation.goToolDir != "" || observation.toolchain != "" {
+					t.Fatalf("unobserved selection invented: %s", observation)
+				}
+			} else if observation.goVersion != "go1.27.1" || observation.toolchain != "go1.27.1" || observation.goRoot == "" || observation.goToolDir == "" || observation.goOS == "" || observation.goArch == "" {
+				t.Fatalf("actual selected child compiler missing: %s", observation)
+			}
+			if observation.probeElapsed < 0 || observation.keyElapsed < observation.probeElapsed || observation.buildElapsed < 0 || observation.totalElapsed < observation.keyElapsed+observation.buildElapsed {
+				t.Fatalf("phase timings overlap or are invalid: %s", observation)
+			}
+			if strings.Contains(observation.String(), secret) || strings.Contains(observation.String(), "FIXTURE_OBSERVATION_SECRET") {
+				t.Fatal("diagnostic exposed environment or arbitrary error text")
+			}
+			if tt.fail || tt.beforeCancel || tt.beforeDeadline || tt.duringCancel || tt.bypass {
+				return
+			}
+			if observation.probeElapsed <= 0 || observation.buildElapsed <= 0 {
+				t.Fatalf("executed probe/build timings missing: %s", observation)
+			}
+			// Old nil-observer entry point must reuse the observed key unchanged.
+			second := filepath.Join(t.TempDir(), "second")
+			next := fixtureControlCommand(t.Context(), root, second)
+			next.Env = append(next.Env, "FIXTURE_OBSERVATION_SECRET="+secret)
+			if _, err := c.build(t.Context(), next, root, second, fixtureControlSentinel); err != nil {
+				t.Fatal(err)
+			}
+			fixtureControlCounts(t, &c, 1, 1, 0)
+			third := filepath.Join(t.TempDir(), "third")
+			last := fixtureControlCommand(t.Context(), root, third)
+			last.Env = append(last.Env, "FIXTURE_OBSERVATION_SECRET="+secret)
+			var hit fixtureBuildObservation
+			if _, err := c.buildObserved(t.Context(), last, root, third, fixtureControlSentinel, &hit); err != nil {
+				t.Fatal(err)
+			}
+			fixtureControlCounts(t, &c, 1, 2, 0)
+			if hit.buildRuns != 0 || hit.buildElapsed != 0 || hit.goVersion != "go1.27.1" || hit.failed {
+				t.Fatalf("cache reuse incorrectly reported an executed build: %s", hit)
+			}
+		})
+	}
+}
+
+func TestFixtureBuildArtifactsObservationReuse(t *testing.T) {
+	var c fixtureBuildArtifacts
+	t.Cleanup(func() { _ = c.close() })
+	root := fixtureControlSource(t)
+	var observation fixtureBuildObservation
+	build := func(ctx context.Context, bypass bool) error {
+		output := filepath.Join(t.TempDir(), "executable")
+		cmd := fixtureControlCommand(ctx, root, output)
+		if bypass {
+			cmd.Args = append(cmd.Args, "-unknown-fixture-flag")
+		}
+		_, err := c.buildObserved(ctx, cmd, root, output, fixtureControlSentinel, &observation)
+		return err
+	}
+	if err := build(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if observation.buildRuns != 1 || observation.goVersion != "go1.27.1" {
+		t.Fatalf("initial observed build missing: %s", observation)
+	}
+	if err := build(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if observation.buildRuns != 0 || observation.buildElapsed != 0 || observation.goVersion != "go1.27.1" {
+		t.Fatalf("reused observation retained executed build: %s", observation)
+	}
+	if err := build(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	if observation.goVersion != "" || observation.goRoot != "" || observation.goToolDir != "" || observation.goOS != "" || observation.goArch != "" || observation.toolchain != "" || observation.probeAttempted || observation.probeFailed || observation.probeElapsed != 0 || observation.buildRuns != 1 || !observation.keyFailed {
+		t.Fatalf("reused observation retained prior selection/probe: %s", observation)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := build(ctx, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reused canceled observation changed error: %v", err)
+	}
+	if observation.goVersion != "" || observation.probeAttempted || observation.keyFailed || observation.buildRuns != 0 || observation.probeElapsed != 0 || observation.keyElapsed != 0 || observation.buildElapsed != 0 || !observation.failed || observation.contextStatus != "canceled" {
+		t.Fatalf("reused canceled observation retained prior phases: %s", observation)
+	}
+	fixtureControlCounts(t, &c, 2, 1, 1)
+}
