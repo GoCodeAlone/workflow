@@ -46,7 +46,7 @@ func discoveryBuild(t *testing.T, cwd, output, source string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-race", "-o", output, source)
+	cmd := exec.CommandContext(ctx, fixtureInvokingGoBinary(t), "build", "-race", "-o", output, source)
 	cmd.Dir, cmd.Env, cmd.WaitDelay = cwd, discoveryBuildEnv(), 5*time.Second
 	var out []byte
 	var err error

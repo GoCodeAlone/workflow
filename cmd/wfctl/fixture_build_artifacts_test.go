@@ -500,3 +500,15 @@ func closeInvocationFixtureBuilds() error {
 	}
 	return invocationFixtureBuilds.close()
 }
+
+// The go test driver prepends its own GOROOT/bin before package initialization.
+// Capture that launcher before tests deliberately replace PATH.
+var fixtureInvokingGoPath, fixtureInvokingGoLookupError = exec.LookPath("go")
+
+func fixtureInvokingGoBinary(t *testing.T) string {
+	t.Helper()
+	if fixtureInvokingGoLookupError != nil {
+		t.Fatalf("locate invoking Go compiler: %v", fixtureInvokingGoLookupError)
+	}
+	return fixtureInvokingGoPath
+}

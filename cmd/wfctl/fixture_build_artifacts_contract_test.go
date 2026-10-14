@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"debug/buildinfo"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func fixtureControlSource(t *testing.T) string {
@@ -842,5 +844,124 @@ func TestDiscoveryBuildUsesInvokingToolchain(t *testing.T) {
 	}
 	if want := runtime.Version() + ":one"; string(got) != want {
 		t.Fatalf("discovery selected compiler output=%q, want %q", got, want)
+	}
+}
+
+func TestFixtureInvokingGoStartupPath(t *testing.T) {
+	if os.Getenv("WFCTL_FIXTURE_STARTUP_GO_CONTROL") == "child" {
+		if os.Getenv("WFCTL_FIXTURE_MISSING_GO_CONTROL") == "yes" {
+			fixtureInvokingGoBinary(t)
+			t.Fatal("missing startup compiler was accepted")
+		}
+		root := fixtureControlSource(t)
+		fixtureControlWrite(t, filepath.Join(root, "main.go"), "package main\nimport (\"embed\"; \"fmt\"; \"runtime\")\nvar _ embed.FS\n//go:embed asset.txt\nvar asset string\nfunc main(){fmt.Printf(\"%s:%s\",runtime.Version(),asset)}\n")
+		fake := t.TempDir()
+		fixtureControlWrite(t, filepath.Join(fake, "go"), "#!/bin/sh\nprintf '%s\\n' 'wrong-startup-path-go-launcher' >&2\nexit 1\n")
+		if err := os.Chmod(filepath.Join(fake, "go"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+		output := filepath.Join(t.TempDir(), "executable")
+		discoveryBuild(t, root, output, ".")
+		got, err := exec.CommandContext(t.Context(), output).CombinedOutput()
+		if err != nil {
+			t.Fatalf("startup compiler artifact: %v", err)
+		}
+		if want := runtime.Version() + ":one"; string(got) != want {
+			t.Fatalf("startup selected compiler output=%q, want %q", got, want)
+		}
+		t.Logf("startup compiler artifact=%s", got)
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoking := fixtureInvokingGoBinary(t)
+	for _, tc := range []struct {
+		name, path string
+		missing    bool
+	}{
+		{"misleading-process-start-GOROOT", filepath.Dir(invoking) + string(os.PathListSeparator) + os.Getenv("PATH"), false},
+		{"missing-startup-compiler-fails-closed", t.TempDir(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, self, "-test.run=^TestFixtureInvokingGoStartupPath$", "-test.v")
+			cmd.WaitDelay = 5 * time.Second
+			for _, item := range os.Environ() {
+				name, _, _ := strings.Cut(item, "=")
+				if name != "GOROOT" && name != "PATH" && name != "WFCTL_FIXTURE_STARTUP_GO_CONTROL" && name != "WFCTL_FIXTURE_MISSING_GO_CONTROL" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "GOROOT="+t.TempDir(), "PATH="+tc.path, "WFCTL_FIXTURE_STARTUP_GO_CONTROL=child")
+			if tc.missing {
+				cmd.Env = append(cmd.Env, "WFCTL_FIXTURE_MISSING_GO_CONTROL=yes")
+			}
+			got, err := cmd.CombinedOutput()
+			if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+				t.Fatalf("startup control did not finish: %v, %v", ctx.Err(), err)
+			}
+			if tc.missing {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(string(got), "locate invoking Go compiler:") {
+					t.Fatalf("missing compiler did not fail closed: %v\n%s", err, got)
+				}
+			} else if err != nil || !strings.Contains(string(got), "startup compiler artifact="+runtime.Version()+":one") {
+				t.Fatalf("startup compiler artifact subprocess: %v\n%s", err, got)
+			}
+		})
+	}
+}
+
+func TestRegistryFallbackUsesInvokingToolchain(t *testing.T) {
+	mode := os.Getenv("WFCTL_FIXTURE_REGISTRY_GO_CONTROL")
+	if mode == "normal" || mode == "trap" {
+		if mode == "trap" {
+			fake := t.TempDir()
+			fixtureControlWrite(t, filepath.Join(fake, "go"), "#!/bin/sh\nprintf '%s\\n' 'wrong-registry-path-go-launcher' >&2\nexit 1\n")
+			if err := os.Chmod(filepath.Join(fake, "go"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+		binary := registrySyncActualCLIBinary(t, runtime.GOOS, "http://fixture.invalid")
+		info, err := buildinfo.ReadFile(binary)
+		if err != nil {
+			t.Fatalf("read actual registry CLI build metadata: %v", err)
+		}
+		if info.GoVersion != runtime.Version() {
+			t.Fatalf("registry selected actual CLI compiler=%q, want %q", info.GoVersion, runtime.Version())
+		}
+		t.Logf("registry actual CLI compiler=%s", info.GoVersion)
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"normal", "trap"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, self, "-test.run=^TestRegistryFallbackUsesInvokingToolchain$", "-test.v")
+			cmd.WaitDelay = 5 * time.Second
+			for _, item := range os.Environ() {
+				name, _, _ := strings.Cut(item, "=")
+				if name != "WFCTL_REGISTRY_SYNC_HOST_BINARY" && name != "WFCTL_FIXTURE_REGISTRY_GO_CONTROL" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "WFCTL_FIXTURE_REGISTRY_GO_CONTROL="+mode)
+			got, err := cmd.CombinedOutput()
+			if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+				t.Fatalf("registry compiler control did not finish: %v, %v", ctx.Err(), err)
+			}
+			if err != nil || !strings.Contains(string(got), "registry actual CLI compiler="+runtime.Version()) {
+				t.Fatalf("registry actual CLI compiler subprocess: %v\n%s", err, got)
+			}
+		})
 	}
 }
