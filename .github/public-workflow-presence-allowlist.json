@@ -1,11 +1,5 @@
 [
   {
-    "path": ".github/workflows/codeql.yml",
-    "contextSHA256": "ff3bb78aaf12cc4448dafd9c7c9f5a43da36ec846ea4105ea8b77e41c39b0811",
-    "state": "active",
-    "presence": "present"
-  },
-  {
     "path": ".github/workflows/copilot-setup-steps.yml",
     "contextSHA256": "9e4088e3a5fedcd03a34de005765a9bb768d26537e5da4be1d5754a3be492d1c",
     "state": "active",
@@ -18,12 +12,6 @@
     "presence": "present"
   },
   {
-    "path": ".github/workflows/dependency-update.yml",
-    "contextSHA256": "4cc139c9e4ddeff0df1ded39f5edc58a07526ead081276ae50b4b21153897de9",
-    "state": "active",
-    "presence": "present"
-  },
-  {
     "path": ".github/workflows/helm-lint.yml",
     "contextSHA256": "da77d154893ef019dc531722a42332d215ebed9f9cd758ec277cfc73f80d3ff1",
     "state": "active",
@@ -32,18 +20,6 @@
   {
     "path": ".github/workflows/osv-scanner.yml",
     "contextSHA256": "8c7670a43ee04394873dc65d86c43851223cb0f10d03078e70e98573bee02c21",
-    "state": "active",
-    "presence": "present"
-  },
-  {
-    "path": ".github/workflows/pre-release.yml",
-    "contextSHA256": "046df32802211b14b97b613f1d5ab9fd444ea7dff3eeacc11b81c62a22b6b844",
-    "state": "active",
-    "presence": "present"
-  },
-  {
-    "path": ".github/workflows/release.yml",
-    "contextSHA256": "7e6b8738cb89f1af132d306880423405b06b7eb3e71bb0cb65b627c88fbf95f3",
     "state": "active",
     "presence": "present"
   },
@@ -88,21 +64,9 @@
     "presence": "absent"
   },
   {
-    "path": ".github/workflows/ci.yml",
-    "contextSHA256": "37b7935261b56568daee7ad04ebb647f5a53bef336b5da0e8efb5df5e666e06a",
-    "state": "active",
-    "presence": "present"
-  },
-  {
     "path": ".github/workflows/cross-plugin-build-test.yml",
     "contextSHA256": "5416093bc5a985f34af5326bd3a7484154084a7911ca6a8384d00b7a34cd2ff4",
     "state": "staged",
-    "presence": "present"
-  },
-  {
-    "path": ".github/workflows/benchmark.yml",
-    "contextSHA256": "0095a1d437ba5a9b5ddad0c3de98e4c911e9c96bfbdf7ad2e0a0187ef69c24b7",
-    "state": "active",
     "presence": "present"
   },
   {
@@ -114,37 +78,37 @@
   {
     "path": ".github/workflows/ci.yml",
     "contextSHA256": "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   },
   {
     "path": ".github/workflows/benchmark.yml",
     "contextSHA256": "f61f9a7dce18191c1aa1691ed6babcadb6718099580f42d3f7604552eeae8571",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   },
   {
     "path": ".github/workflows/codeql.yml",
     "contextSHA256": "1fdd08a88d2022aaf49b69e455173cbaacc34d0d6a43e6822880af63d4bd106b",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   },
   {
     "path": ".github/workflows/dependency-update.yml",
     "contextSHA256": "408a0e3e1729dcabac8012c65ebf8adf1a546ed6dea9d216e4a4e4b1e01b6c37",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   },
   {
     "path": ".github/workflows/pre-release.yml",
     "contextSHA256": "0604cdbfc06c07f363c4d78837a2961ddaa4e481d52e50382c6b4cc60b7b06fb",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   },
   {
     "path": ".github/workflows/release.yml",
     "contextSHA256": "7ac0c26e03352ce47d2898e8af41c39b58af3bc050d91d598c91efa9e8631fc6",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   }
 ]
