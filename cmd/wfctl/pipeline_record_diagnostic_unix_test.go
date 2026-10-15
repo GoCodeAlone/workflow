@@ -87,8 +87,19 @@ func safePipelineRecordDiagnostic(stderr []byte) (pipelineRecordDiagnosticReport
 		return pipelineRecordDiagnosticReport{}, "invalid"
 	}
 	switch report.Operation {
-	case "unknown", "create", "start", "wait":
+	case "unknown", "create", "start", "wait", "resolve_context", "resolve_identity":
 	default:
+		return pipelineRecordDiagnosticReport{}, "invalid"
+	}
+	var resolutionOperation string
+	switch report.Phase {
+	case "docker_resolve_context_cancelled", "docker_resolve_context_deadline", "docker_resolve_context_capture", "docker_resolve_context_command":
+		resolutionOperation = "resolve_context"
+	case "docker_resolve_identity_cancelled", "docker_resolve_identity_deadline", "docker_resolve_identity_capture", "docker_resolve_identity_command":
+		resolutionOperation = "resolve_identity"
+	}
+	if (resolutionOperation != "" && report.Operation != resolutionOperation) ||
+		((report.Operation == "resolve_context" || report.Operation == "resolve_identity") && report.Operation != resolutionOperation) {
 		return pipelineRecordDiagnosticReport{}, "invalid"
 	}
 	return report, "present"
@@ -410,7 +421,7 @@ func TestPipelineRecordDiagnosticsActualHostFailureAndSilence(t *testing.T) {
 				if status != "missing" {
 					t.Fatal("diagnostics emitted on success or without exact opt-in")
 				}
-			} else if status != "present" || report.Phase != tc.phase || !report.ChildObserved || report.Cleanup != "complete" {
+			} else if status != "present" || report.Phase != tc.phase || !report.ChildObserved || report.Cleanup != "complete" || report.Operation != "unknown" || report.DockerExit != -1 {
 				t.Fatalf("actual host failure lost phase/child/cleanup evidence: status=%s report=%+v", status, report)
 			}
 			if bytes.Contains(stderr, []byte("fixture-cli-stdout-canary")) {
@@ -641,5 +652,216 @@ func TestPipelineRecordDiagnosticsContextClassification(t *testing.T) {
 		if status != "present" || report.Cancelled != (ctx.Err() == context.Canceled) || report.Deadline != (ctx.Err() == context.DeadlineExceeded) {
 			t.Fatal("context classification lost cancellation/deadline distinction")
 		}
+	}
+}
+
+func TestPipelineRecordDiagnosticsResolverFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, fail, flood, metadata, server, phase, operation string
+		exit, calls                                           int
+	}{
+		{name: "context-command", fail: "context", phase: "docker_resolve_context_command", operation: "resolve_context", exit: 7, calls: 1},
+		{name: "identity-command", fail: "info", phase: "docker_resolve_identity_command", operation: "resolve_identity", exit: 7, calls: 2},
+		{name: "context-capture", flood: "context", phase: "docker_resolve_context_capture", operation: "resolve_context", exit: 0, calls: 1},
+		{name: "identity-capture", flood: "info", phase: "docker_resolve_identity_capture", operation: "resolve_identity", exit: 0, calls: 2},
+		{name: "context-metadata", metadata: "private-context-metadata-canary", phase: "docker_resolve_context_metadata", operation: "unknown", exit: -1, calls: 1},
+		{name: "endpoint", metadata: `[{"Name":"default","Endpoints":{"docker":{"Host":"private-endpoint-canary"}}}]`, phase: "docker_resolve_endpoint", operation: "unknown", exit: -1, calls: 1},
+		{name: "tls-metadata", metadata: `[{"Name":"private-context-canary","Endpoints":{"docker":{"Host":"tcp://localhost:2376"}},"TLSMaterial":{"docker":["private-tls-canary"]}}]`, phase: "docker_resolve_tls", operation: "unknown", exit: -1, calls: 1},
+		{name: "identity-metadata", server: "private-server-canary / invalid", phase: "docker_resolve_identity_metadata", operation: "unknown", exit: -1, calls: 2},
+		{name: "private-config", phase: "docker_resolve_private_config", operation: "unknown", exit: -1, calls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			directory, fixture := newPipelineDockerFixture(t)
+			fixture.Fail, fixture.Flood = tc.fail, tc.flood
+			if tc.metadata != "" {
+				fixture.Context = tc.metadata
+			}
+			if tc.server != "" {
+				fixture.ServerID = tc.server
+			}
+			if tc.name == "private-config" {
+				t.Setenv("TMPDIR", filepath.Join(directory, "nonexistent"))
+			}
+			writePipelineDockerFixture(t, directory, fixture)
+			diagnostic := newPipelineRecordDiagnostic()
+			ctx := context.WithValue(t.Context(), pipelineRecordDiagnosticKey{}, diagnostic)
+			client, err := resolvePipelineDockerClient(ctx)
+			if client != nil {
+				_ = client.Close()
+			}
+			if err == nil || client != nil {
+				t.Fatal("injected resolver failure was accepted")
+			}
+			report, output := diagnosticTestReport(t, diagnostic)
+			if report.Phase != tc.phase || report.Operation != tc.operation || report.DockerExit != tc.exit || report.ContainerExit != -1 || report.ChildObserved || report.Cleanup != "not_started" {
+				t.Fatal("resolver report lost actual failure stage/status origin")
+			}
+			if len(pipelineDockerCalls(t, directory)) != tc.calls {
+				t.Fatal("resolver diagnostics added or omitted an existing CLI call")
+			}
+			for _, secret := range []string{"TEST_SECRET_TOKEN", "raw daemon stderr", "canary", directory, "daemon-A", "localhost"} {
+				if bytes.Contains(output, []byte(secret)) {
+					t.Fatal("resolver report reflected private input or output")
+				}
+			}
+			if tc.name == "context-command" {
+				for _, invalid := range [][]byte{
+					bytes.Replace(output, []byte(`"resolve_context"`), []byte(`"private-operation-canary"`), 1),
+					bytes.Replace(output, []byte(`"resolve_context"`), []byte(`"resolve_identity"`), 1),
+					bytes.Replace(output, []byte(`"resolve_context"`), []byte(`"unknown"`), 1),
+					bytes.Replace(output, []byte(`"docker_resolve_context_command"`), []byte(`"child_exit"`), 1),
+					bytes.Replace(output, []byte(`"container_exit":-1`), []byte(`"container_exit":0`), 1),
+				} {
+					if _, status := safePipelineRecordDiagnostic(invalid); status == "present" {
+						t.Fatal("safe consumer accepted an unknown or incoherent resolver status")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPipelineRecordDiagnosticsResolverCancellationAndDeadline(t *testing.T) {
+	for _, stage := range []struct{ command, phase string }{{"context", "context"}, {"info", "identity"}} {
+		for _, outcome := range []string{"cancelled", "deadline"} {
+			t.Run(stage.phase+"-"+outcome, func(t *testing.T) {
+				directory, fixture := newPipelineDockerFixture(t)
+				fixture.Sleep = stage.command
+				writePipelineDockerFixture(t, directory, fixture)
+				diagnostic := newPipelineRecordDiagnostic()
+				outer, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				ctx := context.WithValue(outer, pipelineRecordDiagnosticKey{}, diagnostic)
+				stop := make(chan struct{})
+				observed := make(chan bool, 1)
+				if outcome == "cancelled" {
+					// Cancel only after the real selected helper has logged its
+					// invocation, so identity cancellation cannot hit context discovery.
+					go func() {
+						deadline := time.NewTimer(10 * time.Second)
+						defer deadline.Stop()
+						tick := time.NewTicker(10 * time.Millisecond)
+						defer tick.Stop()
+						for {
+							select {
+							case <-stop:
+								observed <- false
+								return
+							case <-deadline.C:
+								cancel()
+								observed <- false
+								return
+							case <-tick.C:
+								data, _ := os.ReadFile(filepath.Join(directory, "calls.jsonl"))
+								for _, line := range bytes.Split(data, []byte{'\n'}) {
+									var call pipelineDockerInvocation
+									if json.Unmarshal(line, &call) == nil {
+										for _, arg := range call.Args {
+											if arg == stage.command {
+												cancel()
+												observed <- true
+												return
+											}
+										}
+									}
+								}
+							}
+						}
+					}()
+				}
+				client, err := resolvePipelineDockerClient(ctx)
+				close(stop)
+				if outcome == "cancelled" && !<-observed {
+					t.Fatal("cancellation control did not observe the selected real resolver call")
+				}
+				if client != nil {
+					_ = client.Close()
+				}
+				if err == nil || client != nil {
+					t.Fatal("resolver accepted the interrupted command")
+				}
+				var output bytes.Buffer
+				diagnostic.emit(outer, &output)
+				report, status := safePipelineRecordDiagnostic(output.Bytes())
+				if status != "present" || report.Phase != "docker_resolve_"+stage.phase+"_"+outcome || report.Operation != "resolve_"+stage.phase || report.DockerExit != -1 || report.ContainerExit != -1 {
+					t.Fatal("interrupted resolver command lost its actual closed outcome")
+				}
+				if report.Cancelled != (outcome == "cancelled") || report.Deadline || (outcome == "deadline" && outer.Err() != nil) {
+					t.Fatal("inner command deadline was confused with outer context state")
+				}
+			})
+		}
+	}
+}
+
+func TestPipelineRecordDiagnosticsActualHostResolverFailure(t *testing.T) {
+	root := pipelineRecordHostTempDir(t)
+	binary := filepath.Join(root, "wfctl")
+	buildPipelineRecordHostBinary(t, binary, ".")
+	for _, enabled := range []string{"", "true", "1"} {
+		t.Run("opt-in-"+enabled, func(t *testing.T) {
+			directory, fixture := newPipelineDockerFixture(t)
+			fixture.Fail = "context"
+			writePipelineDockerFixture(t, directory, fixture)
+			t.Setenv("XDG_STATE_HOME", filepath.Join(pipelineRecordHostTempDir(t), "state"))
+			t.Setenv(pipelineRecordDiagnosticEnv, enabled)
+			stdout, stderr, err := runPipelineRecordHost(t, binary, "testdata/pipeline-record/builtin.yaml", "")
+			assertPipelineRecordHostError(t, stdout, stderr, err, "pipeline_failed")
+			report, status := safePipelineRecordDiagnostic(stderr)
+			if enabled == "1" {
+				if status != "present" || report.Phase != "docker_resolve_context_command" || report.Operation != "resolve_context" || report.DockerExit != 7 || report.ChildObserved || report.Cleanup != "not_started" {
+					t.Fatal("actual record parent did not consume the resolver observation")
+				}
+			} else if status != "missing" {
+				t.Fatal("resolver emitted diagnostics without literal opt-in")
+			}
+			for _, secret := range []string{"TEST_SECRET_TOKEN", "raw daemon stderr", directory} {
+				if bytes.Contains(stderr, []byte(secret)) {
+					t.Fatal("actual record parent exposed private resolver stderr")
+				}
+			}
+		})
+	}
+}
+
+func TestPipelineRecordDiagnosticsResolverFirstFailureAndConcurrency(t *testing.T) {
+	for _, first := range []bool{false, true} {
+		t.Run(map[bool]string{false: "concurrent-first", true: "preserve-first"}[first], func(t *testing.T) {
+			directory, fixture := newPipelineDockerFixture(t)
+			fixture.Fail, fixture.Flood = "context", "info"
+			writePipelineDockerFixture(t, directory, fixture)
+			diagnostic := newPipelineRecordDiagnostic()
+			ctx := context.WithValue(t.Context(), pipelineRecordDiagnosticKey{}, diagnostic)
+			if first {
+				if client, err := resolvePipelineDockerClient(ctx); err == nil || client != nil {
+					t.Fatal("real first resolver failure was not injected")
+				}
+			}
+			var workers sync.WaitGroup
+			outcomes := make(chan bool, 8)
+			for i := 0; i < 8; i++ {
+				workers.Go(func() {
+					operation, args, exit := "resolve_context", []string{"context", "inspect"}, 7
+					if i%2 == 1 {
+						operation, args, exit = "resolve_identity", []string{"info", "--format", "{{json .ID}}"}, 0
+					}
+					result, err := runPipelineDockerCLI(pipelineDockerResolutionContext(ctx, operation), filepath.Join(directory, "docker"), []string{"PATH=" + directory, "HOME=" + directory, "LANG=C", "LC_ALL=C"}, pipelineDockerCallTimeout, args...)
+					outcomes <- err != nil && result != nil && result.ExitCode == exit
+				})
+			}
+			workers.Wait()
+			close(outcomes)
+			for ok := range outcomes {
+				if !ok {
+					t.Fatal("concurrent control missed a real command/capture failure")
+				}
+			}
+			report, _ := diagnosticTestReport(t, diagnostic)
+			contextFailure := report.Phase == "docker_resolve_context_command" && report.Operation == "resolve_context" && report.DockerExit == 7
+			identityFailure := report.Phase == "docker_resolve_identity_capture" && report.Operation == "resolve_identity" && report.DockerExit == 0
+			if (!contextFailure && !identityFailure) || (first && !contextFailure) || report.ContainerExit != -1 {
+				t.Fatal("concurrent observations mixed or rewrote the first failure tuple")
+			}
+		})
 	}
 }
