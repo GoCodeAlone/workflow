@@ -442,9 +442,10 @@ func runPipelineDockerCLI(ctx context.Context, binary string, env []string, time
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		outcome := "command"
-		if contextErr == context.DeadlineExceeded {
+		switch contextErr {
+		case context.DeadlineExceeded:
 			outcome = "deadline"
-		} else if contextErr == context.Canceled {
+		case context.Canceled:
 			outcome = "cancelled"
 		}
 		observePipelineDockerResolutionFailure(ctx, outcome, result.ExitCode)
