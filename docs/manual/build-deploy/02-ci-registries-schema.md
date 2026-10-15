@@ -11,7 +11,7 @@ ci:
   registries:
     - name: docr
       type: do
-      path: registry.digitalocean.com/myorg
+      path: registry.digitalocean.com/myorg/my-image
       auth:
         env: DIGITALOCEAN_TOKEN
       retention:
@@ -60,15 +60,27 @@ auth:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `keep_latest` | int | Keep this many most-recent tags (min: 1) |
-| `untagged_ttl` | duration | Delete untagged manifests older than this (e.g. `168h`) |
+| `keep_latest` | int | Requested number of recent tags to retain (min: 1); provider support is required |
+| `untagged_ttl` | duration | Requested untagged age limit (e.g. `168h`); DOCR and GHCR pruning reject this unsupported policy |
 | `schedule` | cron | Cron expression for automatic pruning (e.g. `0 7 * * 0`) |
 
-The `latest` tag is always preserved by `wfctl registry prune`.
+DOCR and GHCR pruning currently fail closed, including `--dry-run`. Retention
+requires an exact `registry.digitalocean.com/<registry>/<repository>` or
+`ghcr.io/<org>/<package>` path; registry/org roots, tags and digest suffixes are
+refused. Login and push can still use registry/org base paths.
+
+These providers cannot enforce the configured untagged TTL or protect deployed
+and rollback digests during their old deletion operations. DOCR's registry-wide
+GC cannot implement repository-scoped retention. GHCR's whole-version deletion
+can remove tagged images. Exact scopes and `keep_latest` alone do not establish
+preservation, recoverability or approval of each destructive action. Pruning
+therefore returns an error before reading credentials or making commands/API
+calls. All images remain intact. There is no approval flag that bypasses this
+containment; a future implementation must enforce those prerequisites first.
 
 ### `wfctl ci init` integration
 
-When any registry declares `retention.schedule`, `wfctl ci init` emits `.github/workflows/registry-retention.yml`:
+When any registry declares `retention.schedule`, `wfctl ci init` emits `.github/workflows/registry-retention.yml`. DOCR/GHCR jobs using the current providers fail with the safety refusal and perform no deletion:
 
 ```yaml
 on:

@@ -133,7 +133,13 @@ Pushes image refs to all declared registries.
 wfctl registry prune [--config <file>] [--registry <name>] [--dry-run]
 ```
 
-Runs garbage collection and prunes tags beyond `retention.keep_latest`. Preserves `latest`.
+DOCR and GHCR retention currently return a safety error, including `--dry-run`,
+before credentials, commands or API calls. They require exact image
+repository/package scopes and refuse unsupported untagged TTLs. Pruning remains
+disabled until deployed/rollback digest preservation and explicit approval of
+each destructive action can be enforced; registry-wide GC and tag counts do
+not provide these guarantees. No bypass flag is available. Registries without
+retention remain a no-op. Other provider implementations are unchanged.
 
 ---
 
