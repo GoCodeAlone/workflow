@@ -59,14 +59,23 @@ func runPipelineRecord(request pipelineRecordRequest, options pipelineRecordOpti
 	defer cancel()
 	ctx, deadlineCancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer deadlineCancel()
+	var diagnostic *pipelineRecordDiagnostic
+	if os.Getenv(pipelineRecordDiagnosticEnv) == "1" {
+		diagnostic = newPipelineRecordDiagnostic()
+		ctx = context.WithValue(ctx, pipelineRecordDiagnosticKey{}, diagnostic)
+	}
 	output, code := executePipelineRecordParent(ctx, request, options.ConfigPath)
 	if code != "" {
+		diagnostic.fail("pipeline_result")
+		diagnostic.emit(ctx, os.Stderr)
 		if err := writePipelineRecord(os.Stdout, options.ErrorPrefix, pipelineRecordErrorPayload(code)); err != nil {
 			return errors.New("pipeline record output failed")
 		}
 		return errors.New("pipeline record execution failed")
 	}
 	if err := writePipelineRecord(os.Stdout, options.SuccessPrefix, output); err != nil {
+		diagnostic.fail("record_write")
+		diagnostic.emit(ctx, os.Stderr)
 		return errors.New("pipeline record output failed")
 	}
 	return nil
@@ -88,90 +97,112 @@ func pipelineCleanupRoot() (string, error) {
 }
 
 func executePipelineRecordParent(ctx context.Context, request pipelineRecordRequest, configPath string) (map[string]any, string) {
-	fail := func() (map[string]any, string) { return nil, "pipeline_failed" }
+	diagnostic := pipelineRecordDiagnosticFromContext(ctx)
+	fail := func(phase string) (map[string]any, string) {
+		diagnostic.fail(phase)
+		return nil, "pipeline_failed"
+	}
 	root, err := pipelineCleanupRoot()
 	if err != nil {
-		return fail()
+		return fail("state_root")
 	}
 	state, err := openPipelineCleanupState(root)
 	if err != nil {
-		return fail()
+		return fail("state_open")
 	}
 	defer state.Close()
 	retained, err := state.Entries()
 	if err != nil {
-		return fail()
+		return fail("state_entries")
 	}
 	// Kill reuse-safe retained process groups before contacting any daemon or
 	// loading config. A daemon outage must not leave an old child doing work.
 	for i := range retained {
 		entry := retained[i]
 		if reconcilePipelineProcesses(entry) != nil {
-			return fail()
+			return fail("retained_processes")
 		}
 	}
 	client, err := resolvePipelineDockerClient(ctx)
 	if err != nil {
-		return fail()
+		return fail("docker_resolve")
 	}
 	defer client.Close()
 	for i := range retained {
 		entry := retained[i]
-		if entry.Docker != client.Identity || finishPipelineCleanup(state, client, entry) != nil {
-			return fail()
+		if entry.Docker != client.Identity || finishPipelineCleanupObserved(ctx, state, client, entry, "retained_cleanup") != nil {
+			diagnostic.cleanup("failed")
+			return fail("retained_cleanup")
 		}
 	}
+	diagnostic.cleanup("not_started")
 	request.Config, err = config.LoadFromFile(configPath)
 	if err != nil {
-		return fail()
+		return fail("config_load")
 	}
 	closure, err := selectPipelineClosure(request.Config, request.Pipeline, true)
 	if err != nil || closure.names[request.ResultStep] != 1 {
+		diagnostic.fail("pipeline_result")
 		return nil, "result_invalid"
 	}
 	installed, err := inspectPipelineInstallations(request.PluginDir)
 	if err != nil {
-		return fail()
+		return fail("plugin_inspect")
 	}
 	if _, err := installed.resolve(closure.types); err != nil {
-		return fail()
+		return fail("plugin_resolve")
 	}
 	request.Config = closure.config
 	parentToken, err := pipelineProcessStartToken(os.Getpid())
 	if err != nil {
-		return fail()
+		return fail("parent_identity")
 	}
 	request.ParentPID, request.ParentStart = os.Getpid(), parentToken
 	data, err := json.Marshal(request)
 	if err != nil || len(data) > maxPipelineRecordBytes {
+		diagnostic.fail("request_encode")
 		return nil, "result_invalid"
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return fail()
+		return fail("nonce")
 	}
 	deadline, _ := ctx.Deadline()
 	entry := pipelineCleanupEntry{Version: 1, Label: "wfctl-" + hex.EncodeToString(nonce[:]),
 		Parent: pipelineProcessIdentity{PID: os.Getpid(), Start: parentToken}, Docker: client.Identity,
 		Deadline: deadline.UTC().Format(time.RFC3339Nano)}
 	if err := state.Save(entry); err != nil {
-		return fail()
+		return fail("state_save")
 	}
 	envelope, childErr := executeIsolatedPipelineChild(ctx, request, data, state, client, &entry)
 	if errors.Is(childErr, errPipelineCleanupIncomplete) {
-		return fail()
+		diagnostic.cleanup("incomplete")
+		return fail("child_cleanup")
 	}
-	if err := finishPipelineCleanup(state, client, entry); err != nil {
-		return fail()
+	if err := finishPipelineCleanupObserved(ctx, state, client, entry, "cleanup"); err != nil {
+		return fail("cleanup")
 	}
 	if childErr != nil {
-		return fail()
+		return fail("child_exit")
 	}
 	output, code, err := selectPipelineRecordEnvelope(envelope)
 	if err != nil {
+		diagnostic.fail("result_frame")
 		return nil, "result_invalid"
 	}
 	return output, code
+}
+
+func finishPipelineCleanupObserved(ctx context.Context, state *pipelineCleanupState, client *pipelineDockerClient, entry pipelineCleanupEntry, phase string) error {
+	err := finishPipelineCleanup(state, client, entry)
+	diagnostic := pipelineRecordDiagnosticFromContext(ctx)
+	if err != nil {
+		diagnostic.cleanup("failed")
+		diagnostic.fail(phase)
+	} else {
+		diagnostic.cleanup("complete")
+	}
+	return err
 }
 
 func finishPipelineCleanup(state *pipelineCleanupState, client *pipelineDockerClient, entry pipelineCleanupEntry) error {
@@ -206,6 +237,7 @@ func finishPipelineCleanup(state *pipelineCleanupState, client *pipelineDockerCl
 }
 
 func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordRequest, data []byte, state *pipelineCleanupState, client *pipelineDockerClient, entry *pipelineCleanupEntry) (map[string]any, error) {
+	diagnostic := pipelineRecordDiagnosticFromContext(ctx)
 	var files []*os.File
 	defer func() {
 		for _, file := range files {
@@ -221,26 +253,32 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	}
 	inputRead, inputWrite, err := pipe()
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	resultRead, resultWrite, err := pipe()
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	controlRead, controlWrite, err := pipe()
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	stdoutRead, stdoutWrite, err := pipe()
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	stderrRead, stderrWrite, err := pipe()
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	sockets, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	for _, fd := range sockets {
@@ -251,12 +289,14 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	files = append(files, brokerParent, brokerChild)
 	brokerConn, err := net.FileConn(brokerParent)
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	_ = brokerParent.Close()
 	defer brokerConn.Close()
 	executable, err := os.Executable()
 	if err != nil {
+		diagnostic.fail("child_setup")
 		return nil, err
 	}
 	child := exec.Command(executable, pipelineRecordChildCommand) // #nosec G204 -- own executable; no application data in argv.
@@ -265,6 +305,7 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	child.Stdout, child.Stderr = stdoutWrite, stderrWrite
 	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := child.Start(); err != nil {
+		diagnostic.fail("child_start")
 		return nil, err
 	}
 	for _, file := range []*os.File{inputRead, resultWrite, controlRead, brokerChild, stdoutWrite, stderrWrite} {
@@ -272,14 +313,18 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	}
 	childToken, err := pipelineProcessStartToken(child.Process.Pid)
 	if err != nil {
+		diagnostic.fail("child_identity")
 		_ = child.Process.Kill()
 		_ = child.Wait()
+		diagnostic.child(child.ProcessState)
 		return nil, err
 	}
 	entry.Child = pipelineProcessIdentity{PID: child.Process.Pid, PGID: child.Process.Pid, Start: childToken}
 	if err := state.Save(*entry); err != nil {
+		diagnostic.fail("child_journal")
 		_ = child.Process.Kill()
 		_ = child.Wait()
+		diagnostic.child(child.ProcessState)
 		return nil, err
 	}
 	violation := make(chan struct{}, 1)
@@ -316,14 +361,22 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	brokerStopped := false
 	select {
 	case <-resultDone:
+		diagnostic.event("result")
+		diagnostic.result(result.data.Bytes())
 	case protocolErr = <-brokerDone:
+		diagnostic.event("broker")
+		diagnostic.fail("broker_closed")
 		brokerStopped = true
 		if protocolErr == nil {
 			protocolErr = errors.New("sandbox broker closed before result")
 		}
 	case <-ctx.Done():
+		diagnostic.event("context")
+		diagnostic.fail("cancelled")
 		protocolErr = errors.New("pipeline record cancelled")
 	case <-violation:
+		diagnostic.event("quarantine")
+		diagnostic.fail("child_quarantine")
 		protocolErr = errors.New("pipeline child output quarantine failed")
 	}
 	_ = controlWrite.Close()
@@ -333,10 +386,13 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	// The leader is deliberately not reaped before escalation, so its PID/PGID
 	// cannot be recycled while TERM/KILL still targets the recorded group.
 	if groupErr != nil {
+		diagnostic.fail("child_cleanup")
 		_ = child.Process.Kill()
 	}
 	waitErr := child.Wait()
+	diagnostic.child(child.ProcessState)
 	if waitErr != nil && protocolErr == nil {
+		diagnostic.fail("child_exit")
 		protocolErr = errors.New("pipeline child failed")
 	}
 	// Every drain has a bounded termination deadline even if a nonconforming
@@ -345,6 +401,7 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 		select {
 		case <-done:
 		case <-time.After(time.Second):
+			diagnostic.fail("child_pipe")
 			_ = stdoutRead.Close()
 			_ = stderrRead.Close()
 			_ = resultRead.Close()
@@ -354,12 +411,14 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 	}
 	_ = inputWrite.Close()
 	if inputErr := <-inputDone; inputErr != nil {
+		diagnostic.fail("child_input")
 		protocolErr = errors.New("pipeline child input failed")
 	}
 	if !brokerStopped {
 		select {
 		case <-brokerDone:
 		case <-time.After(31 * time.Second):
+			diagnostic.fail("broker_stop")
 			return nil, errPipelineCleanupIncomplete
 		}
 	}
@@ -367,9 +426,11 @@ func executeIsolatedPipelineChild(ctx context.Context, request pipelineRecordReq
 		return nil, errPipelineCleanupIncomplete
 	}
 	if err := waitPipelineProcessGroupEmpty(entry.Child.PGID, time.Second); err != nil {
+		diagnostic.fail("child_cleanup")
 		return nil, errPipelineCleanupIncomplete
 	}
 	if stdout.err != nil || stderr.err != nil || result.err != nil || stdout.data.Len() != 0 || stdout.overflow || stderr.overflow || result.overflow {
+		diagnostic.fail("child_quarantine")
 		return nil, errors.New("pipeline child quarantine or cleanup failed")
 	}
 	if protocolErr != nil {
@@ -396,43 +457,69 @@ func waitPipelineProcessGroupEmpty(pgid int, timeout time.Duration) error {
 }
 
 func executePipelineBrokerSandbox(ctx context.Context, request pipelineBrokerRequest, state *pipelineCleanupState, client *pipelineDockerClient, entry *pipelineCleanupEntry) (*sandbox.ExecResult, error) {
+	diagnostic := pipelineRecordDiagnosticFromContext(ctx)
+	diagnostic.beginOperation("create")
 	name := fmt.Sprintf("%s-%d.cid", entry.Label, len(entry.CIDFiles))
 	args, err := client.CreateArgs(request.Config, request.Command, entry.Label, filepath.Join(state.root, name))
 	if err != nil {
+		diagnostic.fail("container_args")
 		return nil, err
 	}
 	entry.CIDFiles = append(entry.CIDFiles, name)
 	if err := state.Save(*entry); err != nil {
+		diagnostic.fail("state_save")
 		return nil, err
 	}
 	created, err := client.RunInProcessGroup(ctx, entry.Child, append([]string{"create"}, args...)...)
+	if created != nil {
+		diagnostic.dockerExit(created.ExitCode)
+	}
 	if err != nil || created == nil || created.ExitCode != 0 {
+		diagnostic.fail("container_create")
 		return nil, errors.New("record sandbox create failed")
 	}
 	id := strings.TrimSpace(created.Stdout)
 	if len(id) != 64 || strings.ToLower(id) != id {
+		diagnostic.fail("container_id")
 		return nil, errors.New("invalid record sandbox ID")
 	}
 	if _, err := hex.DecodeString(id); err != nil {
+		diagnostic.fail("container_id")
 		return nil, errors.New("invalid record sandbox ID")
 	}
 	entry.IDs = append(entry.IDs, id)
 	if err := state.Save(*entry); err != nil {
+		diagnostic.fail("state_save")
 		return nil, err
 	}
+	diagnostic.beginOperation("start")
 	result, err := client.RunInProcessGroup(ctx, entry.Child, "start", "-a", id)
+	if result != nil {
+		diagnostic.dockerExit(result.ExitCode)
+	}
 	if err != nil || result == nil {
+		diagnostic.fail("container_attach")
 		return nil, errors.New("record sandbox attach failed")
 	}
+	diagnostic.beginOperation("wait")
 	wait, err := client.RunInProcessGroup(ctx, entry.Child, "wait", id)
+	if wait != nil {
+		diagnostic.dockerExit(wait.ExitCode)
+	}
 	if err != nil || wait == nil || wait.ExitCode != 0 {
+		diagnostic.fail("container_wait")
 		return nil, errors.New("record sandbox wait failed")
 	}
 	code, err := strconv.Atoi(strings.TrimSpace(wait.Stdout))
 	if err != nil || code < 0 || code > 255 {
+		diagnostic.fail("container_status")
 		return nil, errors.New("invalid record sandbox status")
 	}
 	result.ExitCode = code
+	diagnostic.containerExit(code)
+	if code != 0 {
+		diagnostic.fail("container_command")
+	}
 	return result, nil
 }
 

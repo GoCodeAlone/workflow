@@ -34,7 +34,9 @@ func TestPipelineRecordHostLiveDockerSandbox(t *testing.T) {
 	}
 	root := pipelineRecordHostTempDir(t)
 	binary := filepath.Join(root, "wfctl")
+	t.Cleanup(func() { logPipelineRecordLiveFailure(t, root, binary, strings.ToLower(digest)) })
 	buildPipelineRecordHostBinary(t, binary, ".")
+	t.Setenv(pipelineRecordDiagnosticEnv, "1")
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	t.Setenv("GITHUB_TOKEN", "host-private-live-canary")
 	t.Setenv("AWS_SESSION_TOKEN", "host-private-live-canary")
@@ -77,7 +79,8 @@ cat /work/message`
 	}
 	stdout, stderr, err := runPipelineRecordHost(t, binary, path, "", "--var", "message=live-dynamic-message")
 	if err != nil || string(stdout) != "SDK_RECORD_V1 {\"message\":\"live-dynamic-message\",\"source\":\"live-container\"}\n" {
-		t.Fatalf("built wfctl failed live sandbox lifecycle: error=%v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+		logSafePipelineRecordDiagnostic(t, stderr)
+		t.Fatalf("built wfctl failed live sandbox lifecycle: host_error=%t host_exit=%d", err != nil, pipelineRecordHostExit(err))
 	}
 	assertPipelineRecordHostJournalEmpty(t, root)
 }
@@ -87,12 +90,14 @@ func pullPipelineRecordLiveImage(t *testing.T) string {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	const image = "busybox:1.37.0"
-	if output, err := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput(); err != nil {
-		t.Fatalf("prepare real CI sandbox image: %v\n%s", err, output)
+	if err := exec.CommandContext(ctx, "docker", "pull", image).Run(); err != nil {
+		t.Fatalf("prepare real CI sandbox image: phase=pull host_exit=%d cancelled=%t deadline=%t",
+			pipelineRecordHostExit(err), ctx.Err() == context.Canceled, ctx.Err() == context.DeadlineExceeded)
 	}
 	output, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image).Output()
 	if err != nil {
-		t.Fatalf("resolve real CI sandbox image digest: %v", err)
+		t.Fatalf("resolve real CI sandbox image digest: phase=image_inspect host_exit=%d cancelled=%t deadline=%t",
+			pipelineRecordHostExit(err), ctx.Err() == context.Canceled, ctx.Err() == context.DeadlineExceeded)
 	}
 	var digests []string
 	if json.Unmarshal(output, &digests) != nil || len(digests) == 0 {
