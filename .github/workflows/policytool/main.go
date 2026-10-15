@@ -802,76 +802,197 @@ func authorityManifestPath(repoRoot string) (string, error) {
 	return manifestPath, nil
 }
 
+// equivalentStagedNativeBudget admits one exact, already reviewed CI budget.
+// Only the position of -timeout=15m changes; no authority is staged anew.
+// Authority validation and the complete candidate scanner remain mandatory.
+func equivalentStagedNativeBudget(repoRoot, scanRoot string, base, candidate trustPolicy, baseInventory, candidateInventory []authorityFile, baseContexts, candidateContexts map[string]string) (bool, error) {
+	const workflow = ".github/workflows/ci.yml"
+	const activeContext = "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386"
+	const priorContext = "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598"
+	const nextContext = "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5"
+	const priorStatement = "fa9dfdc59736a4c3cfa84b50ab1dbb642e3acdf8597adbc4f08c16c31139853d"
+	const nextStatement = "ff839b699b98d3bc674dfc9c04ee51600dec68f4b3dff7292589be885cbe6813"
+	if base.Secrets == nil || candidate.Secrets == nil || len(base.Secrets) != 0 || len(candidate.Secrets) != 0 ||
+		!authorityFilesEqual(baseInventory, candidateInventory) || baseContexts[workflow] != activeContext || candidateContexts[workflow] != nextContext {
+		return false, nil
+	}
+	active, staged, valid := trustStatesForPath(base, workflow)
+	candidateActive, candidateStaged, candidateValid := trustStatesForPath(candidate, workflow)
+	if !valid || !candidateValid || active != candidateActive || active.Presence != "present" || active.ContextSHA256 != activeContext ||
+		staged != (trustGroup{Path: workflow, ContextSHA256: priorContext, State: "staged", Presence: "present"}) ||
+		candidateStaged != (trustGroup{Path: workflow, ContextSHA256: nextContext, State: "staged", Presence: "present"}) ||
+		!stagedAuthorityMatches(staged, trustRowsForGroup(base, staged)) {
+		return false, nil
+	}
+	expected := trustPolicy{Secrets: base.Secrets,
+		Presence: append([]trustGroup(nil), base.Presence...), Executables: append([]executableEntry(nil), base.Executables...),
+		Commands: append([]commandEntry(nil), base.Commands...), Actions: append([]actionEntry(nil), base.Actions...)}
+	groups, executables, commands, actions, statements := 0, 0, 0, 0, 0
+	for i, entry := range expected.Presence {
+		if entry == staged {
+			expected.Presence[i].ContextSHA256 = nextContext
+			groups++
+		}
+	}
+	for i, entry := range expected.Executables {
+		if entry.WorkflowPath == workflow && entry.ContextSHA256 == priorContext {
+			expected.Executables[i].ContextSHA256 = nextContext
+			executables++
+		}
+	}
+	for i, entry := range expected.Commands {
+		if entry.Path == workflow && entry.ContextSHA256 == priorContext {
+			expected.Commands[i].ContextSHA256 = nextContext
+			commands++
+			if entry.StatementSHA256 == priorStatement && entry.Command == "go" {
+				expected.Commands[i].StatementSHA256 = nextStatement
+				statements++
+			}
+		}
+	}
+	for i, entry := range expected.Actions {
+		if entry.Path == workflow && entry.ContextSHA256 == priorContext {
+			expected.Actions[i].ContextSHA256 = nextContext
+			actions++
+		}
+	}
+	if groups != 1 || executables != 4 || commands != 63 || actions != 11 || statements != 1 || !reflect.DeepEqual(expected, candidate) {
+		return false, nil
+	}
+	baseFiles, err := repositoryWorkflowBytes(repoRoot)
+	if err != nil {
+		return false, err
+	}
+	candidateFiles, err := repositoryWorkflowBytes(scanRoot)
+	if err != nil {
+		return false, err
+	}
+	if baseFiles["ci.yml"] != "644:6ecc07031dd1ad63df7e48bdc490fd13e7e9cb1b6c5073c9f492547a8f0b7851" ||
+		candidateFiles["ci.yml"] != "644:9456c3e65ad04f227c34dc80cf6e094d4f2cc89c0dd5484c0fc7e28ae0edee6c" {
+		return false, nil
+	}
+	candidateFiles["ci.yml"] = baseFiles["ci.yml"]
+	if !reflect.DeepEqual(baseFiles, candidateFiles) {
+		return false, nil
+	}
+	for _, relative := range append([]string{".github/public-workflow-authority.json"}, authorityPaths(baseInventory)...) {
+		before := filepath.Join(repoRoot, filepath.FromSlash(relative))
+		after := filepath.Join(scanRoot, filepath.FromSlash(relative))
+		beforeData, err := os.ReadFile(before)
+		if err != nil {
+			return false, err
+		}
+		afterData, err := os.ReadFile(after)
+		if err != nil {
+			return false, err
+		}
+		beforeInfo, err := os.Lstat(before)
+		if err != nil {
+			return false, err
+		}
+		afterInfo, err := os.Lstat(after)
+		if err != nil {
+			return false, err
+		}
+		if !beforeInfo.Mode().IsRegular() || !afterInfo.Mode().IsRegular() || beforeInfo.Mode() != afterInfo.Mode() || !bytes.Equal(beforeData, afterData) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func authorityPaths(files []authorityFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
 func validateRepositoryAuthority(repoRoot, scanRoot string, bootstrap bool) ([]string, error) {
+	findings, _, err := validateRepositoryAuthorityPolicy(repoRoot, scanRoot, bootstrap)
+	return findings, err
+}
+
+func validateRepositoryAuthorityPolicy(repoRoot, scanRoot string, bootstrap bool) ([]string, *trustPolicy, error) {
 	candidateManifest := authorityManifest{}
 	candidateManifestPath, err := authorityManifestPath(scanRoot)
 	if err != nil {
-		return nil, fmt.Errorf("inspect candidate authority manifest: %w", err)
+		return nil, nil, fmt.Errorf("inspect candidate authority manifest: %w", err)
 	}
 	if err := decodeJSONFile(candidateManifestPath, &candidateManifest); err != nil {
-		return nil, fmt.Errorf("read candidate authority manifest: %w", err)
+		return nil, nil, fmt.Errorf("read candidate authority manifest: %w", err)
 	}
 	candidateInventory, err := authorityInventory(scanRoot)
 	if err != nil {
-		return nil, fmt.Errorf("inventory candidate authority: %w", err)
+		return nil, nil, fmt.Errorf("inventory candidate authority: %w", err)
 	}
 	if bootstrap {
-		return validateAuthorityTransition(nil, candidateManifest, nil, candidateInventory, true), nil
+		return validateAuthorityTransition(nil, candidateManifest, nil, candidateInventory, true), nil, nil
 	}
 	baseManifest := authorityManifest{}
 	baseManifestPath, err := authorityManifestPath(repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("inspect base authority manifest: %w", err)
+		return nil, nil, fmt.Errorf("inspect base authority manifest: %w", err)
 	}
 	if err := decodeJSONFile(baseManifestPath, &baseManifest); err != nil {
-		return nil, fmt.Errorf("read base authority manifest: %w", err)
+		return nil, nil, fmt.Errorf("read base authority manifest: %w", err)
 	}
 	baseInventory, err := authorityInventory(repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("inventory base authority: %w", err)
+		return nil, nil, fmt.Errorf("inventory base authority: %w", err)
 	}
 	findings := validateAuthorityTransition(&baseManifest, candidateManifest, baseInventory, candidateInventory, false)
 
 	basePolicy, err := loadTrustPolicy(repoRoot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	candidatePolicy, err := loadTrustPolicy(scanRoot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	baseContexts, err := repositoryWorkflowContexts(repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("read base workflow contexts: %w", err)
+		return nil, nil, fmt.Errorf("read base workflow contexts: %w", err)
 	}
 	candidateContexts, err := repositoryWorkflowContexts(scanRoot)
 	if err != nil {
-		return nil, fmt.Errorf("read candidate workflow contexts: %w", err)
+		return nil, nil, fmt.Errorf("read candidate workflow contexts: %w", err)
 	}
 	basePresent, err := trustPresence(repoRoot, basePolicy, candidatePolicy)
 	if err != nil {
-		return nil, fmt.Errorf("inspect base trust paths: %w", err)
+		return nil, nil, fmt.Errorf("inspect base trust paths: %w", err)
 	}
 	candidatePresent, err := trustPresence(scanRoot, basePolicy, candidatePolicy)
 	if err != nil {
-		return nil, fmt.Errorf("inspect candidate trust paths: %w", err)
+		return nil, nil, fmt.Errorf("inspect candidate trust paths: %w", err)
 	}
-	findings = append(findings, validateTrustTransition(basePolicy, candidatePolicy, baseContexts, candidateContexts, basePresent, candidatePresent)...)
-	if !trustPoliciesEqual(basePolicy, candidatePolicy) {
+	equivalentBudget, err := equivalentStagedNativeBudget(repoRoot, scanRoot, basePolicy, candidatePolicy, baseInventory, candidateInventory, baseContexts, candidateContexts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("validate equivalent staged native budget: %w", err)
+	}
+	if !equivalentBudget {
+		findings = append(findings, validateTrustTransition(basePolicy, candidatePolicy, baseContexts, candidateContexts, basePresent, candidatePresent)...)
+	}
+	if !equivalentBudget && !trustPoliciesEqual(basePolicy, candidatePolicy) {
 		baseFiles, err := repositoryWorkflowBytes(repoRoot)
 		if err != nil {
-			return nil, fmt.Errorf("read base public workflow bytes: %w", err)
+			return nil, nil, fmt.Errorf("read base public workflow bytes: %w", err)
 		}
 		candidateFiles, err := repositoryWorkflowBytes(scanRoot)
 		if err != nil {
-			return nil, fmt.Errorf("read candidate public workflow bytes: %w", err)
+			return nil, nil, fmt.Errorf("read candidate public workflow bytes: %w", err)
 		}
 		if !reflect.DeepEqual(baseFiles, candidateFiles) {
 			findings = append(findings, "trust-only transition must preserve every public workflow byte and mode")
 		}
 	}
 	sort.Strings(findings)
-	return findings, nil
+	if len(findings) == 0 && equivalentBudget {
+		return findings, &candidatePolicy, nil
+	}
+	return findings, nil, nil
 }
 
 func selectTrustGroups(groups []trustGroup, workflowContexts map[string]string, presentPaths map[string]bool) (map[string]bool, []string) {
@@ -2325,8 +2446,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "--bootstrap-authority cannot be combined with custom policy inputs")
 		os.Exit(2)
 	}
+	var verifiedPolicy *trustPolicy
 	if !customPolicyInputs {
-		authorityFindings, authorityErr := validateRepositoryAuthority(repoRoot, scanRoot, bootstrapAuthority)
+		authorityFindings, effectivePolicy, authorityErr := validateRepositoryAuthorityPolicy(repoRoot, scanRoot, bootstrapAuthority)
 		if authorityErr != nil {
 			fmt.Fprintf(os.Stderr, "validate repository authority: %v\n", authorityErr)
 			os.Exit(1)
@@ -2337,6 +2459,7 @@ func main() {
 			}
 			os.Exit(1)
 		}
+		verifiedPolicy = effectivePolicy
 	}
 	if allowPath == "" {
 		allowPath = filepath.Join(repoRoot, ".github", "public-workflow-secret-allowlist.json")
@@ -2409,6 +2532,15 @@ func main() {
 	if err := decodeJSONFile(presencePath, &groups); err != nil {
 		fmt.Fprintf(os.Stderr, "read presence allowlist: %v\n", err)
 		os.Exit(1)
+	}
+	// Only this mechanically validated equivalent policy may replace base inputs.
+	// Candidate files are never selected wholesale as scanner input paths.
+	if verifiedPolicy != nil {
+		allowlist = verifiedPolicy.Secrets
+		executableList = verifiedPolicy.Executables
+		commandList = verifiedPolicy.Commands
+		actionList = verifiedPolicy.Actions
+		groups = verifiedPolicy.Presence
 	}
 	presentTrustPaths := make(map[string]bool)
 	for _, group := range groups {

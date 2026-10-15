@@ -25,11 +25,11 @@
         },
         {
           "path": ".github/workflows/policytool/main.go",
-          "sha256": "9c38f6e1a92d34d31cd73ba2bd2b092216ab9c115af79a0ef5ec13343c4f4d2d"
+          "sha256": "6db7d0f72db318c232a9f5418e64763c92414d3d45b5b55f041eb332c695198f"
         },
         {
           "path": ".github/workflows/policytool/main_test.go",
-          "sha256": "fadde1edd916918a69f912177a74565a6138ed935aae3509d7c6082924467778"
+          "sha256": "ec415dca7a83c743a16b69636f4fa10134099a828d1f8db01861b47d10114900"
         },
         {
           "path": ".github/workflows/scripts/verify-public-workflow-branch-protection.sh",
@@ -37,7 +37,7 @@
         },
         {
           "path": "scripts/check-public-workflow-policy.sh",
-          "sha256": "2cf3f0461ceed4a3e32265ccad7fd3ac1ae4e162d1f2cb19ba9b8737405db02a"
+          "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061"
         },
         {
           "path": "scripts/fixtures/public-workflow-policy/lifecycle-future.yml",
