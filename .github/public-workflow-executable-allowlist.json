@@ -74,7 +74,7 @@
   {
     "path": "scripts/audit-cloud-symbols.sh",
     "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "sha256": "d7511cd72bb72e0901d6f2746a82a47287c7c1a455d8ac730da6e917a2a5a485",
     "state": "staged",
     "rationale": "Staged v0.86 CI authority. Runs the credential-free core cloud-SDK boundary audit."
@@ -82,7 +82,7 @@
   {
     "path": "scripts/check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
     "state": "staged",
     "rationale": "Staged v0.86 CI authority. Enforces the credential-free public workflow boundary in CI."
@@ -90,7 +90,7 @@
   {
     "path": "scripts/test-audit-cloud-symbols.sh",
     "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "sha256": "5d4beac29580146d71c8ca5650aad56c5ccf06f8cf23aac10da67ce502ae3459",
     "state": "staged",
     "rationale": "Runs the credential-free cloud/Kubernetes boundary audit mutation suite."
@@ -98,7 +98,7 @@
   {
     "path": "scripts/test-check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
-    "contextSHA256": "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b",
     "state": "staged",
     "rationale": "Staged v0.86 CI authority. Exercises fail-closed public workflow policy mutations in CI."
