@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -1773,6 +1774,496 @@ run_candidate_fetch "$1/work" example/repo 0123456789012345678901234567890123456
 			out, err := cmd.CombinedOutput()
 			if err != nil || string(out) != "fixture-event-boundary-ok\n" {
 				t.Fatalf("fetch fixture must own its event tuple: err=%v output=%q", err, out)
+			}
+		})
+	}
+}
+
+// These are authority-boundary tests, not native test acceptance evidence.
+const equivalentBudgetFixtureCI = "name: CI\n\non:\n  push:\n    branches: [ main, develop ]\n  pull_request:\n    branches: [ main, develop ]\n\npermissions:\n  contents: read\n  packages: read\n\ndefaults:\n  run:\n    shell: bash\n\nenv:\n  # CI runners are ephemeral; the iac/diffcache filesystem cache would\n  # cold-miss every job and waste a few ms on disk I/O. Force in-memory\n  # mode per the T3.5 rev3 lifecycle constraint \u2014 no filesystem writes\n  # in containerized runners. Operators running wfctl locally see the\n  # default filesystem cache at ~/.cache/wfctl/diff/.\n  WFCTL_DIFFCACHE: \":memory:\"\n\njobs:\n  public-workflow-policy:\n    name: Public Workflow Policy\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n    - name: Enforce credential-free public workflow policy\n      run: ./scripts/check-public-workflow-policy.sh\n    - name: Exercise public workflow policy mutations\n      run: ./scripts/test-check-public-workflow-policy.sh\n\n  test:\n    name: Test (Go ${{ matrix.go-version }})\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n    strategy:\n      matrix:\n        go-version: ['1.27.2']\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: ${{ matrix.go-version }}\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: Download dependencies\n      run: |\n        go mod download\n        go mod verify\n\n    - name: Run tests\n      run: |\n        go test -v -race -coverprofile=coverage.out ./...\n\n    - name: Upload coverage reports\n      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4\n      if: always()\n      with:\n        files: ./coverage.out\n        fail_ci_if_error: false\n\n  go-tests:\n    name: Go Tests\n    runs-on: ubuntu-latest\n    needs: [test]\n    if: always()\n    timeout-minutes: 1\n    permissions: {}\n    steps:\n    - name: Require successful native test job\n      env:\n        TEST_RESULT: ${{ needs.test.result }}\n      run: test \"${TEST_RESULT}\" = success\n\n  lint:\n    name: Lint\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: Run golangci-lint\n      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1\n      with:\n        version: v2.14.0\n        args: --timeout=10m\n\n  build:\n    name: Build\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: Build server binary\n      run: go build -v -o /dev/null ./cmd/server\n\n    - name: Build all packages\n      run: go build -v ./...\n\n    - name: Upload UI build artifact\n      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n      with:\n        name: admin-ui-dist\n        path: ui/dist/\n        retention-days: 3\n\n  build-examples:\n    name: Build Examples\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Build examples\n      run: |\n        cd example\n        go build -v ./...\n\n  lint-examples:\n    name: Lint Examples\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Run golangci-lint on examples\n      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1\n      with:\n        version: v2.14.0\n        args: --timeout=10m\n        working-directory: example\n\n  go-mod-tidy:\n    name: Go Mod Tidy\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      with:\n        token: ${{ github.token }}\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Run go mod tidy (workflow)\n      run: go mod tidy\n\n    - name: Run go mod tidy (examples)\n      run: |\n        cd example\n        go mod tidy\n\n    - name: Commit tidy changes\n      if: github.event_name == 'push'\n      run: |\n        git config user.name \"github-actions[bot]\"\n        git config user.email \"github-actions[bot]@users.noreply.github.com\"\n        git diff --quiet go.mod go.sum example/go.mod example/go.sum || {\n          git add go.mod go.sum example/go.mod example/go.sum\n          git commit -m \"chore: go mod tidy\"\n          git push\n        }\n\n    - name: Fail if go mod tidy produced changes (PR check)\n      if: github.event_name == 'pull_request'\n      run: |\n        git diff --exit-code go.mod go.sum\n        git diff --exit-code example/go.mod example/go.sum\n\n  ui-test:\n    name: UI Tests\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      packages: read\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Install dependencies\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: cd ui && npm ci\n\n    - name: Lint\n      run: cd ui && npm run lint\n\n    - name: Unit tests\n      run: cd ui && npm test -- --run\n\n  # Validate all example workflow configs at three levels:\n  # 1. YAML parsing (can it be loaded?)\n  # 2. Schema validation (correct types, required fields, valid references?)\n  # 3. Engine loading (can BuildFromConfig produce a working engine?)\n  example-configs:\n    name: Validate Example Configs\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: YAML parsing \u2014 all configs loadable\n      run: go test -v -run TestExampleConfigsLoad -timeout 60s .\n\n    - name: Schema validation \u2014 types, fields, dependencies\n      run: go test -v -run TestExampleConfigsValidate -timeout 60s .\n\n    - name: Engine loading \u2014 BuildFromConfig + start/stop cycle\n      run: go test -v -run TestExampleConfigsBuildFromConfig -timeout 120s .\n\n    - name: Build example runner binary\n      run: |\n        cd example\n        go build -o workflow-example .\n\n    - name: Smoke test \u2014 run each config with timeout\n      run: |\n        cd example\n        passed=0\n        warned=0\n        total=0\n\n        for config in $(find . -name \"*.yaml\" \\\n          -not -path \"*/configs/*\" -not -path \"*/seed/*\" -not -path \"*/observability/*\" \\\n          -not -path \"*/spa/*\" -not -path \"*/components/*\" -not -path \"*/node_modules/*\" \\\n          -not -path \"*/e2e/*\" -not -path \"*/data/*\" -not -path \"*/.*\" \\\n          -not -name \"docker-compose.yaml\" -not -name \"docker-compose.yml\" | sort); do\n          total=$((total + 1))\n          echo -n \"  $config ... \"\n\n          # Run with timeout \u2014 exit 124 means timeout (expected for servers)\n          if timeout 10s ./workflow-example -config \"$config\" >/tmp/workflow-example.out 2>&1; then\n            echo \"OK (exited cleanly)\"\n            passed=$((passed + 1))\n          else\n            rc=$?\n            if [ \"$rc\" -eq 124 ]; then\n              echo \"OK (server timeout \u2014 expected)\"\n              passed=$((passed + 1))\n            else\n              echo \"WARN (exit $rc \u2014 may need runtime deps)\"\n              warned=$((warned + 1))\n            fi\n          fi\n        done\n\n        echo \"\"\n        echo \"Results: $total configs, $passed passed, $warned warnings\"\n\n  godo-banned:\n    name: Verify godo is not imported (issue #617)\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n        with:\n          go-version-file: go.mod\n          cache: false\n      - name: Semantically reject godo imports and module declarations\n        run: go test -mod=readonly ./module -run '^TestNoDigitalOceanGodoReferences$' -count=1\n\n  cloud-sdk-audit:\n    name: Cloud-SDK inventory + Kubernetes backend boundary + asymmetric graph audit\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n        with:\n          go-version-file: go.mod\n          cache: false\n      - name: Download module deps (needed for `go list -deps`)\n        env:\n          GOWORK: \"off\"\n        run: go mod download\n      - name: Test cloud/Kubernetes boundary audit mutations\n        run: ./scripts/test-audit-cloud-symbols.sh\n      - name: Audit cloud-SDK imports + Kubernetes backend boundary + Phase C asymmetric gate\n        # The script enforces (once .phase-c-complete is armed):\n        #   - module/ zero gcp/azure SDK real imports\n        #   - only core kind/k3s and temporary eks/aks factory registrations;\n        #     deleted provider-specific GKE implementation stays absent\n        #   - build graph: zero Azure/azure-sdk-for-go, zero google.golang.org/api,\n        #     zero cloud.google.com/go except compute/metadata (OAuth2 ADC helper\n        #     legitimately pulled by provider/gcp's service-account auth).\n        run: ./scripts/audit-cloud-symbols.sh --check\n      - name: Standalone asymmetric gate \u2014 `go list -deps` (mirrors audit script)\n        # Independent assertion of the same invariant for clarity in CI failure logs.\n        # Any cloud.google.com/go path other than compute/metadata fails the build.\n        env:\n          GOWORK: \"off\"\n        run: |\n          set +e\n          DEPS=$(go list -deps ./... 2>&1)\n          LIST_EXIT=$?\n          set -e\n          if [ \"$LIST_EXIT\" -ne 0 ]; then\n            echo \"FAIL: \\`go list -deps ./...\\` exited $LIST_EXIT (gate cannot enforce):\"\n            echo \"$DEPS\" | head -10 | sed 's/^/  /'\n            exit 1\n          fi\n          # `|| true` on grep is fine: exit 1 from grep means \"no matches\" = success.\n          UNEXPECTED=$(echo \"$DEPS\" \\\n            | grep -E '^(cloud\\.google\\.com/go|google\\.golang\\.org/api|github\\.com/Azure/azure-sdk-for-go)' \\\n            | grep -v '^cloud\\.google\\.com/go/compute/metadata$' \\\n            || true)\n          if [ -n \"$UNEXPECTED\" ]; then\n            echo \"FAIL: unexpected gcp/azure/api transitive deps in workflow-core build graph:\"\n            while read -r dep; do\n              printf '  %s\\n' \"$dep\"\n            done <<< \"$UNEXPECTED\"\n            echo\n            echo \"Only cloud.google.com/go/compute/metadata is allowlisted (OAuth2 ADC helper).\"\n            echo \"Other gcp/azure SDK packages belong in a plugin, not workflow core.\"\n            echo \"See docs/migrations/2026-05-15-plugin-modules-on-iac.md (Phase C).\"\n            exit 1\n          fi\n\n  aws-sdk-banned:\n    name: Verify removed AWS SDK packages are not imported (issue #653)\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      - name: Grep gate \u2014 no *.go file (repo-wide) may import fully-removed AWS service packages\n        # Scans the whole repo. service/eks is allowed only in provider/ (ECS/EKS deploy pipeline).\n        # platform/providers/aws/ was deleted in Phase 3; provider/aws/ (deploy pipeline) is kept.\n        run: |\n          ! grep -rn --include=\"*.go\" \\\n              --exclude-dir=_worktrees \\\n              --exclude-dir=.worktrees \\\n              --exclude-dir=.claude \\\n              --exclude=\"aws_absent_test.go\" \\\n              --exclude=\"nosql_dynamodb.go\" \\\n              -e \"aws-sdk-go-v2/service/apigatewayv2\" \\\n              -e \"aws-sdk-go-v2/service/applicationautoscaling\" \\\n              -e \"aws-sdk-go-v2/service/route53\" \\\n              -e \"aws-sdk-go-v2/service/codebuild\" \\\n              -e \"aws-sdk-go-v2/service/ec2\" \\\n              -e \"aws-sdk-go-v2/service/dynamodb\" \\\n              -e \"aws-sdk-go-v2/service/elasticloadbalancingv2\" \\\n              -e \"aws-sdk-go-v2/service/rds\" \\\n              -e \"aws-sdk-go-v2/service/sqs\" \\\n              .\n      - name: Grep gate \u2014 service/eks must only appear in provider/ (deploy pipeline)\n        # platform/providers/aws/ was deleted in Phase 3; only provider/aws/ legitimately uses\n        # service/eks for ECS/EKS deploy pipeline. Any new import outside provider/ is a regression.\n        run: |\n          ! grep -rn --include=\"*.go\" \\\n              --exclude-dir=_worktrees \\\n              --exclude-dir=.worktrees \\\n              --exclude-dir=.claude \\\n              --exclude=\"aws_absent_test.go\" \\\n              --exclude-dir=\"provider\" \\\n              -e \"aws-sdk-go-v2/service/eks\" \\\n              .\n      - name: Grep gate \u2014 go.mod files must not list removed AWS SDK packages\n        # service/eks is intentionally omitted from this go.mod gate: provider/aws/ (deploy\n        # pipeline) has a legitimate caller. ec2/dynamodb/elb/rds/sqs are added here because\n        # platform/providers/aws/ (their only consumer) was deleted in Phase 3.\n        run: |\n          ! grep -qH \\\n              -e \"aws-sdk-go-v2/service/apigatewayv2\" \\\n              -e \"aws-sdk-go-v2/service/applicationautoscaling\" \\\n              -e \"aws-sdk-go-v2/service/route53\" \\\n              -e \"aws-sdk-go-v2/service/ec2\" \\\n              -e \"aws-sdk-go-v2/service/dynamodb\" \\\n              -e \"aws-sdk-go-v2/service/elasticloadbalancingv2\" \\\n              -e \"aws-sdk-go-v2/service/rds\" \\\n              -e \"aws-sdk-go-v2/service/sqs\" \\\n              go.mod example/go.mod\n"
+
+func equivalentBudgetFixture(t *testing.T) (string, string) {
+	t.Helper()
+	const workflow = ".github/workflows/ci.yml"
+	const active = "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386"
+	const prior = "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598"
+	const next = "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5"
+	policy := trustPolicy{Secrets: []allowEntry{}, Presence: []trustGroup{
+		{workflow, active, "active", "present"}, {workflow, prior, "staged", "present"},
+		{".github/workflows/benchmark.yml", strings.Repeat("8", 64), "active", "present"},
+		{".github/workflows/benchmark.yml", strings.Repeat("9", 64), "staged", "present"},
+	}}
+	policy.Executables = []executableEntry{{"scripts/check-public-workflow-policy.sh", workflow, active, strings.Repeat("a", 64), "active", "Active executable."}}
+	policy.Commands = []commandEntry{{workflow, "go", strings.Repeat("b", 64), active, "active", "Active command."}}
+	policy.Actions = []actionEntry{{workflow, "actions/checkout@" + strings.Repeat("c", 40), strings.Repeat("d", 64), active, "active", "Active action."}}
+	for i := 0; i < 4; i++ {
+		policy.Executables = append(policy.Executables, executableEntry{fmt.Sprintf("scripts/staged-%d.sh", i), workflow, prior, strings.Repeat("e", 64), "staged", "Reviewed executable."})
+	}
+	for i := 0; i < 63; i++ {
+		statement := fmt.Sprintf("%064x", i+1)
+		if i == 0 {
+			statement = "fa9dfdc59736a4c3cfa84b50ab1dbb642e3acdf8597adbc4f08c16c31139853d"
+		}
+		policy.Commands = append(policy.Commands, commandEntry{workflow, "go", statement, prior, "staged", "Reviewed command."})
+	}
+	for i := 0; i < 11; i++ {
+		policy.Actions = append(policy.Actions, actionEntry{workflow, "actions/checkout@" + strings.Repeat("c", 40), fmt.Sprintf("%064x", i+100), prior, "staged", "Reviewed action."})
+	}
+	candidatePolicy := groupedClonePolicy(t, policy)
+	candidatePolicy.Presence[1].ContextSHA256 = next
+	for i := 1; i < len(candidatePolicy.Executables); i++ {
+		candidatePolicy.Executables[i].ContextSHA256 = next
+	}
+	for i := 1; i < len(candidatePolicy.Commands); i++ {
+		candidatePolicy.Commands[i].ContextSHA256 = next
+	}
+	candidatePolicy.Commands[1].StatementSHA256 = "ff839b699b98d3bc674dfc9c04ee51600dec68f4b3dff7292589be885cbe6813"
+	for i := 1; i < len(candidatePolicy.Actions); i++ {
+		candidatePolicy.Actions[i].ContextSHA256 = next
+	}
+	makeRoot := func(candidate bool) string {
+		root := t.TempDir()
+		write := func(name string, data []byte, mode os.FileMode) {
+			t.Helper()
+			path := filepath.Join(root, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, name := range append(append([]string(nil), authorityFixedPaths...), "scripts/fixtures/public-workflow-policy/fixture.yml") {
+			write(name, []byte("authority fixture\n"), 0644)
+		}
+		ci := equivalentBudgetFixtureCI
+		selected := policy
+		if candidate {
+			ci = strings.Replace(ci, "go test -v -race -coverprofile=coverage.out ./...", "go test -v -race -coverprofile=coverage.out ./... -timeout=15m", 1)
+			selected = candidatePolicy
+		}
+		write(workflow, []byte(ci), 0644)
+		write(".github/workflows/benchmark.yml", []byte("name: benchmark\non: push\njobs: {}\n"), 0644)
+		writePolicy := func(kind string, value any) {
+			data, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(".github/public-workflow-"+kind+"-allowlist.json", data, 0644)
+		}
+		writePolicy("secret", selected.Secrets)
+		writePolicy("presence", selected.Presence)
+		writePolicy("executable", selected.Executables)
+		writePolicy("command", selected.Commands)
+		writePolicy("action", selected.Actions)
+		inventory, err := authorityInventory(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		staged := append([]authorityFile(nil), inventory...)
+		staged[0].SHA256 = strings.Repeat("f", 64)
+		data, err := json.Marshal(authorityManifest{Version: 1, Bundles: []authorityBundle{{State: "active", Files: inventory}, {State: "staged", Files: staged}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(".github/public-workflow-authority.json", data, 0644)
+		return root
+	}
+	return makeRoot(false), makeRoot(true)
+}
+
+func TestEquivalentStagedNativeBudgetBoundary(t *testing.T) {
+	mutatePolicy := func(root string, edit func(*trustPolicy)) {
+		t.Helper()
+		p, err := loadTrustPolicy(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		edit(&p)
+		for _, item := range []struct {
+			name  string
+			value any
+		}{{"secret", p.Secrets}, {"presence", p.Presence}, {"executable", p.Executables}, {"command", p.Commands}, {"action", p.Actions}} {
+			data, err := json.Marshal(item.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, ".github/public-workflow-"+item.name+"-allowlist.json"), data, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		edit   func(string, string)
+		reject bool
+	}{
+		{"exact reviewed budget equivalent", func(string, string) {}, false},
+		{"partial context relabel", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Executables[1].ContextSHA256 = strings.Repeat("1", 64) })
+		}, true},
+		{"wrong statement", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Commands[1].StatementSHA256 = strings.Repeat("1", 64) })
+		}, true},
+		{"added command", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Commands = append(p.Commands, p.Commands[1]) })
+		}, true},
+		{"deleted staged row", func(_, c string) { mutatePolicy(c, func(p *trustPolicy) { p.Actions = p.Actions[:len(p.Actions)-1] }) }, true},
+		{"active pin change", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Executables[0].SHA256 = strings.Repeat("1", 64) })
+		}, true},
+		{"staged executable pin change", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Executables[1].SHA256 = strings.Repeat("1", 64) })
+		}, true},
+		{"action node change", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Actions[1].NodeSHA256 = strings.Repeat("1", 64) })
+		}, true},
+		{"rationale change", func(_, c string) { mutatePolicy(c, func(p *trustPolicy) { p.Commands[1].Rationale = "Drift" }) }, true},
+		{"row reordering", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Actions[1], p.Actions[2] = p.Actions[2], p.Actions[1] })
+		}, true},
+		{"promotion", func(_, c string) { mutatePolicy(c, func(p *trustPolicy) { p.Presence[1].State = "active" }) }, true},
+		{"second context change", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Presence[3].ContextSHA256 = strings.Repeat("1", 64) })
+		}, true},
+		{"nonempty secrets", func(_, c string) {
+			mutatePolicy(c, func(p *trustPolicy) { p.Secrets = []allowEntry{{Secret: "TOKEN"}} })
+		}, true},
+		{"null secrets", func(_, c string) { mutatePolicy(c, func(p *trustPolicy) { p.Secrets = nil }) }, true},
+		{"missing previous stage", func(b, _ string) {
+			mutatePolicy(b, func(p *trustPolicy) { p.Presence = append(p.Presence[:1], p.Presence[2:]...) })
+		}, true},
+		{"malformed previous stage", func(b, _ string) { mutatePolicy(b, func(p *trustPolicy) { p.Commands[1].Command = "eval" }) }, true},
+		{"base already realizes stage", func(b, _ string) {
+			budgetEditFixtureFile(t, b, ".github/workflows/ci.yml", "go test -v -race -coverprofile=coverage.out ./...", "go test -v -race -timeout=15m -coverprofile=coverage.out ./...")
+		}, true},
+		{"extra target", func(_, c string) {
+			budgetEditFixtureFile(t, c, ".github/workflows/ci.yml", "./... -timeout=15m", "./... ./config/... -timeout=15m")
+		}, true},
+		{"different timeout", func(_, c string) {
+			budgetEditFixtureFile(t, c, ".github/workflows/ci.yml", "-timeout=15m", "-timeout=16m")
+		}, true},
+		{"malformed YAML", func(_, c string) { budgetEditFixtureFile(t, c, ".github/workflows/ci.yml", "name: CI", "name: [") }, true},
+		{"CI comment drift", func(_, c string) {
+			budgetEditFixtureFile(t, c, ".github/workflows/ci.yml", "name: CI", "# extra\nname: CI")
+		}, true},
+		{"other workflow drift", func(_, c string) {
+			budgetEditFixtureFile(t, c, ".github/workflows/benchmark.yml", "name: benchmark", "name: changed")
+		}, true},
+		{"workflow mode", func(_, c string) {
+			if err := os.Chmod(filepath.Join(c, ".github/workflows/ci.yml"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"authority source drift", func(_, c string) {
+			budgetEditFixtureFile(t, c, ".github/workflows/policytool/main.go", "authority fixture", "unreviewed source")
+		}, true},
+		{"authority mode", func(_, c string) {
+			if err := os.Chmod(filepath.Join(c, ".github/workflows/policytool/main.go"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"H staged pin change", func(_, c string) {
+			budgetEditFixtureFile(t, c, ".github/public-workflow-authority.json", strings.Repeat("f", 64), strings.Repeat("e", 64))
+		}, true},
+		{"H mode", func(_, c string) {
+			if err := os.Chmod(filepath.Join(c, ".github/public-workflow-authority.json"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, candidate := equivalentBudgetFixture(t)
+			tc.edit(base, candidate)
+			findings, err := validateRepositoryAuthority(base, candidate, false)
+			if (err != nil || len(findings) != 0) != tc.reject {
+				t.Fatalf("findings=%v err=%v reject=%v", findings, err, tc.reject)
+			}
+		})
+	}
+}
+
+func budgetEditFixtureFile(t *testing.T, root, relative, before, after string) {
+	t.Helper()
+	name := filepath.Join(root, filepath.FromSlash(relative))
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), before) {
+		t.Fatalf("fixture target missing: %s", relative)
+	}
+	if err := os.WriteFile(name, []byte(strings.ReplaceAll(string(data), before, after)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(name, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEquivalentBudgetRetainsIndependentAuthorityFindings(t *testing.T) {
+	base, candidate := equivalentBudgetFixture(t)
+	for _, root := range []string{base, candidate} {
+		budgetEditFixtureFile(t, root, ".github/public-workflow-authority.json", `"version":1`, `"version":2`)
+	}
+	bp, err := loadTrustPolicy(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, err := loadTrustPolicy(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bi, err := authorityInventory(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci, err := authorityInventory(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc, err := repositoryWorkflowContexts(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := repositoryWorkflowContexts(candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := equivalentStagedNativeBudget(base, candidate, bp, cp, bi, ci, bc, cc)
+	if err != nil || !accepted {
+		t.Fatalf("control did not exercise accepted predicate: accepted=%v err=%v", accepted, err)
+	}
+	findings, effective, err := validateRepositoryAuthorityPolicy(base, candidate, false)
+	if err != nil || len(findings) == 0 || effective != nil {
+		t.Fatalf("independent invalid authority was lost: findings=%v effective=%v err=%v", findings, effective != nil, err)
+	}
+}
+
+// Use the actual frozen repository workflow and trust rows for the real CLI
+// crossing. The synthetic boundary fixture above cannot prove scanner wiring.
+func equivalentBudgetRealRepositoryFixture(t *testing.T) (string, string) {
+	t.Helper()
+	const prior = "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598"
+	const next = "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5"
+	roots := []string{groupedRepositoryFixture(t), groupedRepositoryFixture(t)}
+	for index, root := range roots {
+		policy, err := loadTrustPolicy(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The tests can run on either side of the proposed root migration.
+		for i := range policy.Presence {
+			if policy.Presence[i].ContextSHA256 == next {
+				policy.Presence[i].ContextSHA256 = prior
+			}
+		}
+		for i := range policy.Executables {
+			if policy.Executables[i].ContextSHA256 == next {
+				policy.Executables[i].ContextSHA256 = prior
+			}
+		}
+		for i := range policy.Commands {
+			if policy.Commands[i].ContextSHA256 == next {
+				policy.Commands[i].ContextSHA256 = prior
+			}
+			if policy.Commands[i].StatementSHA256 == "ff839b699b98d3bc674dfc9c04ee51600dec68f4b3dff7292589be885cbe6813" {
+				policy.Commands[i].StatementSHA256 = "fa9dfdc59736a4c3cfa84b50ab1dbb642e3acdf8597adbc4f08c16c31139853d"
+			}
+		}
+		for i := range policy.Actions {
+			if policy.Actions[i].ContextSHA256 == next {
+				policy.Actions[i].ContextSHA256 = prior
+			}
+		}
+		ci := equivalentBudgetFixtureCI
+		if index == 1 {
+			ci = strings.Replace(ci, "go test -v -race -coverprofile=coverage.out ./...", "go test -v -race -coverprofile=coverage.out ./... -timeout=15m", 1)
+			for i := range policy.Presence {
+				if policy.Presence[i].ContextSHA256 == prior {
+					policy.Presence[i].ContextSHA256 = next
+				}
+			}
+			for i := range policy.Executables {
+				if policy.Executables[i].ContextSHA256 == prior {
+					policy.Executables[i].ContextSHA256 = next
+				}
+			}
+			for i := range policy.Commands {
+				if policy.Commands[i].ContextSHA256 == prior {
+					policy.Commands[i].ContextSHA256 = next
+					if policy.Commands[i].StatementSHA256 == "fa9dfdc59736a4c3cfa84b50ab1dbb642e3acdf8597adbc4f08c16c31139853d" {
+						policy.Commands[i].StatementSHA256 = "ff839b699b98d3bc674dfc9c04ee51600dec68f4b3dff7292589be885cbe6813"
+					}
+				}
+			}
+			for i := range policy.Actions {
+				if policy.Actions[i].ContextSHA256 == prior {
+					policy.Actions[i].ContextSHA256 = next
+				}
+			}
+		}
+		for _, item := range []struct {
+			name  string
+			value any
+		}{{"secret", policy.Secrets}, {"presence", policy.Presence}, {"executable", policy.Executables}, {"command", policy.Commands}, {"action", policy.Actions}} {
+			data, err := json.Marshal(item.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			name := filepath.Join(root, ".github/public-workflow-"+item.name+"-allowlist.json")
+			if err := os.WriteFile(name, data, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(name, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		path := filepath.Join(root, ".github/workflows/ci.yml")
+		if err := os.WriteFile(path, []byte(ci), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0644); err != nil {
+			t.Fatal(err)
+		}
+		contexts, err := repositoryWorkflowContexts(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		present, err := trustPresence(root, policy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected, findings := selectTrustGroups(policy.Presence, contexts, present)
+		if len(findings) != 0 {
+			t.Fatalf("real fixture trust groups: %v", findings)
+		}
+		// Workflow scanning hashes selected executables even outside H. Copy the
+		// full selected dependency closure; do not special-case missing scripts.
+		copied := make(map[string]bool)
+		for _, entry := range policy.Executables {
+			if !selected[entry.WorkflowPath+"\x00"+entry.ContextSHA256] || copied[entry.Path] {
+				continue
+			}
+			relative := filepath.Clean(filepath.FromSlash(entry.Path))
+			if filepath.IsAbs(relative) || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				t.Fatalf("invalid selected fixture path: %s", entry.Path)
+			}
+			source := filepath.Join("..", "..", "..", relative)
+			info, err := os.Lstat(source)
+			if err != nil || !info.Mode().IsRegular() {
+				t.Fatalf("selected executable %s: info=%v err=%v", entry.Path, info, err)
+			}
+			actual, err := hashAuthorityFile(source)
+			if err != nil || actual != entry.SHA256 {
+				t.Fatalf("selected executable %s: sha=%s want=%s err=%v", entry.Path, actual, entry.SHA256, err)
+			}
+			data, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			destination := filepath.Join(root, relative)
+			if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(destination, data, info.Mode().Perm()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(destination, info.Mode().Perm()); err != nil {
+				t.Fatal(err)
+			}
+			copied[entry.Path] = true
+		}
+	}
+	return roots[0], roots[1]
+}
+
+func TestEquivalentStagedBudgetCLICrossing(t *testing.T) {
+	const marker = "WF_POLICY_EQUIVALENT_BUDGET_CLI_CHILD"
+	if os.Getenv(marker) == "1" {
+		os.Args = []string{"policytool", "--repo", os.Getenv("WF_POLICY_EQUIVALENT_BASE"), "--scan-root", os.Getenv("WF_POLICY_EQUIVALENT_CANDIDATE")}
+		main()
+		return
+	}
+	for _, tc := range []struct {
+		name               string
+		unrelated          bool
+		authorityDrift     bool
+		tamperedExecutable bool
+		pass               bool
+	}{
+		{"actual full scanner accepts equivalent policy", false, false, false, true},
+		{"accepted predicate still runs unrelated policy checks", true, false, false, false},
+		{"invalid authority cannot select candidate policy", false, true, false, false},
+		{"accepted predicate still hashes selected executables", false, false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, candidate := equivalentBudgetRealRepositoryFixture(t)
+			if tc.unrelated {
+				for _, root := range []string{base, candidate} {
+					name := filepath.Join(root, ".github/workflows/unreviewed.yml")
+					if err := os.WriteFile(name, []byte("name: unreviewed\non: push\njobs: {}\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chmod(name, 0644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				findings, effective, err := validateRepositoryAuthorityPolicy(base, candidate, false)
+				if err != nil || len(findings) != 0 || effective == nil {
+					t.Fatalf("control missed accepted predicate: findings=%v effective=%v err=%v", findings, effective != nil, err)
+				}
+			}
+			if tc.tamperedExecutable {
+				audit := filepath.Join(candidate, "scripts/audit-cloud-symbols.sh")
+				info, err := os.Stat(audit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(audit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(audit, append(data, []byte("\n# test control: executable byte tamper\n")...), info.Mode().Perm()); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(audit, info.Mode().Perm()); err != nil {
+					t.Fatal(err)
+				}
+				findings, effective, err := validateRepositoryAuthorityPolicy(base, candidate, false)
+				if err != nil || len(findings) != 0 || effective == nil {
+					t.Fatalf("control missed accepted predicate: findings=%v effective=%v err=%v", findings, effective != nil, err)
+				}
+			}
+			if tc.authorityDrift {
+				budgetEditFixtureFile(t, candidate, ".github/workflows/policytool/main.go", "package main", "// unexpected source drift\npackage main")
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, executable, "-test.run=^TestEquivalentStagedBudgetCLICrossing$")
+			command.Env = append(os.Environ(), marker+"=1", "WF_POLICY_EQUIVALENT_BASE="+base, "WF_POLICY_EQUIVALENT_CANDIDATE="+candidate)
+			output, err := command.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("CLI crossing deadline: %v", ctx.Err())
+			}
+			if (err == nil) != tc.pass {
+				t.Fatalf("pass=%v err=%v output=%s", tc.pass, err, output)
+			}
+			if tc.pass && !strings.Contains(string(output), "public workflow policy passed") {
+				t.Fatalf("real scanner success missing: %s", output)
+			}
+			if tc.unrelated && !strings.Contains(string(output), "no trust group matches workflow") {
+				t.Fatalf("unrelated scanner rejection missing: %s", output)
+			}
+			if tc.tamperedExecutable && !strings.Contains(string(output), "executable hash mismatch for scripts/audit-cloud-symbols.sh") {
+				t.Fatalf("executable scanner rejection missing: %s", output)
 			}
 		})
 	}
