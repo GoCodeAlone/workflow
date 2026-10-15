@@ -110,5 +110,11 @@
     "contextSHA256": "7ac0c26e03352ce47d2898e8af41c39b58af3bc050d91d598c91efa9e8631fc6",
     "state": "active",
     "presence": "present"
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "contextSHA256": "447b640269534fa2108222bfa4e77c885318f92ba206b5aac070646ac910d598",
+    "state": "staged",
+    "presence": "present"
   }
 ]
