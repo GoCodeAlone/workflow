@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1780,7 +1782,145 @@ run_candidate_fetch "$1/work" example/repo 0123456789012345678901234567890123456
 }
 
 // These are authority-boundary tests, not native test acceptance evidence.
-const equivalentBudgetFixtureCI = "name: CI\n\non:\n  push:\n    branches: [ main, develop ]\n  pull_request:\n    branches: [ main, develop ]\n\npermissions:\n  contents: read\n  packages: read\n\ndefaults:\n  run:\n    shell: bash\n\nenv:\n  # CI runners are ephemeral; the iac/diffcache filesystem cache would\n  # cold-miss every job and waste a few ms on disk I/O. Force in-memory\n  # mode per the T3.5 rev3 lifecycle constraint \u2014 no filesystem writes\n  # in containerized runners. Operators running wfctl locally see the\n  # default filesystem cache at ~/.cache/wfctl/diff/.\n  WFCTL_DIFFCACHE: \":memory:\"\n\njobs:\n  public-workflow-policy:\n    name: Public Workflow Policy\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n    - name: Enforce credential-free public workflow policy\n      run: ./scripts/check-public-workflow-policy.sh\n    - name: Exercise public workflow policy mutations\n      run: ./scripts/test-check-public-workflow-policy.sh\n\n  test:\n    name: Test (Go ${{ matrix.go-version }})\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n    strategy:\n      matrix:\n        go-version: ['1.27.2']\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: ${{ matrix.go-version }}\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: Download dependencies\n      run: |\n        go mod download\n        go mod verify\n\n    - name: Run tests\n      run: |\n        go test -v -race -coverprofile=coverage.out ./...\n\n    - name: Upload coverage reports\n      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4\n      if: always()\n      with:\n        files: ./coverage.out\n        fail_ci_if_error: false\n\n  go-tests:\n    name: Go Tests\n    runs-on: ubuntu-latest\n    needs: [test]\n    if: always()\n    timeout-minutes: 1\n    permissions: {}\n    steps:\n    - name: Require successful native test job\n      env:\n        TEST_RESULT: ${{ needs.test.result }}\n      run: test \"${TEST_RESULT}\" = success\n\n  lint:\n    name: Lint\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: Run golangci-lint\n      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1\n      with:\n        version: v2.14.0\n        args: --timeout=10m\n\n  build:\n    name: Build\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: Build server binary\n      run: go build -v -o /dev/null ./cmd/server\n\n    - name: Build all packages\n      run: go build -v ./...\n\n    - name: Upload UI build artifact\n      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n      with:\n        name: admin-ui-dist\n        path: ui/dist/\n        retention-days: 3\n\n  build-examples:\n    name: Build Examples\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Build examples\n      run: |\n        cd example\n        go build -v ./...\n\n  lint-examples:\n    name: Lint Examples\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Run golangci-lint on examples\n      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1\n      with:\n        version: v2.14.0\n        args: --timeout=10m\n        working-directory: example\n\n  go-mod-tidy:\n    name: Go Mod Tidy\n    runs-on: ubuntu-latest\n    permissions:\n      contents: write\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      with:\n        token: ${{ github.token }}\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Run go mod tidy (workflow)\n      run: go mod tidy\n\n    - name: Run go mod tidy (examples)\n      run: |\n        cd example\n        go mod tidy\n\n    - name: Commit tidy changes\n      if: github.event_name == 'push'\n      run: |\n        git config user.name \"github-actions[bot]\"\n        git config user.email \"github-actions[bot]@users.noreply.github.com\"\n        git diff --quiet go.mod go.sum example/go.mod example/go.sum || {\n          git add go.mod go.sum example/go.mod example/go.sum\n          git commit -m \"chore: go mod tidy\"\n          git push\n        }\n\n    - name: Fail if go mod tidy produced changes (PR check)\n      if: github.event_name == 'pull_request'\n      run: |\n        git diff --exit-code go.mod go.sum\n        git diff --exit-code example/go.mod example/go.sum\n\n  ui-test:\n    name: UI Tests\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n      packages: read\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Install dependencies\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: cd ui && npm ci\n\n    - name: Lint\n      run: cd ui && npm run lint\n\n    - name: Unit tests\n      run: cd ui && npm test -- --run\n\n  # Validate all example workflow configs at three levels:\n  # 1. YAML parsing (can it be loaded?)\n  # 2. Schema validation (correct types, required fields, valid references?)\n  # 3. Engine loading (can BuildFromConfig produce a working engine?)\n  example-configs:\n    name: Validate Example Configs\n    runs-on: ubuntu-latest\n    needs: [go-mod-tidy]\n    permissions:\n      contents: read\n      packages: read\n\n    steps:\n    - name: Check out code\n      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n\n    - name: Set up Go\n      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n      with:\n        go-version: '1.27.2'\n        cache: false\n\n    - name: Set up Node.js\n      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0\n      with:\n        node-version: '24'\n        registry-url: 'https://npm.pkg.github.com'\n        cache: 'npm'\n        cache-dependency-path: ui/package-lock.json\n\n    - name: Build UI assets\n      env:\n        NODE_AUTH_TOKEN: ${{ github.token }}\n      run: |\n        cd ui && npm ci && npm run build\n\n    - name: YAML parsing \u2014 all configs loadable\n      run: go test -v -run TestExampleConfigsLoad -timeout 60s .\n\n    - name: Schema validation \u2014 types, fields, dependencies\n      run: go test -v -run TestExampleConfigsValidate -timeout 60s .\n\n    - name: Engine loading \u2014 BuildFromConfig + start/stop cycle\n      run: go test -v -run TestExampleConfigsBuildFromConfig -timeout 120s .\n\n    - name: Build example runner binary\n      run: |\n        cd example\n        go build -o workflow-example .\n\n    - name: Smoke test \u2014 run each config with timeout\n      run: |\n        cd example\n        passed=0\n        warned=0\n        total=0\n\n        for config in $(find . -name \"*.yaml\" \\\n          -not -path \"*/configs/*\" -not -path \"*/seed/*\" -not -path \"*/observability/*\" \\\n          -not -path \"*/spa/*\" -not -path \"*/components/*\" -not -path \"*/node_modules/*\" \\\n          -not -path \"*/e2e/*\" -not -path \"*/data/*\" -not -path \"*/.*\" \\\n          -not -name \"docker-compose.yaml\" -not -name \"docker-compose.yml\" | sort); do\n          total=$((total + 1))\n          echo -n \"  $config ... \"\n\n          # Run with timeout \u2014 exit 124 means timeout (expected for servers)\n          if timeout 10s ./workflow-example -config \"$config\" >/tmp/workflow-example.out 2>&1; then\n            echo \"OK (exited cleanly)\"\n            passed=$((passed + 1))\n          else\n            rc=$?\n            if [ \"$rc\" -eq 124 ]; then\n              echo \"OK (server timeout \u2014 expected)\"\n              passed=$((passed + 1))\n            else\n              echo \"WARN (exit $rc \u2014 may need runtime deps)\"\n              warned=$((warned + 1))\n            fi\n          fi\n        done\n\n        echo \"\"\n        echo \"Results: $total configs, $passed passed, $warned warnings\"\n\n  godo-banned:\n    name: Verify godo is not imported (issue #617)\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n        with:\n          go-version-file: go.mod\n          cache: false\n      - name: Semantically reject godo imports and module declarations\n        run: go test -mod=readonly ./module -run '^TestNoDigitalOceanGodoReferences$' -count=1\n\n  cloud-sdk-audit:\n    name: Cloud-SDK inventory + Kubernetes backend boundary + asymmetric graph audit\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0\n        with:\n          go-version-file: go.mod\n          cache: false\n      - name: Download module deps (needed for `go list -deps`)\n        env:\n          GOWORK: \"off\"\n        run: go mod download\n      - name: Test cloud/Kubernetes boundary audit mutations\n        run: ./scripts/test-audit-cloud-symbols.sh\n      - name: Audit cloud-SDK imports + Kubernetes backend boundary + Phase C asymmetric gate\n        # The script enforces (once .phase-c-complete is armed):\n        #   - module/ zero gcp/azure SDK real imports\n        #   - only core kind/k3s and temporary eks/aks factory registrations;\n        #     deleted provider-specific GKE implementation stays absent\n        #   - build graph: zero Azure/azure-sdk-for-go, zero google.golang.org/api,\n        #     zero cloud.google.com/go except compute/metadata (OAuth2 ADC helper\n        #     legitimately pulled by provider/gcp's service-account auth).\n        run: ./scripts/audit-cloud-symbols.sh --check\n      - name: Standalone asymmetric gate \u2014 `go list -deps` (mirrors audit script)\n        # Independent assertion of the same invariant for clarity in CI failure logs.\n        # Any cloud.google.com/go path other than compute/metadata fails the build.\n        env:\n          GOWORK: \"off\"\n        run: |\n          set +e\n          DEPS=$(go list -deps ./... 2>&1)\n          LIST_EXIT=$?\n          set -e\n          if [ \"$LIST_EXIT\" -ne 0 ]; then\n            echo \"FAIL: \\`go list -deps ./...\\` exited $LIST_EXIT (gate cannot enforce):\"\n            echo \"$DEPS\" | head -10 | sed 's/^/  /'\n            exit 1\n          fi\n          # `|| true` on grep is fine: exit 1 from grep means \"no matches\" = success.\n          UNEXPECTED=$(echo \"$DEPS\" \\\n            | grep -E '^(cloud\\.google\\.com/go|google\\.golang\\.org/api|github\\.com/Azure/azure-sdk-for-go)' \\\n            | grep -v '^cloud\\.google\\.com/go/compute/metadata$' \\\n            || true)\n          if [ -n \"$UNEXPECTED\" ]; then\n            echo \"FAIL: unexpected gcp/azure/api transitive deps in workflow-core build graph:\"\n            while read -r dep; do\n              printf '  %s\\n' \"$dep\"\n            done <<< \"$UNEXPECTED\"\n            echo\n            echo \"Only cloud.google.com/go/compute/metadata is allowlisted (OAuth2 ADC helper).\"\n            echo \"Other gcp/azure SDK packages belong in a plugin, not workflow core.\"\n            echo \"See docs/migrations/2026-05-15-plugin-modules-on-iac.md (Phase C).\"\n            exit 1\n          fi\n\n  aws-sdk-banned:\n    name: Verify removed AWS SDK packages are not imported (issue #653)\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3\n      - name: Grep gate \u2014 no *.go file (repo-wide) may import fully-removed AWS service packages\n        # Scans the whole repo. service/eks is allowed only in provider/ (ECS/EKS deploy pipeline).\n        # platform/providers/aws/ was deleted in Phase 3; provider/aws/ (deploy pipeline) is kept.\n        run: |\n          ! grep -rn --include=\"*.go\" \\\n              --exclude-dir=_worktrees \\\n              --exclude-dir=.worktrees \\\n              --exclude-dir=.claude \\\n              --exclude=\"aws_absent_test.go\" \\\n              --exclude=\"nosql_dynamodb.go\" \\\n              -e \"aws-sdk-go-v2/service/apigatewayv2\" \\\n              -e \"aws-sdk-go-v2/service/applicationautoscaling\" \\\n              -e \"aws-sdk-go-v2/service/route53\" \\\n              -e \"aws-sdk-go-v2/service/codebuild\" \\\n              -e \"aws-sdk-go-v2/service/ec2\" \\\n              -e \"aws-sdk-go-v2/service/dynamodb\" \\\n              -e \"aws-sdk-go-v2/service/elasticloadbalancingv2\" \\\n              -e \"aws-sdk-go-v2/service/rds\" \\\n              -e \"aws-sdk-go-v2/service/sqs\" \\\n              .\n      - name: Grep gate \u2014 service/eks must only appear in provider/ (deploy pipeline)\n        # platform/providers/aws/ was deleted in Phase 3; only provider/aws/ legitimately uses\n        # service/eks for ECS/EKS deploy pipeline. Any new import outside provider/ is a regression.\n        run: |\n          ! grep -rn --include=\"*.go\" \\\n              --exclude-dir=_worktrees \\\n              --exclude-dir=.worktrees \\\n              --exclude-dir=.claude \\\n              --exclude=\"aws_absent_test.go\" \\\n              --exclude-dir=\"provider\" \\\n              -e \"aws-sdk-go-v2/service/eks\" \\\n              .\n      - name: Grep gate \u2014 go.mod files must not list removed AWS SDK packages\n        # service/eks is intentionally omitted from this go.mod gate: provider/aws/ (deploy\n        # pipeline) has a legitimate caller. ec2/dynamodb/elb/rds/sqs are added here because\n        # platform/providers/aws/ (their only consumer) was deleted in Phase 3.\n        run: |\n          ! grep -qH \\\n              -e \"aws-sdk-go-v2/service/apigatewayv2\" \\\n              -e \"aws-sdk-go-v2/service/applicationautoscaling\" \\\n              -e \"aws-sdk-go-v2/service/route53\" \\\n              -e \"aws-sdk-go-v2/service/ec2\" \\\n              -e \"aws-sdk-go-v2/service/dynamodb\" \\\n              -e \"aws-sdk-go-v2/service/elasticloadbalancingv2\" \\\n              -e \"aws-sdk-go-v2/service/rds\" \\\n              -e \"aws-sdk-go-v2/service/sqs\" \\\n              go.mod example/go.mod\n"
+const equivalentBudgetBaselineSHA256 = "6ecc07031dd1ad63df7e48bdc490fd13e7e9cb1b6c5073c9f492547a8f0b7851"
+const equivalentBudgetSuffixSHA256 = "9456c3e65ad04f227c34dc80cf6e094d4f2cc89c0dd5484c0fc7e28ae0edee6c"
+
+// Reuse the reviewed YAML as data rather than duplicating its audit patterns in
+// Go source. Unknown bytes fail closed; only the exact reviewed suffix form is
+// normalized, and its result must reproduce the original fixture byte for byte.
+func readEquivalentBudgetFixtureCI(repository string) (string, error) {
+	root, err := os.OpenRoot(repository)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	const name = ".github/workflows/ci.yml"
+	info, err := root.Lstat(name)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("CI fixture must be a regular file")
+	}
+	file, err := root.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	info, err = file.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("CI fixture must be a regular file")
+	}
+	// The largest reviewed input is 17115 bytes. Bound reads before hashing.
+	data, err := io.ReadAll(io.LimitReader(file, 17116))
+	if err != nil {
+		return "", err
+	}
+	ci := string(data)
+	switch fmt.Sprintf("%x", sha256.Sum256(data)) {
+	case equivalentBudgetBaselineSHA256:
+		return ci, nil
+	case equivalentBudgetSuffixSHA256:
+		ci = strings.Replace(ci, "go test -v -race -coverprofile=coverage.out ./... -timeout=15m", "go test -v -race -coverprofile=coverage.out ./...", 1)
+		if fmt.Sprintf("%x", sha256.Sum256([]byte(ci))) == equivalentBudgetBaselineSHA256 {
+			return ci, nil
+		}
+	}
+	return "", fmt.Errorf("CI fixture does not match reviewed bytes")
+}
+
+func equivalentBudgetFixtureCI(t *testing.T) string {
+	t.Helper()
+	ci, err := readEquivalentBudgetFixtureCI(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ci
+}
+
+func TestEquivalentBudgetFixtureReader(t *testing.T) {
+	baseline := equivalentBudgetFixtureCI(t)
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(baseline))); got != equivalentBudgetBaselineSHA256 {
+		t.Fatalf("canonical fixture hash=%s", got)
+	}
+	suffix := strings.Replace(baseline, "go test -v -race -coverprofile=coverage.out ./...", "go test -v -race -coverprofile=coverage.out ./... -timeout=15m", 1)
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(suffix))); got != equivalentBudgetSuffixSHA256 {
+		t.Fatalf("reviewed suffix fixture hash=%s", got)
+	}
+	for _, tc := range []struct {
+		name string
+		data string
+		pass bool
+	}{
+		{"exact baseline", baseline, true},
+		{"exact reviewed suffix", suffix, true},
+		{"empty", "", false},
+		{"comment drift", baseline + "\n# unrelated drift\n", false},
+		{"whitespace drift", baseline + "\n", false},
+		{"unreviewed timeout", strings.Replace(suffix, "-timeout=15m", "-timeout=16m", 1), false},
+		{"duplicate suffix", strings.Replace(suffix, "-timeout=15m", "-timeout=15m -timeout=15m", 1), false},
+		{"oversized input", strings.Repeat("x", 17117), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, ".github", "workflows", "ci.yml")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.data), 0644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := readEquivalentBudgetFixtureCI(root)
+			if tc.pass {
+				if err != nil || got != baseline {
+					t.Fatalf("reviewed fixture changed: err=%v hash=%x", err, sha256.Sum256([]byte(got)))
+				}
+			} else if err == nil || got != "" {
+				t.Fatalf("unreviewed fixture accepted: err=%v", err)
+			}
+		})
+	}
+	t.Run("missing root", func(t *testing.T) {
+		if got, err := readEquivalentBudgetFixtureCI(filepath.Join(t.TempDir(), "missing")); err == nil || got != "" {
+			t.Fatalf("missing root accepted: err=%v", err)
+		}
+	})
+	for _, kind := range []string{"missing file", "directory", "escaping file symlink", "escaping ancestor symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			root, outside := t.TempDir(), t.TempDir()
+			path := filepath.Join(root, ".github", "workflows", "ci.yml")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(outside, "ci.yml"), []byte(baseline), 0644); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "directory":
+				if err := os.Mkdir(path, 0755); err != nil {
+					t.Fatal(err)
+				}
+			case "escaping file symlink":
+				if err := os.Symlink(filepath.Join(outside, "ci.yml"), path); err != nil {
+					t.Fatal(err)
+				}
+			case "escaping ancestor symlink":
+				if err := os.Remove(filepath.Dir(path)); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, filepath.Dir(path)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got, err := readEquivalentBudgetFixtureCI(root); err == nil || got != "" {
+				t.Fatalf("unsafe fixture accepted: err=%v", err)
+			}
+		})
+	}
+}
 
 func equivalentBudgetFixture(t *testing.T) (string, string) {
 	t.Helper()
@@ -1839,7 +1979,7 @@ func equivalentBudgetFixture(t *testing.T) (string, string) {
 		for _, name := range append(append([]string(nil), authorityFixedPaths...), "scripts/fixtures/public-workflow-policy/fixture.yml") {
 			write(name, []byte("authority fixture\n"), 0644)
 		}
-		ci := equivalentBudgetFixtureCI
+		ci := equivalentBudgetFixtureCI(t)
 		selected := policy
 		if candidate {
 			ci = strings.Replace(ci, "go test -v -race -coverprofile=coverage.out ./...", "go test -v -race -coverprofile=coverage.out ./... -timeout=15m", 1)
@@ -2079,7 +2219,7 @@ func equivalentBudgetRealRepositoryFixture(t *testing.T) (string, string) {
 				policy.Actions[i].ContextSHA256 = prior
 			}
 		}
-		ci := equivalentBudgetFixtureCI
+		ci := equivalentBudgetFixtureCI(t)
 		if index == 1 {
 			ci = strings.Replace(ci, "go test -v -race -coverprofile=coverage.out ./...", "go test -v -race -coverprofile=coverage.out ./... -timeout=15m", 1)
 			for i := range policy.Presence {
