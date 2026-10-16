@@ -43,6 +43,14 @@ var pipelineRecordDiagnosticPhases = map[string]bool{
 	"container_create": true, "container_id": true, "container_attach": true,
 	"container_wait": true, "container_status": true, "container_command": true,
 	"cleanup": true, "pipeline_result": true, "record_write": true,
+	"docker_resolve_cli": true, "docker_resolve_home": true, "docker_resolve_config": true,
+	"docker_resolve_context": true, "docker_resolve_context_metadata": true,
+	"docker_resolve_endpoint": true, "docker_resolve_tls": true,
+	"docker_resolve_private_config": true, "docker_resolve_identity_metadata": true,
+	"docker_resolve_context_cancelled": true, "docker_resolve_context_deadline": true,
+	"docker_resolve_context_capture": true, "docker_resolve_context_command": true,
+	"docker_resolve_identity_cancelled": true, "docker_resolve_identity_deadline": true,
+	"docker_resolve_identity_capture": true, "docker_resolve_identity_command": true,
 }
 
 type pipelineRecordDiagnostic struct {
@@ -61,6 +69,54 @@ func newPipelineRecordDiagnostic() *pipelineRecordDiagnostic {
 func pipelineRecordDiagnosticFromContext(ctx context.Context) *pipelineRecordDiagnostic {
 	diagnostic, _ := ctx.Value(pipelineRecordDiagnosticKey{}).(*pipelineRecordDiagnostic)
 	return diagnostic
+}
+
+// The private tag applies only to the two initial resolver calls. Subsequent
+// server-ID checks and successful resolution never set operation/status fields.
+type pipelineDockerResolutionKey struct{}
+
+func pipelineDockerResolutionContext(ctx context.Context, operation string) context.Context {
+	if pipelineRecordDiagnosticFromContext(ctx) == nil {
+		return ctx
+	}
+	switch operation {
+	case "resolve_context", "resolve_identity":
+		return context.WithValue(ctx, pipelineDockerResolutionKey{}, operation)
+	default:
+		return ctx
+	}
+}
+
+func observePipelineDockerResolutionFailure(ctx context.Context, outcome string, exit int) {
+	diagnostic := pipelineRecordDiagnosticFromContext(ctx)
+	if diagnostic == nil {
+		return
+	}
+	operation, _ := ctx.Value(pipelineDockerResolutionKey{}).(string)
+	var stage string
+	switch operation {
+	case "resolve_context":
+		stage = "context"
+	case "resolve_identity":
+		stage = "identity"
+	default:
+		return
+	}
+	switch outcome {
+	case "cancelled", "deadline", "capture", "command":
+	default:
+		return
+	}
+	diagnostic.mu.Lock()
+	defer diagnostic.mu.Unlock()
+	if diagnostic.report.Phase == "" {
+		// Freeze the whole observation together; later cleanup or operations
+		// cannot mix their status with the first resolver failure.
+		diagnostic.report.Phase = "docker_resolve_" + stage + "_" + outcome
+		diagnostic.report.Operation = operation
+		diagnostic.report.DockerExit = pipelineRecordDiagnosticExit(exit)
+		diagnostic.report.ContainerExit = -1
+	}
 }
 
 func (d *pipelineRecordDiagnostic) fail(phase string) {
