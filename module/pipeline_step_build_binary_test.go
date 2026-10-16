@@ -230,6 +230,10 @@ func TestBuildBinaryStep_DryRun_GeneratedMainHTTPRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve source root: %v", err)
 	}
+	sourceSums, err := os.ReadFile(filepath.Join(sourceRoot, "go.sum"))
+	if err != nil {
+		t.Fatalf("read source dependency checksums: %v", err)
+	}
 	for _, embedConfig := range []bool{true, false} {
 		name := "external-config"
 		if embedConfig {
@@ -284,6 +288,9 @@ func TestBuildBinaryStep_DryRun_GeneratedMainHTTPRuntime(t *testing.T) {
 			if !ok || len(contents) != 3 {
 				t.Fatalf("file_contents = %v, want exactly three emitted files", result.Output["file_contents"])
 			}
+			if !strings.Contains(contents["go.mod"], "\ngo 1.27.2\n") {
+				t.Fatalf("default emitted go.mod does not select Go 1.27.2:\n%s", contents["go.mod"])
+			}
 			for _, path := range []string{"go.mod", "main.go", "app.yaml"} {
 				data, ok := contents[path]
 				if !ok {
@@ -292,6 +299,12 @@ func TestBuildBinaryStep_DryRun_GeneratedMainHTTPRuntime(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(outputDir, path), []byte(data), 0600); err != nil {
 					t.Fatalf("materialize %s: %v", path, err)
 				}
+			}
+			// Resolve the unreleased source using its committed checksums. Build only
+			// the app graph offline; tidy would also load dependencies' test graphs,
+			// which the owning module's normal download/test does not provision.
+			if err := os.WriteFile(filepath.Join(outputDir, "go.sum"), sourceSums, 0600); err != nil {
+				t.Fatalf("seed source dependency checksums: %v", err)
 			}
 			runGo := func(args ...string) {
 				t.Helper()
@@ -304,9 +317,8 @@ func TestBuildBinaryStep_DryRun_GeneratedMainHTTPRuntime(t *testing.T) {
 			}
 			// The emitter's unreleased dependency is resolved only for this source integration.
 			runGo("mod", "edit", "-replace=github.com/GoCodeAlone/workflow="+sourceRoot)
-			runGo("mod", "tidy")
 			binary := filepath.Join(outputDir, "proof-app")
-			runGo("build", "-o", binary, ".")
+			runGo("build", "-mod=mod", "-o", binary, ".")
 			if info, err := os.Stat(binary); err != nil || info.Size() == 0 {
 				t.Fatalf("missing or empty compiled generated binary: %v", err)
 			}
