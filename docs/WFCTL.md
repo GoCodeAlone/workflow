@@ -1400,6 +1400,23 @@ are mode 0600. Cancellation escalates through graceful shutdown, TERM, and
 KILL. Failed cleanup or daemon drift retains the journal and blocks new work;
 do not manually discard retained records to bypass reconciliation.
 
+Daemon identity uses the pinned Docker CLI's system dial-stdio transport
+with one HTTP GET /info, rather than docker info client-plugin reporting.
+Docker may also ping during CLI initialization. The request preserves the
+selected TCP HTTP authority or Docker's Unix dummy host, and keeps stdin open
+until the response connection closes. The existing five-second helper bound
+applies to every identity recheck. Serialized requests over 512 bytes, full
+responses (headers included) over 1 MiB, incomplete or ambiguous framing,
+non-200 replies, invalid IDs, and nonclosing peers fail closed. No fallback
+or retry establishes identity from partial output.
+
+For TCP DNS endpoints, the identity CLI invocation uses the same ASCII DNS
+lookup policy as Docker's HTTP transport. HTTP Host uses its separate Punycode
+policy; uppercase internationalized names can produce a different wire Host.
+ASCII authorities, retained identity state, and other CLI operations keep the
+original endpoint URI. IPv6 routing scopes remain in the dial target and are
+omitted only from the HTTP Host header.
+
 `step.sandbox_exec` in record mode is brokered by the parent. It requires the
 strict nonroot profile (`65532:65532`), read-only root, dropped capabilities,
 no-new-privileges, bounded resources, and no host mounts. Commands and env

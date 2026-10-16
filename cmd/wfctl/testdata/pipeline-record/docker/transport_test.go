@@ -3,10 +3,57 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestTransportIdentityConsumesFramedRequest(t *testing.T) {
+	for _, test := range []struct {
+		endpoint, request string
+		valid             bool
+	}{
+		{"unix:///fixture.sock", "GET /info HTTP/1.1\r\nHost: api.moby.localhost\r\nConnection: close\r\n\r\n", true},
+		{"tcp://selected.example:2376", "GET /info HTTP/1.1\r\nHost: selected.example:2376\r\nConnection: close\r\n\r\n", true},
+		{"tcp://[::1]:2376", "GET /info HTTP/1.1\r\nHost: [::1]:2376\r\nConnection: close\r\n\r\n", true},
+		{"tcp://[fe80::1%25en0]:2376", "GET /info HTTP/1.1\r\nHost: [fe80::1]:2376\r\nConnection: close\r\n\r\n", true},
+		{"tcp://[fe80::1%25en0]:2376", "GET /info HTTP/1.1\r\nHost: [fe80::1%en0]:2376\r\nConnection: close\r\n\r\n", false},
+		{"tcp://bücher.example:2376", "GET /info HTTP/1.1\r\nHost: xn--bcher-kva.example:2376\r\nConnection: close\r\n\r\n", true},
+		{"unix:///fixture.sock", "GET /info HTTP/1.1\r\nHost: wrong-backend\r\nConnection: close\r\n\r\n", false},
+		{"unix:///fixture.sock", "POST /info HTTP/1.1\r\nHost: api.moby.localhost\r\nConnection: close\r\n\r\n", false},
+		{"unix:///fixture.sock", "GET /other HTTP/1.1\r\nHost: api.moby.localhost\r\nConnection: close\r\n\r\n", false},
+		{"unix:///fixture.sock", "GET /info HTTP/1.1\r\nHost: api.moby.localhost\r\n\r\n", false},
+		{"unix:///fixture.sock", "GET /info HTTP/1.1\r\nHost: api.moby.localhost\r\nConnection: close\r\nContent-Length: 1\r\n\r\nx", false},
+		{"unix:///fixture.sock", "malformed", false},
+	} {
+		t.Run(test.request, func(t *testing.T) {
+			var output bytes.Buffer
+			err := serveRecordDockerIdentity(test.endpoint, bytes.NewBufferString(test.request), &output)
+			if !test.valid {
+				if err == nil || output.Len() != 0 {
+					t.Fatal("invalid request produced an identity response")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := http.ReadResponse(bufio.NewReader(&output), &http.Request{Method: "GET"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var body map[string]any
+			if response.StatusCode != 200 || json.NewDecoder(response.Body).Decode(&body) != nil || body["ID"] != "record-fixture-daemon" {
+				t.Fatal("fixture omitted its framed daemon identity")
+			}
+		})
+	}
+}
 
 func TestTransportCreateWritesOwnedStateAndCID(t *testing.T) {
 	root := t.TempDir()

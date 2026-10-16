@@ -757,7 +757,7 @@ func TestPipelineRecordDiagnosticsResolverCancellationAndDeadline(t *testing.T) 
 									var call pipelineDockerInvocation
 									if json.Unmarshal(line, &call) == nil {
 										for _, arg := range call.Args {
-											if arg == stage.command {
+											if arg == stage.command || (stage.command == "info" && arg == "dial-stdio") {
 												cancel()
 												observed <- true
 												return
@@ -842,10 +842,17 @@ func TestPipelineRecordDiagnosticsResolverFirstFailureAndConcurrency(t *testing.
 			for i := 0; i < 8; i++ {
 				workers.Go(func() {
 					operation, args, exit := "resolve_context", []string{"context", "inspect"}, 7
+					var input []byte
 					if i%2 == 1 {
-						operation, args, exit = "resolve_identity", []string{"info", "--format", "{{json .ID}}"}, 0
+						operation, args, exit = "resolve_identity", []string{"system", "dial-stdio"}, 0
+						var err error
+						input, err = pipelineDockerIdentityRequest("unix:///daemon-a.sock")
+						if err != nil {
+							outcomes <- false
+							return
+						}
 					}
-					result, err := runPipelineDockerCLI(pipelineDockerResolutionContext(ctx, operation), filepath.Join(directory, "docker"), []string{"PATH=" + directory, "HOME=" + directory, "LANG=C", "LC_ALL=C"}, pipelineDockerCallTimeout, args...)
+					result, err := runPipelineDockerCLIWithInput(pipelineDockerResolutionContext(ctx, operation), filepath.Join(directory, "docker"), []string{"PATH=" + directory, "HOME=" + directory, "LANG=C", "LC_ALL=C"}, pipelineDockerCallTimeout, input, args...)
 					outcomes <- err != nil && result != nil && result.ExitCode == exit
 				})
 			}
