@@ -27,7 +27,7 @@
     "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
     "path": "scripts/check-public-workflow-policy.sh",
     "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
-    "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
+    "sha256": "48ab26cade210aad60b5fab5bf49c2faad89c8b5ea291b34830b28a50512822e",
     "state": "active",
     "workflowPath": ".github/workflows/public-workflow-policy.yml"
   },
@@ -51,7 +51,7 @@
     "path": "scripts/check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386",
-    "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
+    "sha256": "48ab26cade210aad60b5fab5bf49c2faad89c8b5ea291b34830b28a50512822e",
     "state": "active",
     "rationale": "Staged v0.86 CI authority. Enforces the credential-free public workflow boundary in CI."
   },
@@ -83,7 +83,7 @@
     "path": "scripts/check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
-    "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
+    "sha256": "48ab26cade210aad60b5fab5bf49c2faad89c8b5ea291b34830b28a50512822e",
     "state": "staged",
     "rationale": "Staged v0.86 CI authority. Enforces the credential-free public workflow boundary in CI."
   },
