@@ -27,7 +27,7 @@
     "contextSHA256": "d804de818453d79cf9b6434ea2780dac8a4434b4dd32bd9d46be17620fc25066",
     "path": "scripts/check-public-workflow-policy.sh",
     "rationale": "Stage the exact approved Go1.27.2 canonical policy context. Existing executable/statement/action authority is preserved; adoption and promotion remain separate.",
-    "sha256": "2cf3f0461ceed4a3e32265ccad7fd3ac1ae4e162d1f2cb19ba9b8737405db02a",
+    "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
     "state": "active",
     "workflowPath": ".github/workflows/public-workflow-policy.yml"
   },
@@ -51,7 +51,7 @@
     "path": "scripts/check-public-workflow-policy.sh",
     "workflowPath": ".github/workflows/ci.yml",
     "contextSHA256": "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386",
-    "sha256": "2cf3f0461ceed4a3e32265ccad7fd3ac1ae4e162d1f2cb19ba9b8737405db02a",
+    "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
     "state": "active",
     "rationale": "Staged v0.86 CI authority. Enforces the credential-free public workflow boundary in CI."
   },
@@ -69,6 +69,38 @@
     "contextSHA256": "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386",
     "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b",
     "state": "active",
+    "rationale": "Staged v0.86 CI authority. Exercises fail-closed public workflow policy mutations in CI."
+  },
+  {
+    "path": "scripts/audit-cloud-symbols.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
+    "sha256": "d7511cd72bb72e0901d6f2746a82a47287c7c1a455d8ac730da6e917a2a5a485",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Runs the credential-free core cloud-SDK boundary audit."
+  },
+  {
+    "path": "scripts/check-public-workflow-policy.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
+    "sha256": "a5173d30a7c231f0361a9d1391248a9c5033fba2594d98f853d958a4f0bca061",
+    "state": "staged",
+    "rationale": "Staged v0.86 CI authority. Enforces the credential-free public workflow boundary in CI."
+  },
+  {
+    "path": "scripts/test-audit-cloud-symbols.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
+    "sha256": "5d4beac29580146d71c8ca5650aad56c5ccf06f8cf23aac10da67ce502ae3459",
+    "state": "staged",
+    "rationale": "Runs the credential-free cloud/Kubernetes boundary audit mutation suite."
+  },
+  {
+    "path": "scripts/test-check-public-workflow-policy.sh",
+    "workflowPath": ".github/workflows/ci.yml",
+    "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
+    "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b",
+    "state": "staged",
     "rationale": "Staged v0.86 CI authority. Exercises fail-closed public workflow policy mutations in CI."
   }
 ]
