@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,6 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"os/exec"
@@ -23,6 +27,7 @@ import (
 	"time"
 
 	"github.com/GoCodeAlone/workflow/sandbox"
+	"golang.org/x/net/idna"
 	"golang.org/x/sys/unix"
 )
 
@@ -196,7 +201,7 @@ func resolvePipelineDockerClient(ctx context.Context) (_ *pipelineDockerClient, 
 		}
 	}
 	phase = "docker_resolve_identity_metadata"
-	serverID, err := c.serverID(pipelineDockerResolutionContext(ctx, "resolve_identity"))
+	serverID, err := c.serverID(pipelineDockerResolutionContext(ctx, "resolve_identity"), endpoint.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -290,14 +295,128 @@ func (c *pipelineDockerClient) validateSnapshot() error {
 	return nil
 }
 
-func (c *pipelineDockerClient) serverID(ctx context.Context) (string, error) {
-	result, err := c.raw(ctx, pipelineDockerCallTimeout, "info", "--format", "{{json .ID}}")
+// The identity request deliberately avoids `docker info`, which enumerates
+// unrelated client-plugin metadata even with an ID-only format. Keep Docker's
+// pinned transport/TLS handling, and bound the entire helper to the same five
+// seconds. Client initialization may still ping before dial-stdio opens a stream.
+func (c *pipelineDockerClient) serverID(ctx context.Context, endpoint string) (string, error) {
+	request, err := pipelineDockerIdentityRequest(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("pipeline Docker daemon identity request invalid")
+	}
+	args := slices.Clone(c.args)
+	endpointURL, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("pipeline Docker daemon identity request invalid")
+	}
+	hostname := endpointURL.Hostname()
+	if endpointURL.Scheme == "tcp" && !strings.Contains(hostname, ":") && strings.IndexFunc(hostname, func(r rune) bool { return r > 127 }) >= 0 {
+		// Unlike Info's HTTP transport, Docker's raw dialer does not apply
+		// IDNA Lookup. Its DNS policy differs from Request.Write's Punycode
+		// Host policy. Preserve ASCII authorities and IPv6 routing scopes;
+		// normalize only this identity invocation's non-ASCII DNS target.
+		ascii, err := idna.Lookup.ToASCII(hostname)
+		hostIndex := slices.Index(args, "--host")
+		if err != nil || hostIndex < 0 || hostIndex+1 >= len(args) {
+			return "", fmt.Errorf("pipeline Docker daemon identity request invalid")
+		}
+		args[hostIndex+1] = "tcp://" + net.JoinHostPort(ascii, endpointURL.Port())
+	}
+	result, err := runPipelineDockerCLIWithInput(ctx, c.binary, c.env, pipelineDockerCallTimeout, request, append(args, "system", "dial-stdio")...)
 	if err != nil {
 		return "", fmt.Errorf("pipeline Docker daemon identity unavailable")
 	}
+	return parsePipelineDockerIdentityResponse(result.Stdout)
+}
+
+func pipelineDockerIdentityRequest(endpoint string) ([]byte, error) {
+	if err := validatePipelineDockerEndpoint(endpoint); err != nil {
+		return nil, fmt.Errorf("pipeline Docker identity endpoint invalid")
+	}
+	u, _ := url.Parse(endpoint)  // Validated above; preserve the selected TCP authority.
+	host := "api.moby.localhost" // Docker SDK DummyHost for Unix sockets.
+	if u.Scheme == "tcp" {
+		host = u.Host
+	}
+	request := &http.Request{
+		Method: http.MethodGet, URL: &url.URL{Scheme: "http", Host: host, Path: "/info"},
+		Host: host, Header: http.Header{"User-Agent": {""}}, Close: true,
+	}
+	var wire bytes.Buffer
+	if err := request.Write(&wire); err != nil || wire.Len() > 512 {
+		return nil, fmt.Errorf("pipeline Docker identity request invalid")
+	}
+	return wire.Bytes(), nil
+}
+
+func parsePipelineDockerIdentityResponse(output string) (string, error) {
+	invalid := func() (string, error) { return "", fmt.Errorf("pipeline Docker daemon server ID invalid") }
+	if len(output) > sandbox.MaxOutputBytes {
+		return invalid()
+	}
+	// ReadResponse normalizes away Content-Length when chunked. Reject ambiguous
+	// framing before that normalization; no other HTTP implementation is needed.
+	headers := textproto.NewReader(bufio.NewReader(strings.NewReader(output)))
+	if _, err := headers.ReadLine(); err != nil {
+		return invalid()
+	}
+	h, err := headers.ReadMIMEHeader()
+	if err != nil || len(h.Values("Content-Length")) > 1 || (len(h.Values("Content-Length")) > 0 && len(h.Values("Transfer-Encoding")) > 0) {
+		return invalid()
+	}
+	reader := bufio.NewReader(strings.NewReader(output))
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		return invalid()
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.ProtoMajor != 1 || response.ProtoMinor > 1 {
+		return invalid()
+	}
+	for _, encoding := range response.Header.Values("Content-Encoding") {
+		if encoding != "" && !strings.EqualFold(strings.TrimSpace(encoding), "identity") {
+			return invalid()
+		}
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return invalid()
+	}
+	if _, err := reader.Peek(1); err != io.EOF {
+		return invalid()
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return invalid()
+	}
 	var id string
-	if json.Unmarshal([]byte(result.Stdout), &id) != nil || len(id) == 0 || len(id) > 256 {
-		return "", fmt.Errorf("pipeline Docker daemon server ID invalid")
+	found := false
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return invalid()
+		}
+		name, ok := key.(string)
+		if !ok {
+			return invalid()
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return invalid()
+		}
+		if strings.EqualFold(name, "ID") {
+			if name != "ID" || found || json.Unmarshal(value, &id) != nil {
+				return invalid()
+			}
+			found = true
+		}
+	}
+	if token, err := decoder.Token(); err != nil || token != json.Delim('}') {
+		return invalid()
+	}
+	var extra json.RawMessage
+	if decoder.Decode(&extra) != io.EOF || !found || len(id) == 0 || len(id) > 256 {
+		return invalid()
 	}
 	for _, char := range id {
 		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && !strings.ContainsRune("-_:.", char) {
@@ -369,7 +488,7 @@ func (c *pipelineDockerClient) Run(ctx context.Context, args ...string) (*sandbo
 	}
 	ctx, cancel := context.WithTimeout(ctx, sandbox.RecordMaxTimeout)
 	defer cancel()
-	id, err := c.serverID(ctx)
+	id, err := c.serverID(ctx, c.identity.Endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -400,6 +519,10 @@ func (w *pipelineDockerOutput) Write(data []byte) (int, error) {
 }
 
 func runPipelineDockerCLI(ctx context.Context, binary string, env []string, timeout time.Duration, args ...string) (*sandbox.ExecResult, error) {
+	return runPipelineDockerCLIWithInput(ctx, binary, env, timeout, nil, args...)
+}
+
+func runPipelineDockerCLIWithInput(ctx context.Context, binary string, env []string, timeout time.Duration, input []byte, args ...string) (*sandbox.ExecResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	process, grouped := ctx.Value(pipelineDockerProcessGroupKey{}).(pipelineProcessIdentity)
@@ -413,6 +536,28 @@ func runPipelineDockerCLI(ctx context.Context, binary string, env []string, time
 	argv := append([]string{"-c", `umask 077; exec "$@"`, "wfctl-docker", binary}, args...)
 	cmd := exec.CommandContext(ctx, "/bin/sh", argv...) // #nosec G204,G702 -- fixed shell program; values remain positional argv.
 	cmd.Env = env
+	if len(input) > 0 {
+		if len(input) > 512 {
+			observePipelineDockerResolutionFailure(ctx, "command", -1)
+			return nil, fmt.Errorf("pipeline Docker input exceeded request limit")
+		}
+		read, write, err := os.Pipe()
+		if err != nil {
+			observePipelineDockerResolutionFailure(ctx, "command", -1)
+			return nil, fmt.Errorf("pipeline Docker input unavailable")
+		}
+		defer read.Close()
+		defer write.Close()
+		// A new empty pipe accepts <=512 bytes (POSIX minimum PIPE_BUF) without
+		// waiting for a reader. Keep its writer open until Run returns: stdin EOF
+		// would make dial-stdio half-close TLS before the response. A direct file
+		// avoids an os/exec stdin-copy goroutine; cancellation still kills custody.
+		if n, err := write.Write(input); err != nil || n != len(input) {
+			observePipelineDockerResolutionFailure(ctx, "command", -1)
+			return nil, fmt.Errorf("pipeline Docker input unavailable")
+		}
+		cmd.Stdin = read
+	}
 	cmd.WaitDelay = 250 * time.Millisecond
 	// Broker helpers belong to recorded child custody; discovery/cleanup helpers
 	// get a temporary group. Never kill the recorded group from a CLI cancel.
