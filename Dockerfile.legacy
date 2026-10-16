@@ -9,7 +9,7 @@
 
 # --- Stage 1: Build the Go binary ---
 # Use BUILDPLATFORM so go mod download runs natively; cross-compile via TARGETOS/TARGETARCH.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS go-builder
 
 ARG TARGETOS TARGETARCH
 

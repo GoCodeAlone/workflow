@@ -340,17 +340,16 @@ func TestE2E_Negative_RateLimit_PerClientIsolation(t *testing.T) {
 
 // TestE2E_Negative_RateLimit_RecoveryAfterWindow proves that rate limiting tokens
 // actually refill over time. If the rate limiter permanently blocked clients after
-// burst exhaustion, this test would fail. A very high requestsPerMinute ensures
-// tokens refill quickly so the test doesn't have to wait long.
+// burst exhaustion, this test would fail. The refill interval tolerates client
+// scheduling between requests on a cold race-instrumented host.
 func TestE2E_Negative_RateLimit_RecoveryAfterWindow(t *testing.T) {
 	port := getFreePort(t)
 	addr := fmt.Sprintf(":%d", port)
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	burstSize := 2
-	// 6000 requests/minute = 100 requests/second = 1 token per 10ms
-	// After 50ms, we should have ~5 tokens refilled
-	highRPM := 6000
+	requestsPerMinute := 60
+	refillInterval := time.Minute / time.Duration(requestsPerMinute)
 
 	cfg := &config.WorkflowConfig{
 		Modules: []config.ModuleConfig{
@@ -358,7 +357,7 @@ func TestE2E_Negative_RateLimit_RecoveryAfterWindow(t *testing.T) {
 			{Name: "rlr-router", Type: "http.router", DependsOn: []string{"rlr-server"}},
 			{Name: "rlr-handler", Type: "http.handler", DependsOn: []string{"rlr-router"}, Config: map[string]any{"contentType": "application/json"}},
 			{Name: "rlr-mw", Type: "http.middleware.ratelimit", Config: map[string]any{
-				"requestsPerMinute": float64(highRPM),
+				"requestsPerMinute": float64(requestsPerMinute),
 				"burstSize":         float64(burstSize),
 			}},
 		},
@@ -417,6 +416,8 @@ func TestE2E_Negative_RateLimit_RecoveryAfterWindow(t *testing.T) {
 	t.Run("verify_429_after_exhaustion", func(t *testing.T) {
 		t.Helper()
 		t.Log("Confirm rate limit is active")
+		// Requests can take longer than 10ms on a cold race-instrumented host.
+		time.Sleep(25 * time.Millisecond)
 		resp, err := client.Get(baseURL + "/api/recover")
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
@@ -433,12 +434,7 @@ func TestE2E_Negative_RateLimit_RecoveryAfterWindow(t *testing.T) {
 		t.Helper()
 		t.Log("Waiting for token refill then retrying")
 
-		// With 6000 RPM, that is 100 per second. The refill logic:
-		//   elapsed = time.Since(lastTimestamp).Minutes()
-		//   tokensToAdd = int(elapsed * requestsPerMinute)
-		// For 1 token: elapsed >= 1/6000 minutes = 0.01 seconds = 10ms
-		// Wait 100ms to be safe and get at least 1 token back
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(refillInterval + 100*time.Millisecond)
 
 		resp, err := client.Get(baseURL + "/api/recover")
 		if err != nil {
@@ -458,6 +454,9 @@ func TestE2E_Negative_RateLimit_RecoveryAfterWindow(t *testing.T) {
 		}
 		if result["status"] != "success" {
 			t.Errorf("Expected status='success' in recovery response, got %v", result["status"])
+		}
+		if result["handler"] != "rlr-handler" {
+			t.Errorf("Expected configured recovery handler, got %v", result["handler"])
 		}
 		t.Logf("Recovery verified: got 200 with body %s", string(body))
 	})

@@ -4,8 +4,83 @@ import (
 	"reflect"
 	"testing"
 
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
+
+func TestStringValueTypedMapRoundTrip(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   map[string]any
+		want string
+	}{
+		{name: "nil"},
+		{name: "empty", in: map[string]any{}},
+		{name: "empty-value", in: map[string]any{"value": ""}},
+		{name: "value", in: map[string]any{"value": "actual-plugin-input"}, want: "actual-plugin-input"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := make(map[string]any, len(tc.in))
+			for k, v := range tc.in {
+				before[k] = v
+			}
+			payload, err := mapToTypedAny("google.protobuf.StringValue", tc.in, nil)
+			if err != nil {
+				t.Fatalf("encode StringValue: %v", err)
+			}
+			var decoded wrapperspb.StringValue
+			if err := payload.UnmarshalTo(&decoded); err != nil || decoded.Value != tc.want {
+				t.Fatalf("typed StringValue = %q, want %q: %v", decoded.Value, tc.want, err)
+			}
+			values, err := typedAnyToMap(payload, "google.protobuf.StringValue", nil)
+			if err != nil || !reflect.DeepEqual(values, map[string]any{"value": tc.want}) {
+				t.Fatalf("decode StringValue map = %v: %v", values, err)
+			}
+			if tc.in != nil && !reflect.DeepEqual(tc.in, before) {
+				t.Fatal("encoder mutated caller map")
+			}
+		})
+	}
+}
+
+func TestStringValueTypedMapRejectsInvalidInputs(t *testing.T) {
+	for _, input := range []map[string]any{
+		{"unknown": "value"},
+		{"value": "valid", "unknown": "value"},
+		{"value": 1},
+		{"value": false},
+		{"value": nil},
+		{"value": map[string]any{"value": "nested"}},
+	} {
+		payload, err := mapToTypedAny("google.protobuf.StringValue", input, nil)
+		if err == nil || payload != nil {
+			t.Errorf("invalid StringValue map %v must reject, payload=%v err=%v", input, payload, err)
+		}
+	}
+	wrong, err := anypb.New(wrapperspb.Bool(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values, err := typedAnyToMap(wrong, "google.protobuf.StringValue", nil); err == nil || values != nil {
+		t.Fatalf("wrong Any type must reject: %v %v", values, err)
+	}
+}
+
+func TestStringValueTypedMapKnownFields(t *testing.T) {
+	input := map[string]any{"value": "selected", "other_pipeline_state": "retained"}
+	payload, err := mapToTypedAnyKnownFields("google.protobuf.StringValue", input, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value wrapperspb.StringValue
+	if err := payload.UnmarshalTo(&value); err != nil || value.Value != "selected" {
+		t.Fatalf("known-field StringValue = %q: %v", value.Value, err)
+	}
+	if input["other_pipeline_state"] != "retained" {
+		t.Fatal("known-field conversion mutated pipeline state")
+	}
+}
 
 // mustMapToStruct is a test helper that wraps mapToStruct and fails the test
 // if the conversion errors. Use it for fixture data that is known to be

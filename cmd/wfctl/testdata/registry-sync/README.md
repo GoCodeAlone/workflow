@@ -23,7 +23,7 @@ For Task 35 step 10, verify the downloaded release archive and checksum first,
 then check out that release's exact source tag for the tests. Run on Linux:
 
 ```sh
-GOWORK=off GOTOOLCHAIN=go1.26.5 \
+GOWORK=off GOTOOLCHAIN=go1.27.2 \
   WFCTL_REGISTRY_SYNC_HOST_BINARY=/absolute/path/to/verified/wfctl \
   go test -p=2 ./cmd/wfctl \
     -run '^TestPluginRegistrySync(Target_ActualCLI|HostNegatives)$' -count=1 -v
@@ -54,12 +54,12 @@ overrides once per host-test group (not per negative case) and runs this same
 default-endpoint proxy path. Both host groups reuse the same transport fixture
 and credential-free environment. On Darwin the baseline
 still builds with the existing loopback API linker override. Requested
-downloaded-binary proof on Darwin fails explicitly: Go 1.26.5 does not use
+downloaded-binary proof on Darwin fails explicitly: Go does not use
 `SSL_CERT_FILE` there. Darwin's custom-client proxy tests prove only the
 dependency fixture, not downloaded-binary conformance:
 
 ```sh
-GOWORK=off GOTOOLCHAIN=go1.26.5 \
+GOWORK=off GOTOOLCHAIN=go1.27.2 \
   go test -p=2 ./cmd/wfctl \
     -run '^TestPluginRegistrySync(HostBinary|ReleaseProxy)_' -count=1 -v
 ```

@@ -58,14 +58,136 @@ func buildPipelineRecordHostGo(t *testing.T, output, target string, race bool) {
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	var data []byte
 	var err error
-	switch target {
-	case ".", "./testdata/pipeline-record/plugin", "./testdata/pipeline-record/docker":
-		data, err = buildFixtureArtifact(t, ctx, cmd, "../..", output)
-	default:
-		data, err = cmd.CombinedOutput()
+	if target == "." && race {
+		data, err = pipelineRecordHostSourceCache.buildCommand(ctx, cmd, "../..", output, (*exec.Cmd).CombinedOutput)
+	} else {
+		switch target {
+		case ".", "./testdata/pipeline-record/plugin", "./testdata/pipeline-record/docker":
+			data, err = buildFixtureArtifact(t, ctx, cmd, "../..", output)
+		default:
+			data, err = cmd.CombinedOutput()
+		}
 	}
 	if err != nil {
 		t.Fatalf("build actual host/SDK fixture %s: %v\n%s", target, err, data)
+	}
+}
+
+// These sentinels exercise the actual source-cache dispatch and input guard;
+// they do not replace real source-host/runtime acceptance.
+func TestPipelineRecordHostCacheCommandInputGuard(t *testing.T) {
+	for _, change := range []string{"source", "effective-config"} {
+		t.Run(change, func(t *testing.T) {
+			var cache pipelineRecordHostCache
+			t.Cleanup(func() { _ = cache.close() })
+			root := fixtureControlSource(t)
+			config := filepath.Join(t.TempDir(), "goenv")
+			fixtureControlWrite(t, config, "GOPRIVATE=original.control\n")
+			builds := 0
+			request := func() {
+				t.Helper()
+				output := filepath.Join(t.TempDir(), "host")
+				cmd := fixtureControlCommand(t.Context(), root, output, "-race")
+				cmd.Env = append(cmd.Env, "GOENV="+config)
+				args, env := slices.Clone(cmd.Args), slices.Clone(cmd.Env)
+				data, err := cache.buildCommand(t.Context(), cmd, root, output, func(got *exec.Cmd) ([]byte, error) {
+					builds++
+					return fixtureControlSentinel(got)
+				})
+				if err != nil {
+					t.Fatalf("guarded source dispatch: %v\n%s", err, data)
+				}
+				if !slices.Equal(cmd.Args, args) || !slices.Equal(cmd.Env, env) {
+					t.Fatal("source dispatch changed caller arguments or environment")
+				}
+				if got, err := os.ReadFile(output); err != nil || string(got) != "unit-artifact-sentinel" {
+					t.Fatalf("private source output = %q, %v", got, err)
+				}
+			}
+			request()
+			request()
+			if builds != 1 || cache.key.fingerprint == "" {
+				t.Fatalf("identical closed source requests: builds=%d, fingerprint=%q", builds, cache.key.fingerprint)
+			}
+			path, original, changed := filepath.Join(root, "asset.txt"), "one", "two"
+			if change == "effective-config" {
+				path, original, changed = config, "GOPRIVATE=original.control\n", "GOPRIVATE=changed.control\n"
+			}
+			fixtureControlWrite(t, path, changed)
+			request()
+			request()
+			if builds != 3 {
+				t.Fatalf("changed %s reused source bytes or replaced baseline: builds=%d, want 3", change, builds)
+			}
+			fixtureControlWrite(t, path, original)
+			request()
+			if builds != 3 {
+				t.Fatalf("changed %s displaced cached baseline: builds=%d, want 3", change, builds)
+			}
+		})
+	}
+}
+
+func TestPipelineRecordHostCacheCommandUnclosedInputsBypass(t *testing.T) {
+	for _, variant := range []string{"native", "goenv-native", "goenv-overlay"} {
+		t.Run(variant, func(t *testing.T) {
+			var cache pipelineRecordHostCache
+			t.Cleanup(func() { _ = cache.close() })
+			root := fixtureControlSource(t)
+			config := filepath.Join(t.TempDir(), "goenv")
+			builds := 0
+			for range 2 {
+				output := filepath.Join(t.TempDir(), "host")
+				cmd := fixtureControlCommand(t.Context(), root, output, "-race")
+				if variant == "native" {
+					cmd.Env = append(cmd.Env, "CGO_CFLAGS=-DFIXTURE_EXTERNAL")
+				} else {
+					setting := "CGO_CFLAGS=-DFIXTURE_EXTERNAL\n"
+					if variant == "goenv-overlay" {
+						setting = "GOFLAGS=-overlay=" + filepath.Join(t.TempDir(), "external.json") + "\n"
+					}
+					fixtureControlWrite(t, config, setting)
+					cmd.Env = slices.DeleteFunc(cmd.Env, func(item string) bool {
+						return strings.HasPrefix(item, "GOFLAGS=") || strings.HasPrefix(item, "CGO_CFLAGS=")
+					})
+					cmd.Env = append(cmd.Env, "GOENV="+config)
+				}
+				args, env := slices.Clone(cmd.Args), slices.Clone(cmd.Env)
+				data, err := cache.buildCommand(t.Context(), cmd, root, output, func(got *exec.Cmd) ([]byte, error) {
+					if got != cmd || !slices.Equal(got.Args, args) || !slices.Equal(got.Env, env) {
+						return nil, errors.New("source bypass rewrote the original command")
+					}
+					builds++
+					return fixtureControlSentinel(got)
+				})
+				if err != nil {
+					t.Fatalf("unclosed source bypass: %v\n%s", err, data)
+				}
+			}
+			if builds != 2 || cache.directory != "" || cache.load != nil {
+				t.Fatalf("unclosed %s entered source cache: builds=%d, directory=%q", variant, builds, cache.directory)
+			}
+		})
+	}
+}
+
+func TestPipelineRecordHostCacheCommandCancellation(t *testing.T) {
+	var cache pipelineRecordHostCache
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	root := fixtureControlSource(t)
+	output := filepath.Join(t.TempDir(), "host")
+	cmd := fixtureControlCommand(ctx, root, output, "-race")
+	builds := 0
+	_, err := cache.buildCommand(ctx, cmd, root, output, func(got *exec.Cmd) ([]byte, error) {
+		builds++
+		return fixtureControlSentinel(got)
+	})
+	if !errors.Is(err, context.Canceled) || builds != 0 || cache.directory != "" {
+		t.Fatalf("canceled source dispatch: error=%v, builds=%d, directory=%q", err, builds, cache.directory)
+	}
+	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("canceled source dispatch supplied output: %v", err)
 	}
 }
 

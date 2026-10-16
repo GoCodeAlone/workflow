@@ -136,7 +136,7 @@ event-broker --> notification-handler
 
 ### Prerequisites
 
-- **Go 1.25+** installed
+- **Go 1.27.2+** installed
 - The workflow repository cloned and built:
 
 ```bash
@@ -1210,7 +1210,7 @@ export JWT_SECRET="dev-secret-change-in-production"
 Create a `Dockerfile` in your project:
 
 ```dockerfile
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27.2-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download

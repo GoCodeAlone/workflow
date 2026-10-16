@@ -2,7 +2,7 @@
 # Build:   docker build -t workflow-store -f example/ecommerce-app/Dockerfile .
 # Run:     docker run -p 8080:8080 -e JWT_SECRET=your-secret workflow-store
 
-FROM dhi.io/golang:1.26-alpine3.22-dev AS builder
+FROM dhi.io/golang:1.27.2-alpine3.23-dev AS builder
 
 WORKDIR /build
 

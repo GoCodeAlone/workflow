@@ -93,7 +93,25 @@ func mapToTypedAnyWithOptions(messageName string, values map[string]any, resolve
 		// plugin to publish a coerce-aware contract or every BMW-style
 		// template author to hand-quote in YAML.
 		values = coerceMapScalars(values, msg.ProtoReflect().Descriptor())
-		raw, err := json.Marshal(values)
+		var jsonValue any = values
+		if msg.ProtoReflect().Descriptor().FullName() == "google.protobuf.StringValue" {
+			// Wrapper ProtoJSON is scalar; Workflow step inputs remain field maps.
+			for key := range values {
+				if key != "value" {
+					return nil, fmt.Errorf("unknown field %q for %s", key, messageName)
+				}
+			}
+			value := ""
+			if rawValue, exists := values["value"]; exists {
+				var valid bool
+				value, valid = rawValue.(string)
+				if !valid {
+					return nil, fmt.Errorf("%s value must be a string", messageName)
+				}
+			}
+			jsonValue = value
+		}
+		raw, err := json.Marshal(jsonValue)
 		if err != nil {
 			return nil, fmt.Errorf("marshal %s input as JSON: %w", messageName, err)
 		}
@@ -259,6 +277,13 @@ func typedAnyToMap(payload *anypb.Any, messageName string, resolver protoregistr
 	raw, err := (protojson.MarshalOptions{UseProtoNames: true}).Marshal(msg)
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s typed payload as JSON: %w", messageName, err)
+	}
+	if msg.ProtoReflect().Descriptor().FullName() == "google.protobuf.StringValue" {
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("decode %s typed JSON as string: %w", messageName, err)
+		}
+		return map[string]any{"value": value}, nil
 	}
 	var values map[string]any
 	if err := json.Unmarshal(raw, &values); err != nil {

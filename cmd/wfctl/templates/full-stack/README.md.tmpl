@@ -6,7 +6,7 @@ A full-stack workflow application with React UI and Go backend, built with the [
 
 ### Prerequisites
 
-- Go 1.26.5+
+- Go 1.27.2+
 - Node.js 24+
 
 ### Development
@@ -55,6 +55,10 @@ Visit http://localhost:8080.
 | GET | /api/items/{id} | Get item |
 | PUT | /api/items/{id} | Update item |
 | DELETE | /api/items/{id} | Delete item |
+
+The default configuration uses built-in modules. External telemetry and collector
+modules require explicit installation and host loading of
+[workflow-plugin-observability](https://github.com/GoCodeAlone/workflow-plugin-observability).
 
 ## Project Structure
 

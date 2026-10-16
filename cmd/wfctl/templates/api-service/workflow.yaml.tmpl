@@ -19,29 +19,14 @@ modules:
   - name: {{.Name}}-health
     type: health.checker
     config:
+      healthPath: /health
       description: "Health check endpoint for {{.Name}}"
-
-  - name: {{.Name}}-telemetry
-    type: observability.telemetry
-    config:
-      serviceName: "{{.Name}}"
-      environment: "local"
-
-  - name: {{.Name}}-collector
-    type: observability.collector
-    config:
-      distribution: external
-      topology: external
-      signals: [traces, metrics, logs]
 
 workflows:
   http:
     router: {{.Name}}-router
     server: {{.Name}}-server
     routes:
-      - method: GET
-        path: /health
-        handler: {{.Name}}-health
       - method: GET
         path: /api/items
         handler: {{.Name}}-api
@@ -57,9 +42,3 @@ workflows:
       - method: DELETE
         path: /api/items/{id}
         handler: {{.Name}}-api
-
-triggers:
-  http-trigger:
-    type: http
-    config:
-      server: {{.Name}}-server

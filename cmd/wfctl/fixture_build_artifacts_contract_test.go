@@ -51,7 +51,7 @@ func fixtureControlCommand(ctx context.Context, root, output string, extra ...st
 			cmd.Env = append(cmd.Env, item)
 		}
 	}
-	cmd.Env = append(cmd.Env, "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOTOOLCHAIN=go1.27.1")
+	cmd.Env = append(cmd.Env, "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOTOOLCHAIN=go1.27.2")
 	return cmd
 }
 
@@ -410,7 +410,11 @@ func TestFixtureBuildArtifactsRealOverlayMutation(t *testing.T) {
 	root := fixtureControlSource(t)
 	external := t.TempDir()
 	asset, overlay := filepath.Join(external, "asset.txt"), filepath.Join(external, "overlay.json")
-	fixtureControlWrite(t, overlay, fmt.Sprintf(`{"Replace":{%q:%q}}`, filepath.Join(root, "asset.txt"), asset))
+	sourceAsset, err := filepath.EvalSymlinks(filepath.Join(root, "asset.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureControlWrite(t, overlay, fmt.Sprintf(`{"Replace":{%q:%q}}`, sourceAsset, asset))
 	for _, want := range []string{"first-overlay", "second-overlay"} {
 		fixtureControlWrite(t, asset, want)
 		output := filepath.Join(t.TempDir(), "executable")
@@ -744,7 +748,7 @@ func TestFixtureBuildArtifactsObservation(t *testing.T) {
 				if observation.goVersion != "" || observation.goRoot != "" || observation.goToolDir != "" || observation.toolchain != "" {
 					t.Fatalf("unobserved selection invented: %s", observation)
 				}
-			} else if observation.goVersion != "go1.27.1" || observation.toolchain != "go1.27.1" || observation.goRoot == "" || observation.goToolDir == "" || observation.goOS == "" || observation.goArch == "" {
+			} else if observation.goVersion != "go1.27.2" || observation.toolchain != "go1.27.2" || observation.goRoot == "" || observation.goToolDir == "" || observation.goOS == "" || observation.goArch == "" {
 				t.Fatalf("actual selected child compiler missing: %s", observation)
 			}
 			if observation.probeElapsed < 0 || observation.keyElapsed < observation.probeElapsed || observation.buildElapsed < 0 || observation.totalElapsed < observation.keyElapsed+observation.buildElapsed {
@@ -775,7 +779,7 @@ func TestFixtureBuildArtifactsObservation(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixtureControlCounts(t, &c, 1, 2, 0)
-			if hit.buildRuns != 0 || hit.buildElapsed != 0 || hit.goVersion != "go1.27.1" || hit.failed {
+			if hit.buildRuns != 0 || hit.buildElapsed != 0 || hit.goVersion != "go1.27.2" || hit.failed {
 				t.Fatalf("cache reuse incorrectly reported an executed build: %s", hit)
 			}
 		})
@@ -799,13 +803,13 @@ func TestFixtureBuildArtifactsObservationReuse(t *testing.T) {
 	if err := build(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	if observation.buildRuns != 1 || observation.goVersion != "go1.27.1" {
+	if observation.buildRuns != 1 || observation.goVersion != "go1.27.2" {
 		t.Fatalf("initial observed build missing: %s", observation)
 	}
 	if err := build(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
-	if observation.buildRuns != 0 || observation.buildElapsed != 0 || observation.goVersion != "go1.27.1" {
+	if observation.buildRuns != 0 || observation.buildElapsed != 0 || observation.goVersion != "go1.27.2" {
 		t.Fatalf("reused observation retained executed build: %s", observation)
 	}
 	if err := build(t.Context(), true); err != nil {

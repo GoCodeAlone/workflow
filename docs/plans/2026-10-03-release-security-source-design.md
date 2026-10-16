@@ -1,0 +1,487 @@
+# Workflow Source Security Remediation
+
+**Status:** Approved; design review PASS with two proof refinements incorporated.
+**Baseline:** main `49e1803424f303f6f98cef51cc9ea2dee96c7d38`.
+**Authority:** independent source-only maintenance. Existing Signal scope unchanged.
+**Decision:** `decisions/0056-isolate-source-security-remediation.md`.
+
+### Backport 2026-10-04: Existing Test Boundary Corrections
+
+Evidence: cold Linux checkpoint33b4 failed the two init default-module
+expectations and linked-version combined-output assertion. Defaults correctly
+omit optional external observability plugins per ADR0059; the final version
+line is v9.9.9 and stderr also includes a dependency compatibility warning.
+The focused channel probe disproves a stdout assumption: the existing handler
+uses stderr for version output, with empty stdout.
+See decisions/0062-align-scaffold-and-version-test-boundaries.md.
+
+Correction: Task2 additionally names init_test.go; assert absent optional
+types without dropping existing file/module/UI checks. Already-owned
+main_test.go checks empty stdout and the exact final stderr version line,
+retaining preceding stderr diagnostics/logs.
+No warning suppression, dependency change or production-version change.
+The existing default-registry/health/runtime tests cover the product invariant;
+this is a stale expectation/channel correction, not a new product feature.
+Manifest scope stays three tasks/one existing PR, protected exclusions intact.
+
+## Goal And Requirements
+
+Ship reviewed, patched Workflow source and reliable real-host tests without
+modifying protected CI authority, unrelated staged work, or release tags.
+
+### Backport 2026-10-04: Native Linux Proof Custody And DHI Builder
+
+Cold33b4 used an unregistered UID501 and host VirtioFS source/temp/cache paths.
+The resulting home-resolution, inode, lock, permission and LRU failures are
+environmental: unchanged33b4 with registered UID1000, container-native source/
+temp/cache and Docker --init passes every matched case (wfctl173s, LRU2s), with
+unchanged tracked source. Final cold proof uses that corrected custody; retain
+the exact CI test command/default600s limit and move coverage output outside
+source before clean-status readback. No filesystem/test-runtime product changes.
+
+The immutable official DHI catalog615555cd declares Go1.27.1 dev only on
+Alpine3.23, not3.22. Use exact dhi.io/golang:1.27.1-alpine3.23-dev while retaining
+DHI/dev/musl, CGO_ENABLED=0 and the existing nonroot static3.22 runtime. This is
+a builder-OS-minor change, not a vendor/runtime/hardening change. Official
+metadata declares amd64/arm64 and compiler1.27.1; both old/new registry probes
+return401, so published digests/native compiler/image build remain unverified
+until host authentication. No guessed3.22 tag or substitute image proof.
+Both corrections stay Task2/S4/S6; three tasks/one PR and CI exclusions unchanged.
+
+### Backport 2026-10-04: Rate-Recovery Fixture Scheduling
+
+Corrected native cold ee6eb078 exits1 solely on root rate-recovery test: the
+6000RPM fixture refills a token every10ms, but its two HTTP burst requests take
+50ms; the subsequent200 is valid refill, not a middleware/compiler defect.
+wfctl passes460.576s under unchanged600s; native filesystem/home failures do not
+recur. The isolated fast-host probe passes, confirming a scheduling assumption.
+
+Task2/S4 additionally names e2e_middleware_negative_test.go. First demonstrate
+the invalid10ms assumption with a25ms client pause through the actual engine/
+HTTP test. Then use60RPM and derive a one-token refill wait plus100ms from that
+configuration, matching the existing module-test precedent. Preserve all three
+subtests, exact success/429/handler-body assertions, HTTP5s/default-package
+deadlines and production middleware bytes. No clock mock, skip or timeout
+increase; the changed wait represents the configured rate. Rerun focused
+RED/GREEN/reversal and the whole cold command on frozen corrected source.
+This test-only proof backport adds no product invariant/feature; manifest
+three tasks/one existing PR and protected exclusions remain unchanged.
+
+The approved2026-10-04 backport below supersedes earlier1.26.8/generator/Docker
+exclusions; earlier evidence remains historical, not finalGo1.27.1 proof.
+
+- S1: Root, example, and external-plugin fixture Go floors become 1.26.8;
+  affected OTel modules become 1.45.0; vulnerable gRPC/x-text fixture pins use
+  established root 1.83.2/0.42.0. Tidy each owning module. Source fixture
+  compiler overrides and runnable minimum-version docs match 1.26.8.
+- S2: Patch the ten affected npm package families within existing compatible
+  ranges, preserving unrelated lock resolutions and direct dependencies.
+  Add a real js-yaml merge-budget regression and exercise the actual imported
+  `@gocodealone/workflow-editor/utils` `parseYaml`; run the UI suite/build.
+- S3: Lazily reuse only the immutable source-built record host (`.`, race),
+  matching cwd, compiler and complete build environment. Changed inputs use
+  the original uncached path. Explicit downloaded-binary selection/denial runs
+  first. Copy to distinct mode-0700 paths; remove the owned cache before exit.
+  SDK, Docker, registry, mutant, and capability builders remain independent.
+  Preserve GORACE, all deadlines/cases and the default 600s package limit.
+- S4: Prove original-source failures, new cache semantics, full cold
+  race/coverage completion, Go package/build metadata, actual Workflow HTTP
+  startup, SDK/composite/custody matrices, strict Docker and registry matrices,
+  UI build/test and version-skew audit. New source must be lint-clean.
+- S5: Preserve CI/workflow/policytool bytes and staged contexts. Exact Go
+  1.26.5 policytool reachability proof is required. Independently run supported
+  OSV v2.6.0 against source plus an isolated called-vulnerability control,
+  using verified image index digest
+  `sha256:71ad04ab2f8798be47870f9b18817ad317c2f8f2f97aa6726ba10d5578bc174a`;
+  retain tool identity and analyzed JSON. No scan suppression, ignores or clean-CI claim for the
+  old pinned main scanner. Source PR merge needs all required PR checks green.
+
+## Alternatives
+
+| Option | Decision |
+|---|---|
+| Hold all source fixes until unrelated trust rollout settles | Reject: independent production remediation can proceed |
+| Source-only patch with real runtime/native analysis proof | Choose |
+| Rewrite staged CI/harness authority or weaken environment policy | Reject: owner reconciliation required |
+
+## Global Design Guidance
+
+Repository `AGENTS.md`, `CLAUDE.md`, `docs/AGENT_GUIDE.md`, `docs/REPO_LAYOUT.md`
+and `docs/public-workflow-policy.md` apply. Reuse Go/npm resolvers, existing
+runtime fixtures and upstream scanner. No new plugin, CLI, app, framework,
+scenario, provider, Go minor migration or CI-policy exception.
+
+## Security Review
+
+- Main/base full scans have identical 159 findings, 157 fixable. Code-based
+  triage found plausible shipped TLS/relative-URL DoS and UI YAML CPU DoS;
+  unchanged baseline is not risk acceptance. Patch owning dependencies.
+- Go drivers in existing CI stay pinned 1.26.5; their authenticated default
+  selection must compile the new module floor with 1.26.8. Check actual binary
+  build metadata, not the job label. No production tag is created here.
+- Policytool Go 1.26.5 and scanner CI rollout stay outside this source boundary;
+  prove no affected policytool calls using that exact compiler. Called findings
+  or analysis errors block progress. Old main OSV remains a disclosed issue.
+- Source cache contains only a test executable in an owned private directory;
+  no credentials/input/result data, persistent custody store, or runtime cache.
+
+## Infrastructure Impact
+
+No workflow, runner, IAM/token, deployment, resource or data change. Temporary
+local compiler/scanner containers and test services only. Preserve automatic
+repository-token policy and concurrent v0.86.1 tag/run.
+
+## Multi-Component Validation
+
+| Integration | Class | Proof |
+|---|---|---|
+| compiler + Workflow server | runtime-integrated | actual built server/YAML/HTTP request plus compiler metadata |
+| wfctl + real SDK/plugin/Docker | runtime-integrated | complete existing host, late-output, composite and crash matrices; live strict sandbox |
+| wfctl + registry + Git | runtime-integrated | default-API Linux CLI accepted/rejected snapshot matrix |
+| UI + js-yaml | runtime-integrated | actual installed parser regression, UI tests/build |
+| upstream OSV + Go loader + reporter | runtime-integrated | successful native analysis, preserved classification, outside-tree called-vulnerability control rejected |
+| existing CI policy | config-only | no byte changes; existing positive/mutation suite |
+| scanner CI rollout/fleet upgrade/Signal promotion | separate | user approved CI reconciliation; this source-only PR does not perform it; existing Signal tasks remain open |
+
+## Assumptions And Self-Challenge
+
+| ID | Claim | Verification/Failure |
+|---|---|---|
+| A1 | Four avoided duplicate host builds provide sufficient margin | Whole cold Linux race/coverage suite must finish under 600s; otherwise backport, do not silently extend limits |
+| A2 | Cache cannot hide a compiler/environment override | Changed-input and error regressions; explicit prebuilt selection still first |
+| A3 | Dependency patches preserve typed SDK/runtime contracts | Real host/HTTP/registry/Docker matrices and all required CI |
+| A4 | Module floor drives actual compiler 1.26.8 | Older-driver probe and `go version -m` on built artifacts |
+| A5 | Remaining module-only findings are uncalled | Successful analyzed JSON, per-release-platform OpenPGP absence, exact policytool compiler proof; no suppression |
+
+## Rollback
+
+Reviewed revert of the single source-remediation PR, rerun build/runtime tests,
+and hold promotion because known vulnerabilities return. No workflow trust,
+tag, registry, deployment or data rollback occurs.
+
+### Backport 2026-10-04: Approved Go And Generated Toolchains
+
+Authority: explicit operator Go1.27.1/CI/admin instruction; ADR0057 records
+original locked timestamp/hash and owning-file expansion. S1 now targets
+Go1.27.1 in root/example/eleven fixtures and source-host expectations. S6 adds
+existing wfctl app/plugin scaffold modules, workflow/release/Docker templates,
+legacy generate-CI emitters, deploy Docker generator, SDK minimum/default Go
+constants, binary-build default (explicit overrides preserved), maintained
+admin/legacy Docker builders, and cigen CircleCI cimg/go:1.27.1. Official
+CircleCI sources/registry confirm Linuxamd64/arm64 image availability.
+
+S4 requires literal independent version regressions (RED/GREEN), actual built
+wfctl-generated app/plugin output and build/launch, exact-head four-command
+metadata/server smoke, new nativeGo1.27.1 host/SDK/registry/Docker/coldLinux
+proof, and compatible golangci-lint2.14.0. Existing dependency/UI fixes remain.
+Generated instructions and active prerequisites align; historical evidence
+and deliberate explicit test overrides are not mechanically rewritten.
+
+S5 still excludes all protected CI/scripts/policy/trust writes. Its policytool
+minimum remains1.26.5; Go1.27.1 execution/CI drivers are separately governed.
+Native prior1.26.5 reachability evidence remains disclosed; new source must
+pass all actual hosted checks after the CI rollover. Approved admin exception
+affects ordinary review only; no settings, failed-check or policy bypass.
+Manifest amendment: unchanged three tasks/one PR; Task2 gains S6/Go-minor and
+maintained generator/Docker ownership. No fleet, release or Signal completion.
+
+### Backport 2026-10-04: Real Generated Engine Startup
+
+Actual default BuildBinaryStep factory/Execute emitted three files withGo1.27.1;
+native generated-project compilation succeeded after disclosed local resolver
+replacement, but the real binary exited1 with unknown http.server module.
+Cause: emitted NewStdEngine constructs an empty factory registry, unlike the
+existing app scaffold's NewEngineBuilder.WithAllDefaults/setup registration.
+The first correction still failed real HTTP startup: WithAllDefaults omits
+module plugins. Reuse plugins/all.DefaultPlugins in the existing builder and
+all three application main templates. Correct the owning bootstrap and add a
+regression; rerun actual emitted binary HTTP/lifecycle proof. No mock/fake app,
+accepted compilation error or empty config proves this boundary. Task2 already
+owns generated-runtime proof; ADR0058 explicitly adds the three main templates
+to owning files, preserving three tasks/one PR and protected-file exclusions.
+
+### Backport 2026-10-04: Strict Generated StringValue Runtime
+
+Actual generated plugin compiles, starts, loads through the real host, then
+fails configuration. Initial wrong main.Version probe flag was corrected to
+the generated internal.Version before causal analysis; it is not a product bug.
+Host mapToTypedAny sends object JSON to scalar StringValue, and typedAnyToMap
+would decode scalar JSON into an object. Keep the generated strict wire schema;
+adapt only StringValue's value field with canonical protojson validation,
+empty-map default and strict unknown-field rejection. No legacy fallback or
+other well-known type changes. ADR0058 adds external convert.go/tests to Task2;
+native RED/GREEN, strict negative cases and real uppercase pipeline execution
+must verify both directions. Three tasks/one PR and CI exclusions unchanged.
+
+Independent code review S1: Go Windows Process.Signal rejects SIGTERM. Retain
+both generated native compilation modes on Windows, then explicitly skip only
+the POSIX lifecycle portion before process launch. Darwin/Linux continue to
+prove real HTTP and graceful SIGTERM; forced kill is never graceful evidence.
+Windows cross-compilation is compile-only, not a native lifecycle receipt.
+
+### Backport 2026-10-04: Default App Config Has External Modules
+
+Actual wfctl init API output, compiled withGo1.27.1 and its corrected default
+plugin bootstrap, exits1 because observability.telemetry/collector are external
+plugin types, not built-ins. API/full-stack templates omit their installation
+and discovery. Per ADR0059, remove only those optional external modules from
+default configurations and disclose explicit opt-in composition in existing
+READMEs. Assert every generated app module against the actual default registry;
+rerun the real API config, changing only loopback address/response identity in
+the proof. No alternate-type substitution or proof-only config deletion.
+Task2 adds the two YAML templates; three tasks/one PR and CI exclusions remain.
+
+### Backport 2026-10-04: Default Health Route Is Not A Handler
+
+Fresh generated API now initializes all modules, then rejects its manual GET
+/health route because the named health.checker service is not an HTTP handler.
+All three app configs share that invalid route. Per ADR0060, set healthPath to
+/health and let the existing observability hook mount its real health handler;
+remove only the invalid manual route. Test generated paths/routes RED/GREEN
+and rerun real API/health/shutdown. Task2 adds event-processor YAML alongside
+the existing two YAML owners; no new core API or endpoint/feature removal.
+
+### Backport 2026-10-04: Remove Redundant Invalid Trigger Blocks
+
+The real API now reaches trigger configuration, then exits1 because the emitted
+http-trigger key is not a registered trigger type. All three templates use this
+obsolete named/type/config shape; event-processor also has event-trigger. Actual
+HTTP/event trigger configuration expects type-keyed routes/subscriptions, not
+the nested server/topic blocks. Existing workflows.http already configures the
+real API routes; workflows.messaging already configures the event subscriptions
+and producers. Remove only these redundant invalid top-level trigger blocks,
+retaining those real workflow sections unchanged. Add actual default trigger
+registry assertions RED/GREEN and regenerate/launch the API app again. This is
+Task2C in its existing three YAML owners: no manifest, task/PR count, engine API,
+or application-route/subscription removal. Do not repair only the proof config.
+
+### Backport 2026-10-04: Complete The Maintained-Default Inventory
+
+The structured33b4 version audit proves thirteen source module floors and five
+scaffold workflow pins match1.27.1, but finds two old MCP legacy driver literals,
+an old maintained e-commerce DHI builder, and five active prerequisite/default
+claims. Per ADR0061, extend Task2's owning files for those defaults only; parsed
+MCP emitter/actual CD handler regression RED/GREEN, verified DHI tag/compiler,
+and updated source audit/frozen gates are required. Do not implement new MCP
+plugin detection or count the legacy release helper as a proved host feature;
+its existing HasPlugin condition is unchanged. Historical receipts and explicit
+test overrides remain. Three tasks/one PR, no protected CI or runtime-image
+hardening change. The current33b4 cold check predates this owning-file repair.
+
+### Backport 2026-10-03: Bootstrap Pins And Actual Toolchains
+
+Cause: full skew audit found existing Go 1.26.5 scaffold/generator, Docker
+bootstrap and deployment-documentation pins, not just protected CI/policytool.
+Changing those product defaults is the separately deferred fleet/generator
+boundary; the source-only patch does not silently perform it.
+
+Evidence: root/example/eleven owning fixture floors and relevant fixture
+overrides are 1.26.8; old `go1.26.5+auto` driver builds patched source with
+actual 1.26.8 metadata. Exact policytool 1.26.5 analysis has eight module-only
+stdlib rows and zero called findings; its wrapper passes unchanged. Forcing
+`GOTOOLCHAIN=go1.26.5` across the root mutation harness prevents root-level
+helper compilation. CI-equivalent authenticated auto selection runs all
+mutation assertions, but concurrent worker edits invalidate its production
+immutability snapshot; repeat once in a frozen, noncompeting plain checkout.
+
+Correction: audit classifies every residual pin as protected driver, standalone
+legacy scaffold/bootstrap, historical example or pending fleet follow-up.
+Never call this a completed fleet upgrade. Nested Git worktree artifact VCS
+metadata reports the outer checkout: frozen plain-checkout verification is
+required for exact-head evidence. Local path/actual CLI and compiler checks
+establish source behavior, not a release. Scope: no manifest/task/PR change.
+
+### Backport 2026-10-03: Bundled Editor Parser Prerequisite
+
+Cause: installed editor 0.2.0 embeds its own js-yaml implementation. Updating
+Workflow's external lock cannot patch it. Real consumer regression remains
+RED (140 tests PASS, one editor hostile-merge test FAIL); direct updated
+js-yaml tests and UI build pass.
+
+Correction: independently design/review/patch/release compatible editor 0.2.x,
+then resolve it through existing Workflow `^0.2.0` range. Preserve current
+Workflow manifest/PR grouping; no parser mock, UI shim, externalization shortcut
+or weakened assertion. The adjacent owning-library fix has its own design and
+PR, not an unrecorded edit in this source-only manifest.
+
+### Backport 2026-10-03: Match CI Filesystem Privilege
+
+Cause: the first local container used a read-only checkout/tmpfs and was not a
+valid CI environment. Its writable replacement ran as root: wfctl finished in
+542.027s, but root bypassed the intentional read-only lockfile denial and could
+create `/nonexistent/path`, contaminating three subsequent missing-path tests.
+Neither run is full-suite GREEN or a reason to modify tests or their deadlines.
+
+Correction: cold-cache proof uses a fresh complete plain checkout, writable
+owned source copy and a non-root CI user, with disk-backed compiler cache.
+Verify exact HEAD/clean tracked bytes before execution. Preserve the unchanged
+`go test -v -race -coverprofile=coverage.out ./...` command and 600s package
+timeout. Classify environmental failures separately from code regressions; no
+retry without a falsifiable corrected cause. Scope: no manifest/task/PR change.
+
+### Backport 2026-10-03: Reproduce CI Init/Reaping
+
+Cause: non-root `runuser` as container PID 1 does not reap adopted helper
+orphans; inherited-FD/cleanup tests saw surviving PID identities with no active
+group. Matched control reproduces FAIL in 4.318s and observes PID-1-owned
+zombies. A shell PID 1 can itself reap, so a superficially similar container
+is not the negative control. No production defect was inferred from either.
+
+Correction/proof: same source/user/control with Docker `--init` passes the
+inherited-FD and seven-case crash matrix (83.503s). Fresh disk compiler cache,
+non-root user, normal init and clean plain source `40d5d6e6` pass the exact
+full CI command: 152 packages, wfctl 519.387s below the unchanged 600s limit,
+run 19:46:25-19:59:01 UTC. Go 1.26.8 real strict live Docker tests also pass
+(36.661s), with journal/container cleanup. Explicitly source evidence, not
+downloaded-release proof. Scope: no manifest/task/PR or protected-file change.
+
+### Backport 2026-10-03: Native Scanner Memory Custody
+
+Cause: digest-pinned OSV2.6 unchanged entrypoint discovered all14 Go modules,
+then Docker killed the scanner after63.224s: exit137/OOMKilled=true, 7GiB
+container cap, no results JSON and no reporter execution. Discovery alone is
+not successful native analysis. Docker Desktop has8GiB total; another owner's
+container must remain untouched. No production-code defect or clean scan is
+inferred from this failed local verification environment.
+
+Hypothesis: a container-local `GOMEMLIMIT=4GiB` soft GC budget can reduce the
+scanner's peak memory without changing analyses. This is ordinary runtime
+resource tuning, not a Go/compiler/authentication or advisory exception. It
+does not authorize CI adoption: the protected policytool's GO* env restriction
+remains unchanged. Official [runtime docs](https://pkg.go.dev/runtime#hdr-Environment_Variables)
+define a soft Go-managed-memory bound, not a hard shared container bound.
+
+Correction: one paired resource trial on the same frozen550c0f7a source/image,
+platform, entrypoint, recursive command, container limits and analysis defaults;
+only GOMEMLIMIT changes. Fresh outside-source evidence, exact OOM receipt and
+raw logs retained. If it completes, verify final preserved-resolution source
+separately under the corrected environment. Require all14 module discovery and
+native-analysis coverage, current valid JSON, no loading/analysis/OOM/timeout
+errors, raw classification and unchanged reporter acceptance. Missing analysis
+stays unknown. Preserve the genuine called-control reporter rejection. Another
+incomplete trial remains blocking; no automatic retry loop, ignores, disabled
+analysis or deadline extension. This external resource failure needs no new
+product/spec invariant. Scope: no manifest/task/PR or protected-file change.
+
+Trial disposition: paired550 source scanner0/reporter0; final preserved-source
+cf28e5a4 scanner0/reporter0, no loading/analysis errors or OOM. Raw root/example
+OpenPGP findings remain called:false; same GC-budget real-call control yields
+called:true and reporter1. Upstream v2.6 default calls native analysis only for
+sources with affected dependency groups. Classification covers all14 discovered
+modules, distinguishing the12 without reported affected groups from the2 with
+native results; no invented analysis receipt. Exact native compiler proofs
+remain separate, including protected policytool stdlib module-only findings.
+
+### Backport 2026-10-10: HTTP/2 Patch Floor And Compute Ownership
+
+Authority: parent verified paused managed Signal successor and explicitly
+assigned this repair to Compute; ADR0063. No Signal feature/acceptance re-entry.
+Evidence: source3e62f5fa is Go1.27.1/x/net0.58.0/OTel1.45; actual consumed
+wfctl0.86.1 is Go1.26.5/x/net0.58.0. GO-2026-6611 requires Go1.27.2 and
+x/net0.60.0. Official stable Go, proxy/sumdb and Docker/CircleCI/DHI tag metadata
+verified; their existence does not substitute for native/runtime artifact proof.
+
+S1/S6→Task2: upgrade the existing source/example/eleven fixtures, compiler-host
+expectations and generated/default/container pins1.27.1→1.27.2; x/net0.58→0.60
+in owning graphs; retain OTel1.45 and all deliberate version overrides.
+S4→Task2 plus existing Tasks1/3 acceptance: native authenticated targeted tidy,
+focused literal RED/GREEN, real generated app/plugin and runtime/SDK/registry/
+Docker proof, exact-head four-command metadata, full cold Linux race/coverage,
+native scanner/called control and UI gates. Prior Go1.27.1 receipts are history.
+Task2 integration preserves accepted main's source-map-js1.2.2 repair, verified
+at2fcb9baf; source-only protected diff compares to that recorded accepted main,
+not the historical49e18034 base. Use the existing branch and a non-force merge.
+S5: protected CI/scripts/policytool remain separate; current accepted CI/release
+Go1.26.5 pins must be reconciled through the existing governed rollout before
+source merge. No failed-check bypass, settings change, release or deployment
+inside this source manifest. Source3tasks/1PR grouping retained; re-lock after
+independent amendment review and structural alignment PASS.
+
+See `decisions/0063-source-go1272-http2-security.md`.
+
+### Backport 2026-10-10: Preserve Accepted Fixture Input Guards
+
+Accepted main2fcb9baf already owns reusable SDK/Docker fixture callers, a full
+effective Go/config/compiler/tool/source fingerprint, cancellation-aware
+exclusive copy, process teardown and the relocated linked-version regression.
+Retaining the older source cache alone would bypass those accepted guards.
+
+Task1 keeps its source `.`+race cache, sticky failure/lazy/private-copy cases
+and independent changed-input build semantics. Its actual request path first
+uses accepted `fixtureBuildKey`; the full fingerprint joins cache identity.
+Unclosed or failed input-key resolution uses the unchanged raw command, never
+another cache. Cached delivery uses accepted context-aware exclusive copy.
+Integrated source-dispatch controls cover fingerprint changes and native/
+GOENV bypass; helper sentinels remain distinct from real runtime acceptance.
+Attempt both process-cache cleanups after `m.Run()` and fail on either error.
+The accepted integration version test retains empty stdout, preceding stderr
+diagnostics and final v9.9.9; remove only its duplicate package-main copy.
+No new cache kind, SDK/Docker opt-in, task/PR count change, deadline increase or
+protected-file source change. Final frozen runtime/CI gates remain mandatory.
+Task2's inherited compiler-host inventory names
+`cmd/wfctl/fixture_build_artifacts_contract_test.go`: its normal GOTOOLCHAIN pin
+moves1.27.1→1.27.2, preserving deliberate older-version controls. The inherited
+public-policy document describes separately protected bridge pins and remains
+outside the source/generated-default patch. No1.27.2 proof is claimed here.
+
+### Backport 2026-10-10: Match Physical Overlay Source Paths
+
+The real native Go1.27.2 fixture/cache/host run passed wfctl/SDK/composite/
+cleanup and every other control, but its inherited overlay case returned the
+original embedded asset. A matched raw-Go control changed only the overlay
+source key: logical /var kept the original value; physical /private/var
+returned both requested mutations. This proves a Darwin path-alias fixture
+defect, not cached-byte reuse or an accepted Go overlay bypass.
+
+Task2/S4 corrects only the source key in already-owned
+`cmd/wfctl/fixture_build_artifacts_contract_test.go` with `filepath.EvalSymlinks`.
+Keep command/environment, two actual output assertions and2-build/0-hit/
+2-bypass counts unchanged. Retain native RED/causal evidence and require
+focused race GREEN plus all fixture controls; final frozen Linux/full runtime/
+scanner/UI/CI gates remain mandatory. No cache/production behavior, task/PR
+count, protected ownership or deadline change.
+
+
+### Backport 2026-10-16: Recover snapshot acceptance through existing source PR1022 (ADR0198)
+
+Actual Task34/PR1073 is normally merged as main `3c5aa969` (reviewed tree `a0ebe8a9`, parent `aee545f5`). All13 actual-main CI jobs and the four strict checks pass, including153 uncached packages/57 critical parents, realCLI1272/liveDocker4.99s and wfctl578.623s. Its separate automatic snapshot38889204283 attempt1 genuinely FAILS: `go test -race ./...` reaches the unchanged600-second aggregate wfctl package alarm at600.221s while MissingLdflag has run1s;152 other packages pass, image/release jobs SKIP. The active one-second build is not proved hung. Preserve the complete failed log and all historical receipts. Existing source-host reuse in the already approved three-task/one-PR1022 lane is a recovery candidate, not a proved fix or a new task.
+
+| ID | Effective requirement | Existing boundary |
+|---|---|---|
+| SR1 | Preserve all36 compiler task IDs/branches/PRs, Task34's shipped four-map-only scope, source1022's existing3tasks/1PR/owners and the actual shipping order34→1022. No task, owner, PR grouping, shipped feature or Scope Manifest changes; all17 workspace locks and the source-plan lock remain byte-identical. Task35 remains conditional UNPERFORMED/open because the unchanged harness passes. | Governance/preservation |
+| SR2 | Task34 remains unaccepted after its failed snapshot; mainCI PASS never substitutes for snapshot PASS and no original run is relabeled. Record Main1 failure reviews/counters before recovery. Allow only the existing source1022 lane to integrate the engineering-integrated actualmain3c5aa969 through its normal merge under ADR0063 while forward Task34 acceptance remains pending. This supersedes only the accepted-predecessor timing in SF1/RR1/IQ8 and sourceTask2 step1 for this recovery; it does not change which task ships in which PR or accept Task34/runtime. | Existing source1022 preparation |
+| SR3 | Compose the already-owned Task1 source race-host reuse with accepted fixtureBuildKey/compiler/config/source identity and context-aware exclusive copy; retain all cache bypass/error/cancellation/cleanup controls and inherited SDK/Docker/registry/capability behavior. Retain existing Task2 Go1.27.2/x/net0.60/generated/runtime/module/default repairs and Task3 UI parsing scope. Reconcile only existing source owners against the recorded actual integration base; all protected .github/scripts/policytool/H/maps bytes must equal that base. No speculative cache efficacy or transferred historical1.27.1 proof. | Existing3tasks/1PR1022 |
+| SR4 | Preserve source1022's exact-head focused/full native/default600 budget, generated app/plugin/realhost/UI/maintained-image and ordinary current security/review/protection requirements. Its publication/integration uses the existing PR and ordinary protected checks; actual corrected-main native and unchanged600 snapshot tests/release/image provenance plus final reviews must genuinely succeed before source acceptance. No timeout/race/assertion weakening, manual tag/image/release, blind rerun, private Go cache, extra clone or deployment. | Source1022 verification/integration |
+| SR5 | Only after source1022 is genuinely accepted, perform a fresh Task34 Main2 forward reevaluation on that corrected accepted descendant. Prove Task34 H/fourmaps/realized context unchanged and classify every intervening source delta under the approved3/1 source owners; all other bytes/modes remain exact. Join genuine corrected-main/native/snapshot/security/protection evidence and two fresh final reviews before Task34 forward acceptance. Preserve originalMain1 snapshotFAIL and every counter/seal; no retroactivePASS or whole-planComplete. | Task34 forward acceptance |
+| SR6 | Existing named34 same-known nonrequired OSV timing still expires at reviewed source1022 integration; source1022 retains its own ordinary current security obligation and no extension/Task35 inheritance is added. Preserve actual full finding/error/alias/risk assessment, CodeQL/Quality/required protections and UNKNOWN/AnalysisComplete=false/SecurityClean=false while incomplete. No scanner framework/upstream env-policy change, setting/credential/runner/deploy authority is added. | Security/runtime boundary |
+
+Forward: SR1→all36/source3/1/locks;SR2→Task34 failure and sourceTask2 integration timing;SR3–SR4→existing sourceTasks1–3;SR5→fresh Task34Main2;SR6→both current security/unchanged expiry. Reverse: Task34 four-map source→unchanged SF5; Task34 acceptance→SR2/SR5 plus unchanged real gates; sourceTasks1–3→ADR0063 andSR2–SR4/SR6; Task35→unchangedSF6; runtime/issuer/releasedLinuxCLI/Compute identities-worker-quietwindow→unchanged obligations. This is a bug/assumption design backport under existing approved source work: PR34 has already shipped before PR1022, and their task grouping/shipped scope is unchanged. Two independent scope-first/all15 governance reviews and full36+source3 alignment precede canonical apply; verify existing locks without relocking.
+
+
+### Backport 2026-10-16: Preserve current accepted integration dependencies and compiler dispatch
+
+The SR2 normal merge records engineering-integrated main `3c5aa969` as the comparison base. Its owning module graphs already select OTel1.47.0/otelhttp0.70.0 and newer accepted schema/protobuf/genproto companions; its UI already selects js-yaml4.3.2/Vitest5.0.3/source-map-js1.2.2. Preserve those exact accepted versions and graph classifications instead of restoring the source branch's older1.45/4.x graph. Start the thirteen owning modules and their existing checksum files from that accepted base, then use native structured `go mod edit` for only the existing Go1.27.2 floor and x/net0.60.0 requirements, followed by native targeted tidy and complete graph-delta review. No unrelated upgrade, checksum text edit or protected policytool change. Any genuine companion correction must be evidence-backed and reviewed. Older literal1.45/source UI counts are historical proof details; final metadata/runtime expectations bind the inherited accepted1.47 graph and actual current UI suite.
+
+Preserve the accepted invoking-compiler dispatch and `GOTOOLCHAIN=local` registry environment, actual built-CLI metadata rejection and startup/PATH controls. The outer exact source verifier runs native1.27.2; it must not restore downloaded registry compiler selection or remove current main controls. In the already-owned fixture contract, update only normal fixed1.27.1 selection/observation expectations to1.27.2, preserve every deliberate old-compiler/floor variant and current startup/discovery/registry controls, and retain the source-owned physical overlay key fix. SourceTask1 remains source `.` plus race only, with complete accepted fixtureBuildKey, exclusive context-aware copy and both cache cleanups; capability/SDK/Docker/registry cache expansion remains excluded.
+
+This is an accepted-baseline integration clarification within the same three tasks, one PR1022 and existing module/UI/fixture/document owners. It changes no manifest, lock, task/PR grouping, API, timeout or security gate. All historical failure/review counters remain, actual current-head/generated/runtime/Linux default600/UI/image/security/main/snapshot/final proof remains due, and Task34 remains unaccepted under SR1–SR6.
+
+
+### Backport 2026-10-16: Retain the already-approved editor security resolution
+
+Actual source3 owning CI38895629738/UI job116955296201 fails1/141 cases: the real imported editor parseYaml accepts the above-budget hostile merge, while direct js-yaml.load rejects it. Whole main-lock preservation had restored editor0.2.0 and dropped this source branch's existing0.2.1 correction. Root js-yaml4.3.2 alone does not establish the separately bundled editor parser's budget. Preserve original failure/log/source3 seals; no weakened or removed parser assertion.
+
+Existing Task3 already owns the compatible lock resolution. Native npm metadata resolution restores exactly the original source81b9 editor0.2.1 package object within unchanged manifest^0.2.0; every other package/root object remains exact, including accepted Vitest5/rootjsYaml4.3.2/source-map-js1.2.2. This narrowly corrects the earlier accepted-baseline UI-graph preservation note. No new editor release/repository source, package manifest edit, task/PR/owner/Scope Manifest or lock change. Resolver uses ignore-scripts/package-lock-only and installs no node_modules; its Node25 version is metadata tooling, not Node24 runtime proof.
+
+Installed original0.2.1 artifact statically includes default10000 merge-work accounting and the original source resolution is supporting evidence only. Fresh exact-source review and real Node24 focused/full UI141/build plus all ordinary current CI/security/runtime/main/snapshot/final gates remain due. Source4 review has not started and tests/builds are HELD for Tina after the source3 four-command batch released the local heavy slot. Do not blind-rerun b436, transfer historical1.27.1/older-Vitest proof, accept source1022/Task34 or infer the snapshot600 cause. All existing review counters and source3 M1 cancellation-delay limits remain.
+
+
+### Backport 2026-10-16: Offline Generated-App Production Graph
+
+The original natural source3 run38895629738/native116955501479 failed both embedded/external `TestBuildBinaryStep_DryRun_GeneratedMainHTTPRuntime` variants before compilation: forced-offline `go mod tidy` loads dependency test graphs not provisioned by the owning source module's download/test. Preserve the complete failed producer log,82 proxy-off denials and both post-seal Important review supplements. This is a test dependency-resolution assumption defect; no generated-app runtime failure was reached or proved.
+
+Existing Task2 already owns this runtime test. Keep the exact three emitted files, default factory/Execute without a Go override, explicit source-only Workflow replacement, invoking native compiler and all HTTP identity/SIGTERM/endpoint-absence assertions in both modes. Seed only committed owning go.sum metadata into the disposable generated module; build its production graph with explicit `-mod=mod` under unchanged GOWORKoff/GOTOOLCHAINlocal/GOPROXYoff/GOSUMDBoff/CGO0. Do not preload dependency test modules, add a clone/private Go cache, enable network, suppress an error or reuse a prebuilt artifact. Add an independent literal1.27.2 assertion to the actual emitted module. This bounded runtime harness no longer invokes dependency-test-graph tidy; ordinary13-owning-module tidy and the separate generated-app/plugin native tidy integration proofs remain mandatory. No production emitter, dependency graph, task/PR/owner/manifest, lock, protected file, assertion or deadline changes.
+
+Fresh exact Node24.21.0 install, real-parser10/fullUI141 tests, build and lint now PASS on the already-reviewed editor0.2.1 resolution with accepted Vitest5.0.3/js-yaml4.3.2 preserved. Keep original UI140PASS1FAIL as failed historical evidence. Source5 continues round5/max5 with both Source4 static seals and new Important native supplements preserved; final full-source independent review follows meaningful actual offline HTTP/lifecycle validation, scoped vet/lint and source preservation checks.
+
+Source3 wfctl604.441s genuinely passed the actual900s CI alarm and exceeded the separate600s functional acceptance target by4.441s. Proportionate log assessment separates that timing gap from the concrete module-resolution failure and advisory benchmark. Do not treat a benchmark as a blocker or infer an individual hang/cache cause; no additional cache scope, assertion weakening, alarm increase or blind prior-head rerun. The corrected source's natural native run and genuine unchanged600 snapshot/acceptance must establish their own results. Source1022/Task34/runtime remain unaccepted until their ordinary current gates succeed; named34 security timing expiry and retired scanner-framework disposition remain unchanged.

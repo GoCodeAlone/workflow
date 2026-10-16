@@ -61,6 +61,7 @@ modules:
   - name: {{.Name}}-health
     type: health.checker
     config:
+      healthPath: /health
       description: "Health check endpoint"
 
 workflows:
@@ -125,17 +126,3 @@ workflows:
   http:
     router: {{.Name}}-router
     server: {{.Name}}-server
-    routes:
-      - method: GET
-        path: /health
-        handler: {{.Name}}-health
-
-triggers:
-  event-trigger:
-    type: event
-    config:
-      topic: "{{.Name}}.incoming"
-  http-trigger:
-    type: http
-    config:
-      server: {{.Name}}-server

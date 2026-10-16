@@ -4,7 +4,7 @@ A hands-on tutorial for developers who want to build real applications using the
 
 Throughout this guide, the [Chat Platform example](../../example/chat-platform/) serves as the reference architecture. It is a production-grade mental health support platform built entirely from YAML configuration and dynamic Go components -- no custom server code required.
 
-**Prerequisites**: Go 1.26.5+, the workflow server binary, and a text editor.
+**Prerequisites**: Go 1.27.2+, the workflow server binary, and a text editor.
 
 ---
 
@@ -63,7 +63,7 @@ It is not a good fit for:
 
 ### Prerequisites
 
-1. **Go 1.26.5+** installed on your machine
+1. **Go 1.27.2+** installed on your machine
 2. **The workflow repository** cloned and built:
 
 ```bash
@@ -2493,7 +2493,7 @@ spec:
 Create a `Dockerfile`:
 
 ```dockerfile
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27.2-alpine AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download

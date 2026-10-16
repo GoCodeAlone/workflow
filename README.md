@@ -1,6 +1,6 @@
 # Workflow Engine
 
-[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.27.2+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built on Modular](https://img.shields.io/badge/Built%20on-GoCodeAlone%2Fmodular-green)](https://github.com/GoCodeAlone/modular)
 [![Go Reference](https://pkg.go.dev/badge/github.com/GoCodeAlone/workflow.svg)](https://pkg.go.dev/github.com/GoCodeAlone/workflow)
@@ -133,7 +133,7 @@ scaffolds, see [Repository Layout](docs/REPO_LAYOUT.md).
 
 ### Requirements
 
-- Go 1.26.5+
+- Go 1.27.2+
 - Node.js 24+ (for UI development)
 
 ### Run the Server
@@ -349,7 +349,7 @@ cd ui && npm run lint
 
 | Component | Technology |
 |-----------|-----------|
-| Language | Go 1.26 |
+| Language | Go 1.27 |
 | Framework | [GoCodeAlone/modular](https://github.com/GoCodeAlone/modular) v1.12.3 |
 | UI | React, ReactFlow, Zustand, Vite, TypeScript |
 | Hot-Reload | [Yaegi](https://github.com/traefik/yaegi) Go interpreter |
