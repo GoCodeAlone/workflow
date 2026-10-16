@@ -1,4 +1,5 @@
 {
+  "version": 1,
   "bundles": [
     {
       "files": [
@@ -8,7 +9,7 @@
         },
         {
           "path": ".github/workflows/policytool/adoptionguard/main_test.go",
-          "sha256": "f4220c8924a6feb96d124c06032cdced62342fe39165f8a0e96f6b2b397e7f17"
+          "sha256": "b146ba9688e6aa2d4d72879263875e1a189768894552efeb3087179e5c0651cd"
         },
         {
           "path": ".github/workflows/policytool/adoptionguard/run.sh",
@@ -16,7 +17,7 @@
         },
         {
           "path": ".github/workflows/policytool/go.mod",
-          "sha256": "0a2d135980310757f36e733161b94498b4e0a1b6ac8c6de8a799f542d6c9ddb8"
+          "sha256": "65717c7073e6a6532e6e687ada4bed681081b3c9c565f78b84560e89005353b4"
         },
         {
           "path": ".github/workflows/policytool/go.sum",
@@ -24,11 +25,11 @@
         },
         {
           "path": ".github/workflows/policytool/main.go",
-          "sha256": "8dba6ad341fa07644868fd43717aff162c4feae1694ee9a122ef4cd401214a00"
+          "sha256": "9c38f6e1a92d34d31cd73ba2bd2b092216ab9c115af79a0ef5ec13343c4f4d2d"
         },
         {
           "path": ".github/workflows/policytool/main_test.go",
-          "sha256": "a88f4ec70a2736e54bf887594da855fb6d25d2cecb35321cd5fa8a2455304212"
+          "sha256": "fadde1edd916918a69f912177a74565a6138ed935aae3509d7c6082924467778"
         },
         {
           "path": ".github/workflows/scripts/verify-public-workflow-branch-protection.sh",
@@ -36,7 +37,7 @@
         },
         {
           "path": "scripts/check-public-workflow-policy.sh",
-          "sha256": "166d4c7f272b6e249abd5bd2efadb8034105cf62df3cff2200978c6e9fb6998c"
+          "sha256": "48ab26cade210aad60b5fab5bf49c2faad89c8b5ea291b34830b28a50512822e"
         },
         {
           "path": "scripts/fixtures/public-workflow-policy/lifecycle-future.yml",
@@ -152,11 +153,10 @@
         },
         {
           "path": "scripts/test-check-public-workflow-policy.sh",
-          "sha256": "7d209bb35ff3a7a46b22f9a10a920eb30218c3403726d1dac72e0bffd1d914a4"
+          "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b"
         }
       ],
       "state": "active"
     }
-  ],
-  "version": 1
+  ]
 }

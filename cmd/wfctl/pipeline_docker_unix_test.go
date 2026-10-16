@@ -3,13 +3,28 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
+	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -22,29 +37,38 @@ import (
 const pipelineDockerTestLabel = "wfctl-0123456789abcdef0123456789abcdef"
 
 type pipelineDockerFixture struct {
-	Context         string                  `json:"context"`
-	ServerID        string                  `json:"server_id"`
-	Containers      map[string]string       `json:"containers"`
-	Fail            string                  `json:"fail"`
-	Sleep           string                  `json:"sleep"`
-	Flood           string                  `json:"flood"`
-	Keep            bool                    `json:"keep"`
-	ListOverride    string                  `json:"list_override"`
-	InspectOverride string                  `json:"inspect_override"`
-	UnavailableHost string                  `json:"unavailable_host"`
-	Helper          string                  `json:"helper"`
-	HelperBlocks    bool                    `json:"helper_blocks"`
-	Group           pipelineProcessIdentity `json:"group"`
-	LateCreate      bool                    `json:"late_create"`
+	IdentityDialAddresses map[string]string       `json:"identity_dial_addresses,omitempty"`
+	Context               string                  `json:"context"`
+	ServerID              string                  `json:"server_id"`
+	Containers            map[string]string       `json:"containers"`
+	Fail                  string                  `json:"fail"`
+	Sleep                 string                  `json:"sleep"`
+	Flood                 string                  `json:"flood"`
+	Keep                  bool                    `json:"keep"`
+	ListOverride          string                  `json:"list_override"`
+	InspectOverride       string                  `json:"inspect_override"`
+	UnavailableHost       string                  `json:"unavailable_host"`
+	Helper                string                  `json:"helper"`
+	HelperBlocks          bool                    `json:"helper_blocks"`
+	Group                 pipelineProcessIdentity `json:"group"`
+	LateCreate            bool                    `json:"late_create"`
+	WaitStatus            string                  `json:"wait_status,omitempty"`
+	IdentityResponse      string                  `json:"identity_response,omitempty"`
+	IdentityProxy         bool                    `json:"identity_proxy,omitempty"`
+	RequireOpenInput      bool                    `json:"require_open_input,omitempty"`
 }
 
 type pipelineDockerInvocation struct {
-	Args   []string          `json:"args"`
-	Env    []string          `json:"env"`
-	Files  map[string]string `json:"files"`
-	Config string            `json:"config"`
-	PID    int               `json:"pid"`
-	PGID   int               `json:"pgid"`
+	Args          []string          `json:"args"`
+	Env           []string          `json:"env"`
+	Files         map[string]string `json:"files"`
+	Config        string            `json:"config"`
+	PID           int               `json:"pid"`
+	PGID          int               `json:"pgid"`
+	RequestHost   string            `json:"request_host,omitempty"`
+	RequestMethod string            `json:"request_method,omitempty"`
+	RequestTarget string            `json:"request_target,omitempty"`
+	RequestClose  bool              `json:"request_close,omitempty"`
 }
 
 // The helper substitutes only the Docker CLI dependency. Resolution, execution,
@@ -93,6 +117,7 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 	invocation.PID, invocation.PGID = os.Getpid(), syscall.Getpgrp()
 	commandArgs := args
 	host := "unix:///daemon-b.sock"
+	tlsEnabled, verifyTLS := false, false
 	for len(commandArgs) > 0 && strings.HasPrefix(commandArgs[0], "--") {
 		flag, value, hasValue := strings.Cut(commandArgs[0], "=")
 		commandArgs = commandArgs[1:]
@@ -105,12 +130,34 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 		switch flag {
 		case "--host":
 			host = value
+		case "--tls":
+			tlsEnabled = value == "true"
+		case "--tlsverify":
+			verifyTLS = value == "true"
 		case "--config":
 			config, _ := os.ReadFile(filepath.Join(value, "config.json"))
 			invocation.Config = string(config)
 		case "--tlscacert", "--tlscert", "--tlskey":
 			material, _ := os.ReadFile(value)
 			invocation.Files[flag] = string(material)
+		}
+	}
+
+	identityStream := slices.Equal(commandArgs, []string{"system", "dial-stdio"})
+	var request *http.Request
+	var input *bufio.Reader
+	if identityStream {
+		input = bufio.NewReader(os.Stdin)
+		request, err = http.ReadRequest(input)
+		if err != nil || request.Method != http.MethodGet || request.RequestURI != "/info" || !request.Close || request.ContentLength != 0 || len(request.TransferEncoding) != 0 {
+			os.Exit(94)
+		}
+		invocation.RequestHost, invocation.RequestMethod, invocation.RequestTarget, invocation.RequestClose = request.Host, request.Method, request.RequestURI, request.Close
+		if fixture.RequireOpenInput {
+			fds := []unix.PollFd{{Fd: int32(os.Stdin.Fd()), Events: unix.POLLIN}}
+			if _, err := unix.Poll(fds, 0); err != nil || fds[0].Revents&unix.POLLHUP != 0 {
+				os.Exit(94)
+			}
 		}
 	}
 	log, _ := os.OpenFile(filepath.Join(dir, "calls.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -120,6 +167,9 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 		os.Exit(93)
 	}
 	command := commandArgs[0]
+	if identityStream {
+		command = "info" // Existing logical identity fault; invocation retains actual argv.
+	}
 	if fixture.Helper == command {
 		binary, _ := os.Executable()
 		helperArgs := []string{"-test.run=^TestPipelineDockerCLIHelper$", "--", "--pipeline-docker-inherited-fd"}
@@ -153,10 +203,28 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 		os.Exit(0)
 	}
 	switch command {
+	case "pull":
+		// Synthetic setup transition only; no image or container is fetched.
 	case "context":
 		fmt.Print(fixture.Context)
 	case "info":
-		_ = json.NewEncoder(os.Stdout).Encode(fixture.ServerID)
+		if !identityStream {
+			_ = json.NewEncoder(os.Stdout).Encode(fixture.ServerID)
+			break
+		}
+		if fixture.IdentityProxy {
+			if err := proxyPipelineDockerIdentity(request, input, host, tlsEnabled, verifyTLS, invocation.Files, fixture.IdentityDialAddresses); err != nil {
+				os.Exit(7)
+			}
+		} else if fixture.IdentityResponse != "" {
+			fmt.Print(fixture.IdentityResponse)
+		} else {
+			body, _ := json.Marshal(map[string]any{"ID": fixture.ServerID, "Containers": 0, "Unrelated": map[string]any{"field": true}})
+			fmt.Print(pipelineDockerIdentityWire(string(body)))
+		}
+		if fixture.Fail == "identity-after-response" {
+			os.Exit(7)
+		}
 	case "ps":
 		if fixture.ListOverride != "" {
 			fmt.Print(fixture.ListOverride)
@@ -191,7 +259,11 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 			_ = os.WriteFile(filepath.Join(dir, "fixture.json"), data, 0600)
 		}
 	case "wait":
-		fmt.Println("0")
+		if fixture.WaitStatus != "" {
+			fmt.Println(fixture.WaitStatus)
+		} else {
+			fmt.Println("0")
+		}
 	case "create":
 		id := strings.Repeat("a", 64)
 		for i, arg := range commandArgs {
@@ -214,6 +286,16 @@ func TestPipelineDockerCLIHelper(t *testing.T) {
 		fmt.Print("captured output")
 	default:
 		os.Exit(94)
+	}
+	// Rotate only after the preceding command has succeeded. The next real
+	// client's identity preflight then fails before it can start another CLI.
+	if (command == "create" && fixture.Fail == "after-create-server-change") ||
+		(command == "start" && fixture.Fail == "after-start-server-change") {
+		fixture.ServerID = "synthetic-rotated-daemon"
+		updated, err := json.Marshal(fixture)
+		if err != nil || os.WriteFile(filepath.Join(dir, "fixture.json"), updated, 0600) != nil {
+			os.Exit(99)
+		}
 	}
 	os.Exit(0)
 }
@@ -835,8 +917,10 @@ func TestPipelineDockerParentSIGKILLStopsLateCreateBeforeEmptyProbe(t *testing.T
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		if data, err := os.ReadFile(filepath.Join(dir, "helper.pid")); err == nil {
-			_, _ = fmt.Sscan(string(data), &helperPID)
-			break
+			if pid, parseErr := strconv.Atoi(string(data)); parseErr == nil && pid > 0 {
+				helperPID = pid
+				break
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -1007,5 +1091,580 @@ func TestPipelineDockerCreateArgs(t *testing.T) {
 	cfg.Env["GITHUB_TOKEN"] = "TEST_SECRET_TOKEN"
 	if _, err := client.CreateArgs(cfg, command, pipelineDockerTestLabel, cidfile); err == nil || strings.Contains(err.Error(), "TEST_SECRET_TOKEN") {
 		t.Fatal("builder must apply the redacted record config policy")
+	}
+}
+
+func pipelineDockerIdentityWire(body string) string {
+	return fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+}
+
+func proxyPipelineDockerIdentity(request *http.Request, input io.Reader, endpoint string, enabled, verify bool, files map[string]string, addresses map[string]string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return err
+	}
+	network, address := "tcp", u.Host
+	if u.Scheme == "unix" {
+		network, address = "unix", u.Path
+	}
+	if network == "tcp" && addresses != nil {
+		// A bounded fixture DNS table replaces only external lookup. The
+		// production resolver must actually pass its canonical dial authority.
+		mapped, exists := addresses[address]
+		if !exists {
+			return fmt.Errorf("fixture DNS authority unavailable")
+		}
+		address = mapped
+	}
+	connection, err := net.DialTimeout(network, address, time.Second)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	if enabled {
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM([]byte(files["--tlscacert"])) {
+			return fmt.Errorf("fixture CA invalid")
+		}
+		secure := tls.Client(connection, &tls.Config{RootCAs: roots, ServerName: u.Hostname(), MinVersion: tls.VersionTLS12, InsecureSkipVerify: !verify}) // #nosec G402 -- models the explicit CLI TLS policy in isolated fixtures.
+		if err := secure.HandshakeContext(context.Background()); err != nil {
+			return err
+		}
+		connection = secure
+	}
+	if err := request.Write(connection); err != nil {
+		return err
+	}
+	go func() {
+		_, _ = io.Copy(connection, input)
+		if half, ok := connection.(interface{ CloseWrite() error }); ok {
+			_ = half.CloseWrite()
+		}
+	}()
+	_, err = io.Copy(os.Stdout, connection)
+	return err
+}
+
+func TestPipelineDockerIdentityRequestAuthorityAndBound(t *testing.T) {
+	for _, test := range []struct{ endpoint, host string }{
+		{"unix:///unused-fixture.sock", "api.moby.localhost"},
+		{"tcp://selected.example:2376", "selected.example:2376"},
+		{"tcp://[::1]:2376", "[::1]:2376"},
+		{"tcp://[fe80::1%25en0]:2376", "[fe80::1]:2376"},
+	} {
+		t.Run(test.endpoint, func(t *testing.T) {
+			wire, err := pipelineDockerIdentityRequest(test.endpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(wire)))
+			if err != nil || request.Method != http.MethodGet || request.RequestURI != "/info" || request.Host != test.host || !request.Close || request.ContentLength != 0 {
+				t.Fatalf("identity request changed method/path/authority/close: %v, %v", request, err)
+			}
+			if request.Header.Get("User-Agent") != "" {
+				t.Fatal("identity added an unrelated client header")
+			}
+		})
+	}
+	wire, err := pipelineDockerIdentityRequest("tcp://" + strings.Repeat("a", 461) + ":1")
+	if err != nil || len(wire) != 512 {
+		t.Fatalf("512-byte boundary rejected: %d, %v", len(wire), err)
+	}
+	if _, err := pipelineDockerIdentityRequest("tcp://" + strings.Repeat("a", 462) + ":1"); err == nil {
+		t.Fatal("513-byte request exceeded safe prestart pipe bound")
+	}
+	for _, endpoint := range []string{"ssh://private.invalid", "tcp://user:private-canary@host:2376", "tcp://host:2376\r\nX: private-canary"} {
+		if _, err := pipelineDockerIdentityRequest(endpoint); err == nil || strings.Contains(err.Error(), "private-canary") {
+			t.Fatal("invalid endpoint accepted or reflected")
+		}
+	}
+}
+
+func TestPipelineDockerIdentityInputAndStartFailures(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input []byte
+		env   []string
+	}{
+		{"oversize-input", bytes.Repeat([]byte("x"), 513), nil},
+		{"invalid-exec-environment", []byte("GET /info HTTP/1.1\r\nHost: api.moby.localhost\r\nConnection: close\r\n\r\n"), []string{"private-start-canary=\x00"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			diagnostic := newPipelineRecordDiagnostic()
+			ctx := pipelineDockerResolutionContext(context.WithValue(t.Context(), pipelineRecordDiagnosticKey{}, diagnostic), "resolve_identity")
+			result, err := runPipelineDockerCLIWithInput(ctx, "private-binary-canary", test.env, pipelineDockerCallTimeout, test.input, "system", "dial-stdio")
+			if err == nil || (result != nil && result.ExitCode != -1) {
+				t.Fatal("input/start failure appeared successful")
+			}
+			report, output := diagnosticTestReport(t, diagnostic)
+			if report.Phase != "docker_resolve_identity_command" || report.Operation != "resolve_identity" || report.DockerExit != -1 {
+				t.Fatal("prestart failure lost its actual unknown exit")
+			}
+			if bytes.Contains(output, []byte("private-start-canary")) || bytes.Contains(output, []byte("private-binary-canary")) {
+				t.Fatal("input/start failure reflected private input")
+			}
+		})
+	}
+}
+
+func TestPipelineDockerIdentityFramingAndMetadata(t *testing.T) {
+	body := "{\"ID\":\"daemon-A\",\"Containers\":3,\"Unrelated\":{\"nested\":[1,true,null]}}\n"
+	chunked := "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" + fmt.Sprintf("%x\r\n%s\r\n0\r\n\r\n", len(body), body)
+	for _, test := range []struct {
+		name, wire string
+		valid      bool
+	}{
+		{"content-length", pipelineDockerIdentityWire(body), true},
+		{"chunked", chunked, true},
+		{"eof-delimited", "HTTP/1.0 200 OK\r\n\r\n" + body, true},
+		{"missing-ID", pipelineDockerIdentityWire("{\"Containers\":0}"), false},
+		{"empty-ID", pipelineDockerIdentityWire("{\"ID\":\"\"}"), false},
+		{"null-ID", pipelineDockerIdentityWire("{\"ID\":null}"), false},
+		{"number-ID", pipelineDockerIdentityWire("{\"ID\":123}"), false},
+		{"duplicate-ID", pipelineDockerIdentityWire("{\"ID\":\"daemon-A\",\"ID\":\"other\"}"), false},
+		{"escaped-duplicate-ID", pipelineDockerIdentityWire("{\"ID\":\"daemon-A\",\"I\\u0044\":\"other\"}"), false},
+		{"case-alias-ID", pipelineDockerIdentityWire("{\"ID\":\"daemon-A\",\"id\":\"other\"}"), false},
+		{"only-case-alias", pipelineDockerIdentityWire("{\"id\":\"daemon-A\"}"), false},
+		{"unsafe-ID", pipelineDockerIdentityWire("{\"ID\":\"private-canary\\nsecret\"}"), false},
+		{"overlong-ID", pipelineDockerIdentityWire("{\"ID\":\"" + strings.Repeat("a", 257) + "\"}"), false},
+		{"non-object", pipelineDockerIdentityWire("[{\"ID\":\"daemon-A\"}]"), false},
+		{"trailing-JSON", pipelineDockerIdentityWire(body + "{}"), false},
+		{"trailing-wire", pipelineDockerIdentityWire(body) + "private-canary", false},
+		{"second-response", pipelineDockerIdentityWire(body) + pipelineDockerIdentityWire(body), false},
+		{"redirect", strings.Replace(pipelineDockerIdentityWire(body), "200 OK", "302 Found", 1), false},
+		{"daemon-error", strings.Replace(pipelineDockerIdentityWire(body), "200 OK", "500 Error", 1), false},
+		{"compressed", strings.Replace(pipelineDockerIdentityWire(body), "Connection: close", "Content-Encoding: gzip\r\nConnection: close", 1), false},
+		{"ambiguous-length-and-chunked", strings.Replace(chunked, "Connection: close", "Content-Length: 1\r\nConnection: close", 1), false},
+		{"duplicate-length", strings.Replace(pipelineDockerIdentityWire(body), "Connection: close", fmt.Sprintf("Content-Length: %d\r\nConnection: close", len(body)), 1), false},
+		{"truncated-length", pipelineDockerIdentityWire(body)[:len(pipelineDockerIdentityWire(body))-2], false},
+		{"truncated-chunked", chunked[:len(chunked)-5], false},
+		{"malformed-chunked", strings.Replace(chunked, fmt.Sprintf("%x\r\n", len(body)), "z\r\n", 1), false},
+		{"invalid-status", "private-canary\r\n\r\n" + body, false},
+		{"http2-text", strings.Replace(pipelineDockerIdentityWire(body), "HTTP/1.1", "HTTP/2.0", 1), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir, fixture := newPipelineDockerFixture(t)
+			fixture.IdentityResponse, fixture.RequireOpenInput = test.wire, true
+			writePipelineDockerFixture(t, dir, fixture)
+			client, err := resolvePipelineDockerClient(t.Context())
+			if test.valid {
+				if err != nil || client == nil {
+					t.Fatalf("valid framed identity rejected: %v", err)
+				}
+				defer client.Close()
+				if client.Identity.ServerID != "daemon-A" {
+					t.Fatal("wrong identity consumed")
+				}
+			} else {
+				if client != nil {
+					_ = client.Close()
+					t.Fatal("invalid response established a client")
+				}
+				if err == nil || strings.Contains(err.Error(), "private-canary") || strings.Contains(err.Error(), dir) {
+					t.Fatal("invalid framing or identity accepted/reflected")
+				}
+			}
+			calls := pipelineDockerCalls(t, dir)
+			if len(calls) != 2 || !slices.Contains(calls[1].Args, "dial-stdio") || slices.Contains(calls[1].Args, "info") ||
+				calls[1].RequestHost != "api.moby.localhost" || calls[1].RequestMethod != "GET" || calls[1].RequestTarget != "/info" || !calls[1].RequestClose {
+				t.Fatal("test did not cross the real resolver/helper stdin protocol boundary exactly once")
+			}
+			if !test.valid {
+				for i, arg := range calls[1].Args {
+					if arg == "--config" {
+						if _, err := os.Lstat(calls[1].Args[i+1]); !os.IsNotExist(err) {
+							t.Fatal("failed resolver retained private config")
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// The selected helper models the upstream stream copier, not Docker's binary.
+// A natural hosted live test remains required for actual Docker compatibility.
+func TestPipelineDockerIdentitySelectedTransport(t *testing.T) {
+	for _, transport := range []string{"unix", "tcp", "tls12", "tls13"} {
+		t.Run(transport, func(t *testing.T) {
+			dir, fixture := newPipelineDockerFixture(t)
+			requests := make(chan string, 8)
+			expectedHost := ""
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests <- r.Method + " " + r.RequestURI + " " + r.Host
+				id := "wrong-http-host-backend"
+				if r.Method == "GET" && r.RequestURI == "/info" && r.Host == expectedHost && r.Close {
+					id = "daemon-A"
+				}
+				w.Header().Set("Connection", "close")
+				_ = json.NewEncoder(w).Encode(map[string]any{"ID": id, "Containers": 0})
+			}))
+			if transport == "unix" {
+				if err := server.Listener.Close(); err != nil {
+					t.Fatal(err)
+				}
+				short, err := os.MkdirTemp("/tmp", "wf-id-")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.RemoveAll(short) })
+				server.Listener, err = net.Listen("unix", filepath.Join(short, "daemon.sock"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixture.Context = fmt.Sprintf("[{\"Name\":\"default\",\"Endpoints\":{\"docker\":{\"Host\":%q}}}]", "unix://"+server.Listener.Addr().String())
+				expectedHost = "api.moby.localhost"
+			} else {
+				expectedHost = server.Listener.Addr().String()
+				fixture.Context = fmt.Sprintf("[{\"Name\":\"default\",\"Endpoints\":{\"docker\":{\"Host\":%q}}}]", "tcp://"+expectedHost)
+			}
+			if strings.HasPrefix(transport, "tls") {
+				version := uint16(tls.VersionTLS12)
+				if transport == "tls13" {
+					version = tls.VersionTLS13
+				}
+				server.TLS = &tls.Config{MinVersion: version, MaxVersion: version}
+				server.StartTLS()
+				material := filepath.Join(dir, "tls")
+				if err := os.Mkdir(material, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(material, "ca.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("DOCKER_TLS_VERIFY", "1")
+				t.Setenv("DOCKER_CERT_PATH", material)
+			} else {
+				server.Start()
+			}
+			t.Cleanup(server.Close)
+			fixture.IdentityProxy, fixture.RequireOpenInput = true, true
+			writePipelineDockerFixture(t, dir, fixture)
+			client := resolvePipelineDockerFixture(t)
+			if client.Identity.ServerID != "daemon-A" {
+				t.Fatal("identity used different HTTP Host/backend")
+			}
+			if _, err := client.Run(t.Context(), "wait", strings.Repeat("a", 64)); err != nil {
+				t.Fatal(err)
+			}
+			if len(requests) != 2 {
+				t.Fatalf("want initial and operation identity revalidation; got%d", len(requests))
+			}
+			for range 2 {
+				if got := <-requests; got != "GET /info "+expectedHost {
+					t.Fatalf("identity crossed a different request boundary: %q", got)
+				}
+			}
+			for _, call := range pipelineDockerCalls(t, dir) {
+				if slices.Contains(call.Args, "info") {
+					t.Fatal("identity re-entered client-plugin info reporting")
+				}
+			}
+		})
+	}
+}
+
+func TestPipelineDockerIdentityIncompletePeerAndCLIExit(t *testing.T) {
+	for _, mode := range []string{"stalled", "partial", "complete-but-open", "successful-bytes-failed-CLI", "capture-overflow"} {
+		t.Run(mode, func(t *testing.T) {
+			dir, fixture := newPipelineDockerFixture(t)
+			diagnostic := newPipelineRecordDiagnostic()
+			outer := context.WithValue(t.Context(), pipelineRecordDiagnosticKey{}, diagnostic)
+			ctx := outer
+			switch mode {
+			case "successful-bytes-failed-CLI":
+				fixture.Fail = "identity-after-response"
+			case "capture-overflow":
+				fixture.Flood = "info"
+			default:
+				ready := make(chan struct{}, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Connection", "close")
+					body := "{\"ID\":\"daemon-A\"}"
+					if mode != "stalled" {
+						w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+						if mode == "partial" {
+							body = body[:5]
+						}
+						_, _ = io.WriteString(w, body)
+						w.(http.Flusher).Flush()
+					}
+					ready <- struct{}{}
+					<-r.Context().Done()
+				}))
+				t.Cleanup(server.Close)
+				fixture.Context = fmt.Sprintf("[{\"Name\":\"default\",\"Endpoints\":{\"docker\":{\"Host\":%q}}}]", "tcp://"+server.Listener.Addr().String())
+				fixture.IdentityProxy = true
+				defer func() {
+					select {
+					case <-ready:
+					default:
+						t.Error("failure never reached the fixture peer")
+					}
+				}()
+			}
+			writePipelineDockerFixture(t, dir, fixture)
+			start := time.Now()
+			client, err := resolvePipelineDockerClient(ctx)
+			if client != nil {
+				_ = client.Close()
+				t.Fatal("failed/incomplete helper established identity")
+			}
+			if err == nil || time.Since(start) > 12*time.Second {
+				t.Fatal("peer/CLI failure did not fail within unchanged bounds")
+			}
+			report, _ := diagnosticTestReport(t, diagnostic)
+			phase := "docker_resolve_identity_deadline"
+			if mode == "successful-bytes-failed-CLI" {
+				phase = "docker_resolve_identity_command"
+			}
+			if mode == "capture-overflow" {
+				phase = "docker_resolve_identity_capture"
+			}
+			if report.Phase != phase || report.Operation != "resolve_identity" || report.ChildObserved {
+				t.Fatal("failure precedence changed after plausible identity bytes")
+			}
+		})
+	}
+}
+
+func TestPipelineDockerIdentityInheritedFDInitialResolution(t *testing.T) {
+	for _, blocks := range []bool{false, true} {
+		t.Run(strconv.FormatBool(blocks), func(t *testing.T) {
+			dir, fixture := newPipelineDockerFixture(t)
+			fixture.Helper, fixture.HelperBlocks = "info", blocks
+			writePipelineDockerFixture(t, dir, fixture)
+			diagnostic := newPipelineRecordDiagnostic()
+			outer := context.WithValue(t.Context(), pipelineRecordDiagnosticKey{}, diagnostic)
+			started := time.Now()
+			client, err := resolvePipelineDockerClient(outer)
+			if client != nil {
+				_ = client.Close()
+				t.Fatal("inherited output fd was accepted as successful identity")
+			}
+			if err == nil || time.Since(started) > 12*time.Second {
+				t.Fatal("initial inherited-fd failure exceeded helper plus drain bounds")
+			}
+			report, output := diagnosticTestReport(t, diagnostic)
+			phase, exit := "docker_resolve_identity_command", 0
+			if blocks {
+				phase, exit = "docker_resolve_identity_deadline", -1
+			}
+			if report.Phase != phase || report.Operation != "resolve_identity" || report.DockerExit != exit || report.Deadline || report.Cancelled || outer.Err() != nil {
+				t.Fatal("initial helper exit/drain and inner deadline were confused")
+			}
+			if bytes.Contains(output, []byte(dir)) || bytes.Contains(output, []byte("daemon-A")) {
+				t.Fatal("private fixture identity leaked")
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "helper.pid"))
+			if err != nil {
+				t.Fatal("control did not launch an inherited-fd helper")
+			}
+			pid, err := strconv.Atoi(string(data))
+			if err != nil || pid <= 0 {
+				t.Fatal("invalid owned helper PID")
+			}
+			t.Cleanup(func() { _ = unix.Kill(pid, unix.SIGKILL) })
+			deadline := time.Now().Add(time.Second)
+			for unix.Kill(pid, 0) == nil && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			if unix.Kill(pid, 0) == nil {
+				t.Fatal("owned initial helper survived group cleanup")
+			}
+		})
+	}
+}
+
+func TestPipelineDockerIdentityDNSDialAuthority(t *testing.T) {
+	for _, endpoint := range []struct{ name, original, dial, wire string }{
+		{"lowercase-IDN", "bücher.example", "xn--bcher-kva.example", "xn--bcher-kva.example"},
+		{"uppercase-IDN", "BÜCHER.example", "xn--bcher-kva.example", "xn--BCHER-2pa.example"},
+		{"ASCII-verbatim", "Docker.EXAMPLE", "Docker.EXAMPLE", "Docker.EXAMPLE"},
+	} {
+		for _, mode := range []string{"tcp", "verified-TLS", "wrong-TLS-name"} {
+			t.Run(endpoint.name+"/"+mode, func(t *testing.T) {
+				dir, fixture := newPipelineDockerFixture(t)
+				requests := make(chan string, 8)
+				serverNames := make(chan string, 8)
+				expectedHost := ""
+				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests <- r.Host
+					id := "wrong-host-backend"
+					if r.Method == "GET" && r.RequestURI == "/info" && r.Host == expectedHost && r.Close {
+						id = "daemon-A"
+					}
+					w.Header().Set("Connection", "close")
+					_ = json.NewEncoder(w).Encode(map[string]any{"ID": id})
+				}))
+				_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				expectedHost = net.JoinHostPort(endpoint.wire, port)
+				expectedDial := net.JoinHostPort(endpoint.dial, port)
+				original := "tcp://" + net.JoinHostPort(endpoint.original, port)
+				fixture.Context = fmt.Sprintf("[{\"Name\":\"default\",\"Endpoints\":{\"docker\":{\"Host\":%q}}}]", original)
+				fixture.IdentityProxy, fixture.RequireOpenInput = true, true
+				fixture.IdentityDialAddresses = map[string]string{expectedDial: server.Listener.Addr().String()}
+				if mode != "tcp" {
+					key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+					if err != nil {
+						t.Fatal(err)
+					}
+					name := endpoint.dial
+					if mode == "wrong-TLS-name" {
+						name = "other.invalid"
+					}
+					certificate := &x509.Certificate{
+						SerialNumber: big.NewInt(1), DNSNames: []string{name},
+						NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+						KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+						ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+						IsCA:        true, BasicConstraintsValid: true,
+					}
+					der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
+					if err != nil {
+						t.Fatal(err)
+					}
+					server.TLS = &tls.Config{
+						MinVersion:   tls.VersionTLS12,
+						Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+						GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+							serverNames <- hello.ServerName
+							return nil, nil
+						},
+					}
+					server.StartTLS()
+					material := filepath.Join(dir, "tls")
+					if err := os.Mkdir(material, 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(material, "ca.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
+						t.Fatal(err)
+					}
+					t.Setenv("DOCKER_TLS_VERIFY", "1")
+					t.Setenv("DOCKER_CERT_PATH", material)
+				} else {
+					server.Start()
+				}
+				t.Cleanup(server.Close)
+				writePipelineDockerFixture(t, dir, fixture)
+				client, err := resolvePipelineDockerClient(t.Context())
+				if mode == "wrong-TLS-name" {
+					if client != nil {
+						_ = client.Close()
+						t.Fatal("wrong TLS server name established identity")
+					}
+					if err == nil || strings.Contains(err.Error(), "x509") || strings.Contains(err.Error(), endpoint.dial) {
+						t.Fatal("TLS rejection was omitted or exposed private transport error")
+					}
+					if len(requests) != 0 || len(serverNames) != 1 || <-serverNames != endpoint.dial {
+						t.Fatal("negative did not reach the selected canonical TLS name before rejection")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer client.Close()
+				if client.Identity.Endpoint != original || client.Identity.ServerID != "daemon-A" {
+					t.Fatal("canonical dialing changed the frozen identity URI or selected backend")
+				}
+				if _, err := client.Run(t.Context(), "wait", strings.Repeat("a", 64)); err != nil {
+					t.Fatal(err)
+				}
+				if len(requests) != 2 {
+					t.Fatal("initial/operation identity did not cross the actual fixture socket")
+				}
+				for range 2 {
+					if <-requests != expectedHost {
+						t.Fatal("wire Host did not retain its independent Punycode policy")
+					}
+				}
+				if mode == "verified-TLS" {
+					if len(serverNames) != 2 {
+						t.Fatal("TLS revalidation did not reach both selected handshakes")
+					}
+					for range 2 {
+						if <-serverNames != endpoint.dial {
+							t.Fatal("TLS SNI retained a noncanonical DNS name")
+						}
+					}
+				}
+				calls := pipelineDockerCalls(t, dir)
+				if len(calls) != 4 {
+					t.Fatal("DNS normalization added or omitted CLI operations")
+				}
+				for _, call := range calls[1:] {
+					at := slices.Index(call.Args, "--host")
+					if at < 0 || at+1 >= len(call.Args) {
+						t.Fatal("selected transport was not explicit")
+					}
+					want := original
+					if slices.Contains(call.Args, "dial-stdio") {
+						want = "tcp://" + expectedDial
+					}
+					if call.Args[at+1] != want {
+						t.Fatal("identity DNS normalization changed another operation's frozen endpoint")
+					}
+					if mode == "verified-TLS" && !slices.Contains(call.Args, "--tlsverify=true") {
+						t.Fatal("DNS normalization weakened the pinned TLS policy")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestPipelineDockerIdentityInvalidDNSLookupFailsBeforeDial(t *testing.T) {
+	dir, fixture := newPipelineDockerFixture(t)
+	const endpoint = "tcp://a\u200db.example:2376"
+	// Punycode can serialize this name, but Lookup rejects the joiner's context.
+	// A partial Lookup result must never reach the selected CLI transport.
+	if _, err := pipelineDockerIdentityRequest(endpoint); err != nil {
+		t.Fatal("control did not reach the DNS Lookup boundary")
+	}
+	fixture.Context = fmt.Sprintf("[{\"Name\":\"default\",\"Endpoints\":{\"docker\":{\"Host\":%q}}}]", endpoint)
+	writePipelineDockerFixture(t, dir, fixture)
+	client, err := resolvePipelineDockerClient(t.Context())
+	if client != nil {
+		_ = client.Close()
+		t.Fatal("invalid DNS lookup established an identity")
+	}
+	if err == nil || strings.Contains(err.Error(), endpoint) || strings.Contains(err.Error(), "idna") {
+		t.Fatal("DNS lookup rejection was omitted or exposed private transport detail")
+	}
+	calls := pipelineDockerCalls(t, dir)
+	if len(calls) != 1 || !slices.Contains(calls[0].Args, "context") {
+		t.Fatal("invalid or partial DNS Lookup result reached a daemon command")
+	}
+}
+
+func TestPipelineDockerIdentityDNSNormalizationPreservesIPv6Scope(t *testing.T) {
+	const endpoint = "tcp://[fe80::1%25en0]:2376"
+	dir, fixture := newPipelineDockerFixture(t)
+	fixture.Context = fmt.Sprintf("[{\"Name\":\"default\",\"Endpoints\":{\"docker\":{\"Host\":%q}}}]", endpoint)
+	fixture.RequireOpenInput = true
+	writePipelineDockerFixture(t, dir, fixture)
+	client := resolvePipelineDockerFixture(t)
+	if client.Identity.Endpoint != endpoint {
+		t.Fatal("recorded IPv6 identity URI changed")
+	}
+	if _, err := client.Run(t.Context(), "wait", strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	calls := pipelineDockerCalls(t, dir)
+	if len(calls) != 4 {
+		t.Fatal("IPv6 scope control missed initial/operation revalidation")
+	}
+	for _, call := range calls[1:] {
+		at := slices.Index(call.Args, "--host")
+		if at < 0 || at+1 >= len(call.Args) || call.Args[at+1] != endpoint {
+			t.Fatal("HTTP Host normalization stripped the actual IPv6 routing scope")
+		}
+		if slices.Contains(call.Args, "dial-stdio") && call.RequestHost != "[fe80::1]:2376" {
+			t.Fatal("IPv6 routing zone leaked into HTTP Host")
+		}
 	}
 }

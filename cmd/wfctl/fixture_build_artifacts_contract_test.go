@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func fixtureControlSource(t *testing.T) string {
@@ -644,5 +646,330 @@ func TestFixtureBuildArtifactsOrdinaryFailureTeardown(t *testing.T) {
 	}
 	if _, err := os.Lstat(string(data)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("invocation root survived ordinary test failure: %v", err)
+	}
+}
+
+func TestFixtureBuildArtifactsObservation(t *testing.T) {
+	const secret = "private-observation-input-must-not-be-logged"
+	tests := []struct {
+		name           string
+		beforeCancel   bool
+		beforeDeadline bool
+		missingProbe   bool
+		duringCancel   bool
+		bypass         bool
+		fail           bool
+	}{
+		{name: "success-and-cache-reuse"},
+		{name: "build-failure", fail: true},
+		{name: "build-cancellation", duringCancel: true},
+		{name: "already-canceled", beforeCancel: true},
+		{name: "already-expired-deadline", beforeDeadline: true},
+		{name: "failed-probe", missingProbe: true, fail: true},
+		{name: "unobserved-bypass", bypass: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var c fixtureBuildArtifacts
+			t.Cleanup(func() {
+				if err := c.close(); err != nil {
+					t.Error(err)
+				}
+			})
+			root := fixtureControlSource(t)
+			ctx, cancel := context.WithCancel(t.Context())
+			if tt.beforeDeadline {
+				cancel()
+				ctx, cancel = context.WithTimeout(t.Context(), 0)
+			}
+			defer cancel()
+			if tt.beforeCancel {
+				cancel()
+			}
+			output := filepath.Join(t.TempDir(), "executable")
+			cmd := fixtureControlCommand(ctx, root, output)
+			cmd.Env = append(cmd.Env, "FIXTURE_OBSERVATION_SECRET="+secret)
+			if tt.bypass {
+				cmd.Args = append(cmd.Args, "-unknown-fixture-flag")
+			}
+			if tt.missingProbe {
+				cmd.Path = filepath.Join(t.TempDir(), "missing-go")
+			}
+			privateErr := errors.New(secret)
+			calls := 0
+			run := func(cmd *exec.Cmd) ([]byte, error) {
+				calls++
+				if tt.duringCancel {
+					cancel()
+					return []byte("canceled output"), ctx.Err()
+				}
+				if tt.fail {
+					return []byte("original failure output"), privateErr
+				}
+				return fixtureControlSentinel(cmd)
+			}
+			var observation fixtureBuildObservation
+			data, err := c.buildObserved(ctx, cmd, root, output, run, &observation)
+			if tt.fail && (!errors.Is(err, privateErr) || string(data) != "original failure output") {
+				t.Fatalf("original failure bytes/error changed: %q %v", data, err)
+			}
+			if (tt.beforeCancel || tt.duringCancel) && !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation changed: %v", err)
+			}
+			if tt.beforeDeadline && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("deadline changed: %v", err)
+			}
+			if !tt.fail && !tt.beforeCancel && !tt.beforeDeadline && !tt.duringCancel && err != nil {
+				t.Fatal(err)
+			}
+			wantCalls := 1
+			if tt.beforeCancel || tt.beforeDeadline {
+				wantCalls = 0
+			}
+			if calls != wantCalls || observation.buildRuns != wantCalls || observation.failed != (err != nil) {
+				t.Fatalf("run/result observation: calls=%d observation=%s", calls, observation)
+			}
+			wantContext := "none"
+			if tt.beforeCancel || tt.duringCancel {
+				wantContext = "canceled"
+			}
+			if tt.beforeDeadline {
+				wantContext = "deadline"
+			}
+			if observation.contextStatus != wantContext || observation.keyFailed != (tt.bypass || tt.missingProbe) {
+				t.Fatalf("context/key observation: %s", observation)
+			}
+			unobserved := tt.beforeCancel || tt.beforeDeadline || tt.bypass || tt.missingProbe
+			wantProbe := !tt.beforeCancel && !tt.beforeDeadline && !tt.bypass
+			if observation.probeAttempted != wantProbe || observation.probeFailed != tt.missingProbe {
+				t.Fatalf("probe observation: %s", observation)
+			}
+			if unobserved {
+				if observation.goVersion != "" || observation.goRoot != "" || observation.goToolDir != "" || observation.toolchain != "" {
+					t.Fatalf("unobserved selection invented: %s", observation)
+				}
+			} else if observation.goVersion != "go1.27.2" || observation.toolchain != "go1.27.2" || observation.goRoot == "" || observation.goToolDir == "" || observation.goOS == "" || observation.goArch == "" {
+				t.Fatalf("actual selected child compiler missing: %s", observation)
+			}
+			if observation.probeElapsed < 0 || observation.keyElapsed < observation.probeElapsed || observation.buildElapsed < 0 || observation.totalElapsed < observation.keyElapsed+observation.buildElapsed {
+				t.Fatalf("phase timings overlap or are invalid: %s", observation)
+			}
+			if strings.Contains(observation.String(), secret) || strings.Contains(observation.String(), "FIXTURE_OBSERVATION_SECRET") {
+				t.Fatal("diagnostic exposed environment or arbitrary error text")
+			}
+			if tt.fail || tt.beforeCancel || tt.beforeDeadline || tt.duringCancel || tt.bypass {
+				return
+			}
+			if observation.probeElapsed <= 0 || observation.buildElapsed <= 0 {
+				t.Fatalf("executed probe/build timings missing: %s", observation)
+			}
+			// Old nil-observer entry point must reuse the observed key unchanged.
+			second := filepath.Join(t.TempDir(), "second")
+			next := fixtureControlCommand(t.Context(), root, second)
+			next.Env = append(next.Env, "FIXTURE_OBSERVATION_SECRET="+secret)
+			if _, err := c.build(t.Context(), next, root, second, fixtureControlSentinel); err != nil {
+				t.Fatal(err)
+			}
+			fixtureControlCounts(t, &c, 1, 1, 0)
+			third := filepath.Join(t.TempDir(), "third")
+			last := fixtureControlCommand(t.Context(), root, third)
+			last.Env = append(last.Env, "FIXTURE_OBSERVATION_SECRET="+secret)
+			var hit fixtureBuildObservation
+			if _, err := c.buildObserved(t.Context(), last, root, third, fixtureControlSentinel, &hit); err != nil {
+				t.Fatal(err)
+			}
+			fixtureControlCounts(t, &c, 1, 2, 0)
+			if hit.buildRuns != 0 || hit.buildElapsed != 0 || hit.goVersion != "go1.27.2" || hit.failed {
+				t.Fatalf("cache reuse incorrectly reported an executed build: %s", hit)
+			}
+		})
+	}
+}
+
+func TestFixtureBuildArtifactsObservationReuse(t *testing.T) {
+	var c fixtureBuildArtifacts
+	t.Cleanup(func() { _ = c.close() })
+	root := fixtureControlSource(t)
+	var observation fixtureBuildObservation
+	build := func(ctx context.Context, bypass bool) error {
+		output := filepath.Join(t.TempDir(), "executable")
+		cmd := fixtureControlCommand(ctx, root, output)
+		if bypass {
+			cmd.Args = append(cmd.Args, "-unknown-fixture-flag")
+		}
+		_, err := c.buildObserved(ctx, cmd, root, output, fixtureControlSentinel, &observation)
+		return err
+	}
+	if err := build(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if observation.buildRuns != 1 || observation.goVersion != "go1.27.2" {
+		t.Fatalf("initial observed build missing: %s", observation)
+	}
+	if err := build(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	if observation.buildRuns != 0 || observation.buildElapsed != 0 || observation.goVersion != "go1.27.2" {
+		t.Fatalf("reused observation retained executed build: %s", observation)
+	}
+	if err := build(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	if observation.goVersion != "" || observation.goRoot != "" || observation.goToolDir != "" || observation.goOS != "" || observation.goArch != "" || observation.toolchain != "" || observation.probeAttempted || observation.probeFailed || observation.probeElapsed != 0 || observation.buildRuns != 1 || !observation.keyFailed {
+		t.Fatalf("reused observation retained prior selection/probe: %s", observation)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := build(ctx, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reused canceled observation changed error: %v", err)
+	}
+	if observation.goVersion != "" || observation.probeAttempted || observation.keyFailed || observation.buildRuns != 0 || observation.probeElapsed != 0 || observation.keyElapsed != 0 || observation.buildElapsed != 0 || !observation.failed || observation.contextStatus != "canceled" {
+		t.Fatalf("reused canceled observation retained prior phases: %s", observation)
+	}
+	fixtureControlCounts(t, &c, 2, 1, 1)
+}
+
+func TestDiscoveryBuildUsesInvokingToolchain(t *testing.T) {
+	root := fixtureControlSource(t)
+	fixtureControlWrite(t, filepath.Join(root, "main.go"), "package main\nimport (\"embed\"; \"fmt\"; \"runtime\")\nvar _ embed.FS\n//go:embed asset.txt\nvar asset string\nfunc main(){fmt.Printf(\"%s:%s\",runtime.Version(),asset)}\n")
+	fake := t.TempDir()
+	launcher := filepath.Join(fake, "go")
+	fixtureControlWrite(t, launcher, "#!/bin/sh\nprintf '%s\\n' 'wrong-path-go-launcher' >&2\nexit 1\n")
+	if err := os.Chmod(launcher, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	output := filepath.Join(t.TempDir(), "executable")
+	discoveryBuild(t, root, output, ".")
+	got, err := exec.CommandContext(t.Context(), output).CombinedOutput()
+	if err != nil {
+		t.Fatalf("actual invoking-compiler artifact: %v", err)
+	}
+	if want := runtime.Version() + ":one"; string(got) != want {
+		t.Fatalf("discovery selected compiler output=%q, want %q", got, want)
+	}
+}
+
+func TestFixtureInvokingGoStartupPath(t *testing.T) {
+	if os.Getenv("WFCTL_FIXTURE_STARTUP_GO_CONTROL") == "child" {
+		if os.Getenv("WFCTL_FIXTURE_MISSING_GO_CONTROL") == "yes" {
+			fixtureInvokingGoBinary(t)
+			t.Fatal("missing startup compiler was accepted")
+		}
+		root := fixtureControlSource(t)
+		fixtureControlWrite(t, filepath.Join(root, "main.go"), "package main\nimport (\"embed\"; \"fmt\"; \"runtime\")\nvar _ embed.FS\n//go:embed asset.txt\nvar asset string\nfunc main(){fmt.Printf(\"%s:%s\",runtime.Version(),asset)}\n")
+		fake := t.TempDir()
+		fixtureControlWrite(t, filepath.Join(fake, "go"), "#!/bin/sh\nprintf '%s\\n' 'wrong-startup-path-go-launcher' >&2\nexit 1\n")
+		if err := os.Chmod(filepath.Join(fake, "go"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+		output := filepath.Join(t.TempDir(), "executable")
+		discoveryBuild(t, root, output, ".")
+		got, err := exec.CommandContext(t.Context(), output).CombinedOutput()
+		if err != nil {
+			t.Fatalf("startup compiler artifact: %v", err)
+		}
+		if want := runtime.Version() + ":one"; string(got) != want {
+			t.Fatalf("startup selected compiler output=%q, want %q", got, want)
+		}
+		t.Logf("startup compiler artifact=%s", got)
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoking := fixtureInvokingGoBinary(t)
+	for _, tc := range []struct {
+		name, path string
+		missing    bool
+	}{
+		{"misleading-process-start-GOROOT", filepath.Dir(invoking) + string(os.PathListSeparator) + os.Getenv("PATH"), false},
+		{"missing-startup-compiler-fails-closed", t.TempDir(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, self, "-test.run=^TestFixtureInvokingGoStartupPath$", "-test.v")
+			cmd.WaitDelay = 5 * time.Second
+			for _, item := range os.Environ() {
+				name, _, _ := strings.Cut(item, "=")
+				if name != "GOROOT" && name != "PATH" && name != "WFCTL_FIXTURE_STARTUP_GO_CONTROL" && name != "WFCTL_FIXTURE_MISSING_GO_CONTROL" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "GOROOT="+t.TempDir(), "PATH="+tc.path, "WFCTL_FIXTURE_STARTUP_GO_CONTROL=child")
+			if tc.missing {
+				cmd.Env = append(cmd.Env, "WFCTL_FIXTURE_MISSING_GO_CONTROL=yes")
+			}
+			got, err := cmd.CombinedOutput()
+			if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+				t.Fatalf("startup control did not finish: %v, %v", ctx.Err(), err)
+			}
+			if tc.missing {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.Contains(string(got), "locate invoking Go compiler:") {
+					t.Fatalf("missing compiler did not fail closed: %v\n%s", err, got)
+				}
+			} else if err != nil || !strings.Contains(string(got), "startup compiler artifact="+runtime.Version()+":one") {
+				t.Fatalf("startup compiler artifact subprocess: %v\n%s", err, got)
+			}
+		})
+	}
+}
+
+func TestRegistryFallbackUsesInvokingToolchain(t *testing.T) {
+	mode := os.Getenv("WFCTL_FIXTURE_REGISTRY_GO_CONTROL")
+	if mode == "normal" || mode == "trap" {
+		if mode == "trap" {
+			fake := t.TempDir()
+			fixtureControlWrite(t, filepath.Join(fake, "go"), "#!/bin/sh\nprintf '%s\\n' 'wrong-registry-path-go-launcher' >&2\nexit 1\n")
+			if err := os.Chmod(filepath.Join(fake, "go"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+		defer cancel()
+		build := registrySyncHostBuildCommand(t, ctx, runtime.GOOS, filepath.Join(t.TempDir(), "wfctl"), "http://fixture.invalid")
+		probe := exec.CommandContext(ctx, build.Path, "env", "GOVERSION")
+		probe.Env = build.Env
+		probe.WaitDelay = 5 * time.Second
+		got, err := probe.CombinedOutput()
+		if err != nil {
+			t.Fatalf("probe registry build compiler: %v\n%s", err, got)
+		}
+		if version := strings.TrimSpace(string(got)); version != runtime.Version() {
+			t.Fatalf("registry selected compiler probe=%q, want %q", version, runtime.Version())
+		}
+		t.Logf("registry compiler probe=%s", runtime.Version())
+		return
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"normal", "trap"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, self, "-test.run=^TestRegistryFallbackUsesInvokingToolchain$", "-test.v")
+			cmd.WaitDelay = 5 * time.Second
+			for _, item := range os.Environ() {
+				name, _, _ := strings.Cut(item, "=")
+				if name != "WFCTL_REGISTRY_SYNC_HOST_BINARY" && name != "WFCTL_FIXTURE_REGISTRY_GO_CONTROL" {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "WFCTL_FIXTURE_REGISTRY_GO_CONTROL="+mode)
+			got, err := cmd.CombinedOutput()
+			if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+				t.Fatalf("registry compiler control did not finish: %v, %v", ctx.Err(), err)
+			}
+			if err != nil || !strings.Contains(string(got), "registry compiler probe="+runtime.Version()) {
+				t.Fatalf("registry compiler subprocess: %v\n%s", err, got)
+			}
+		})
 	}
 }

@@ -89,6 +89,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Validate the real input before any external mutation fixture is constructed.
+"${checker_binary}" --scan-root "${production_repo_root}" >/dev/null
+
 # BEGIN root-module-graph-check
 root_module_graph="$(GOWORK=off GOFLAGS=-mod=readonly go list -m all)"
 if grep -Eq '^mvdan\.cc/sh/v3 ' <<<"${root_module_graph}"; then
@@ -1524,6 +1527,9 @@ run_candidate_fetch() {
   (
     cd "${workdir}"
     PATH="${fake_bin}:$PATH" \
+      EVENT_NAME=pull_request_target \
+      BASE_REF=main \
+      EVENT_REF=refs/heads/main \
       CANDIDATE_REPOSITORY="${repository}" \
       CANDIDATE_SHA="${sha}" \
       GIT_ASKPASS=/bin/false \
@@ -2259,21 +2265,63 @@ active_authority="${tmp_dir}/authority-active.json"
 active_verifier="${tmp_dir}/authority-active-verifier.sh"
 staged_authority="${tmp_dir}/authority-staged.json"
 future_verifier="${tmp_dir}/authority-future-verifier.sh"
-cp "${candidate_authority}" "${active_authority}"
-cp "${candidate_verifier}" "${active_verifier}"
-cp "${candidate_verifier}" "${future_verifier}"
+original_candidate_authority="${tmp_dir}/authority-original-candidate.json"
+original_archive_authority="${tmp_dir}/authority-original-archive.json"
+original_archive_verifier="${tmp_dir}/authority-original-archive-verifier.sh"
+cp -p "${candidate_authority}" "${original_candidate_authority}"
+cp -p "${archive_authority}" "${original_archive_authority}"
+cp -p "${candidate_verifier}" "${active_verifier}"
+cp -p "${archive_verifier}" "${original_archive_verifier}"
+
+# Only this external archive uses a synthetic active baseline. The real checker
+# must verify the complete inventory, not just a matching subset of file hashes.
+realized_bundle_count=0
+bundle_count="$(jq -er '.bundles | length' "${original_archive_authority}")"
+for ((bundle_index=0; bundle_index<bundle_count; bundle_index++)); do
+  jq --argjson index "${bundle_index}" \
+    '.bundles = [(.bundles[$index] | .state = "active")]' \
+    "${original_archive_authority}" >"${archive_authority}"
+  if "${archive_checker}" --scan-root "${archive_repo}" --bootstrap-authority \
+    >"${tmp_dir}/authority-realized-${bundle_index}.log" 2>&1; then
+    realized_bundle_count=$((realized_bundle_count + 1))
+    cp -p "${archive_authority}" "${active_authority}"
+  fi
+done
+if [[ "${realized_bundle_count}" -ne 1 ]]; then
+  echo "synthetic authority fixture requires exactly one complete realized bundle" >&2
+  exit 1
+fi
+cp "${active_authority}" "${archive_authority}"
+cp "${active_authority}" "${candidate_authority}"
+"${archive_checker}" --scan-root "${candidate_root}" >/dev/null
+cp -p "${candidate_verifier}" "${future_verifier}"
 printf '\n# authority lifecycle fixture\n' >>"${future_verifier}"
 future_verifier_sha="$(sha256_file "${future_verifier}")"
 jq --arg path "${authority_path}" --arg sha "${future_verifier_sha}" '
   .bundles += [{
     state: "staged",
-    files: (.bundles[0].files | map(if .path == $path then .sha256 = $sha else . end))
+    files: (.bundles[] | select(.state == "active") | .files | map(if .path == $path then .sha256 = $sha else . end))
   }]
 ' "${active_authority}" >"${staged_authority}"
 
 # Stage-only retains the active implementation.
 cp "${staged_authority}" "${candidate_authority}"
 "${checker_binary}" --scan-root "${candidate_root}" >/dev/null
+
+# Synthetic isolation must not weaken the production one-staged-bundle rule.
+jq '.bundles += [(.bundles[] | select(.state == "staged"))]' \
+  "${staged_authority}" >"${candidate_authority}"
+set +e
+two_staged_output="$("${checker_binary}" --scan-root "${candidate_root}" 2>&1)"
+two_staged_status=$?
+set -e
+if [[ "${two_staged_status}" -eq 0 ]] || ! grep -Fq -- \
+  "authority manifest may contain at most one staged bundle" <<<"${two_staged_output}"; then
+  echo "two staged authority bundles were not explicitly rejected" >&2
+  printf '%s\n' "${two_staged_output}" >&2
+  exit 1
+fi
+cp "${staged_authority}" "${candidate_authority}"
 
 # The same pull request cannot both introduce and realize the staged bundle.
 cp "${future_verifier}" "${candidate_verifier}"
@@ -2298,10 +2346,14 @@ jq '.bundles = [(.bundles[] | select(.state == "staged") | .state = "active")]' 
   "${staged_authority}" >"${candidate_authority}"
 "${archive_checker}" --scan-root "${candidate_root}" >/dev/null
 
-cp "${active_authority}" "${candidate_authority}"
-cp "${active_verifier}" "${candidate_verifier}"
-cp "${active_authority}" "${archive_authority}"
-cp "${active_verifier}" "${archive_verifier}"
+cp -p "${original_candidate_authority}" "${candidate_authority}"
+cp -p "${active_verifier}" "${candidate_verifier}"
+cp -p "${original_archive_authority}" "${archive_authority}"
+cp -p "${original_archive_verifier}" "${archive_verifier}"
+assert_file_unchanged "candidate authority manifest" "${original_candidate_authority}" "${candidate_authority}"
+assert_file_unchanged "archive authority manifest" "${original_archive_authority}" "${archive_authority}"
+assert_file_unchanged "candidate verifier" "${active_verifier}" "${candidate_verifier}"
+assert_file_unchanged "archive verifier" "${original_archive_verifier}" "${archive_verifier}"
 
 (cd "${policytool}" && \
   "${checker_binary}" --scan-root "${candidate_root}" \

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"debug/buildinfo"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +18,7 @@ func registrySyncRequestedHostBinary(host, requested string, provided bool) (str
 		return "", nil
 	}
 	if host != "linux" {
-		return "", fmt.Errorf("WFCTL_REGISTRY_SYNC_HOST_BINARY proof requires Linux: Go does not use SSL_CERT_FILE on %s", host)
+		return "", fmt.Errorf("WFCTL_REGISTRY_SYNC_HOST_BINARY proof requires Linux: Go 1.26.5 does not use SSL_CERT_FILE on %s", host)
 	}
 	if requested == "" {
 		return "", fmt.Errorf("WFCTL_REGISTRY_SYNC_HOST_BINARY must name an executable file")
@@ -48,12 +50,26 @@ func registrySyncActualCLIBinary(t *testing.T, host, apiURL string) string {
 	binary = filepath.Join(t.TempDir(), "wfctl")
 	buildCtx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	build := exec.CommandContext(buildCtx, "go", registrySyncHostBuildArguments(host, binary, apiURL)...)
-	build.Env = registrySyncHostEnvironment(os.Environ())
+	build := registrySyncHostBuildCommand(t, buildCtx, host, binary, apiURL)
 	if out, err := buildFixtureArtifact(t, buildCtx, build, "../..", binary); err != nil {
 		t.Fatalf("build actual CLI: %v\n%s", err, out)
 	}
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("read actual registry CLI build metadata: %v", err)
+	}
+	if info.GoVersion != runtime.Version() {
+		t.Fatalf("registry selected actual CLI compiler=%q, want %q", info.GoVersion, runtime.Version())
+	}
+	t.Logf("registry actual CLI compiler=%s", info.GoVersion)
 	return binary
+}
+
+func registrySyncHostBuildCommand(t *testing.T, ctx context.Context, host, binary, apiURL string) *exec.Cmd {
+	t.Helper()
+	build := exec.CommandContext(ctx, fixtureInvokingGoBinary(t), registrySyncHostBuildArguments(host, binary, apiURL)...)
+	build.Env = registrySyncHostEnvironment(os.Environ())
+	return build
 }
 
 func registrySyncHostBuildArguments(host, binary, apiURL string) []string {
@@ -74,7 +90,7 @@ func registrySyncHostEnvironment(source []string) []string {
 		}
 		env = append(env, variable)
 	}
-	return append(env, "GOWORK=off", "GOTOOLCHAIN=go1.27.2")
+	return append(env, "GOWORK=off", "GOTOOLCHAIN=local")
 }
 
 func TestPluginRegistrySyncHostBinary_Selection(t *testing.T) {
@@ -131,9 +147,9 @@ func TestPluginRegistrySyncHostBinary_CredentialFreeEnvironment(t *testing.T) {
 	env := registrySyncHostEnvironment([]string{
 		"PATH=/fixture", "HOME=/fixture/home", "RELEASES_TOKEN=secret", "GH_TOKEN=secret", "GITHUB_TOKEN=secret",
 		"HTTP_PROXY=http://user:secret@outside.invalid", "https_proxy=http://outside.invalid", "ALL_PROXY=http://outside.invalid", "no_proxy=*",
-		"SSL_CERT_FILE=/outside/ca", "SSL_CERT_DIR=/outside/roots", "GOWORK=/outside/go.work", "GOTOOLCHAIN=go1.27.2",
+		"SSL_CERT_FILE=/outside/ca", "SSL_CERT_DIR=/outside/roots", "GOWORK=/outside/go.work", "GOTOOLCHAIN=go1.27.1",
 	})
-	if got := strings.Join(env, "\n"); got != "PATH=/fixture\nHOME=/fixture/home\nGOWORK=off\nGOTOOLCHAIN=go1.27.2" {
+	if got := strings.Join(env, "\n"); got != "PATH=/fixture\nHOME=/fixture/home\nGOWORK=off\nGOTOOLCHAIN=local" {
 		t.Fatalf("host environment retained credentials or transport overrides:\n%s", got)
 	}
 }
@@ -152,7 +168,7 @@ func TestPluginRegistrySyncHostBinary_ExplicitNeverBuilds(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"WFCTL_REGISTRY_SYNC_HOST_BINARY="+filepath.Join(root, "missing-wfctl"),
 		"PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"GOWORK=off", "GOTOOLCHAIN=go1.27.2")
+		"GOWORK=off", "GOTOOLCHAIN=go1.26.5")
 	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "WFCTL_REGISTRY_SYNC_HOST_BINARY") || strings.Contains(string(out), "unexpected source-build fallback") {
 		t.Fatalf("explicit binary selection did not fail closed before building: %v\n%s", err, out)

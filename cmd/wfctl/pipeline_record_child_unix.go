@@ -22,7 +22,7 @@ func pipelineRecordChildEnvironment(source []string, toolDirectory string) []str
 	env := make([]string, 0, len(source)+3)
 	for _, variable := range source {
 		name, _, _ := strings.Cut(variable, "=")
-		if strings.HasPrefix(name, "DOCKER_") || name == "PATH" {
+		if strings.HasPrefix(name, "DOCKER_") || name == "PATH" || name == pipelineRecordDiagnosticEnv {
 			continue
 		}
 		env = append(env, variable)

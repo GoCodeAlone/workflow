@@ -1376,6 +1376,20 @@ values, and invalid UTF-8 fail. Represent identifiers and counters as decimal
 strings. Failure emits one generic error record and exits nonzero; its payload
 is defined in `docs/schemas/wfctl-pipeline-record-v1.schema.json`.
 
+For synthetic record-host troubleshooting, `WFCTL_RECORD_DIAGNOSTICS=1` opts
+the parent into one failure-only stderr line prefixed
+`WFCTL_RECORD_DIAGNOSTIC_V1`. Its JSON contains fixed phase/event/cleanup
+names, bounded child/Docker CLI/container exit fields and context flags.
+An unknown exit is `-1`; `docker_operation` names the attempted operation,
+and a Docker CLI exit does not establish a container exit. These operation
+statuses are frozen at the first observed failure, with later child-wait and
+cleanup outcomes reported separately. Success and
+the default mode emit no diagnostic line. This opt-in is removed from the
+isolated child's environment; public stdout records remain unchanged.
+Reports contain no raw errors, workload output, environment values or
+resource identities. The live synthetic test logs only validated statuses,
+fixture digests and bounded cleanup counts on failure.
+
 Before loading application config, the parent locks private cleanup state at
 `$XDG_STATE_HOME/wfctl/pipeline-cleanup` (default
 `~/.local/state/wfctl/pipeline-cleanup`), reconciles retained executions, and
@@ -1385,6 +1399,23 @@ contain symlinks; the cleanup directory is owner-only mode 0700 and its files
 are mode 0600. Cancellation escalates through graceful shutdown, TERM, and
 KILL. Failed cleanup or daemon drift retains the journal and blocks new work;
 do not manually discard retained records to bypass reconciliation.
+
+Daemon identity uses the pinned Docker CLI's system dial-stdio transport
+with one HTTP GET /info, rather than docker info client-plugin reporting.
+Docker may also ping during CLI initialization. The request preserves the
+selected TCP HTTP authority or Docker's Unix dummy host, and keeps stdin open
+until the response connection closes. The existing five-second helper bound
+applies to every identity recheck. Serialized requests over 512 bytes, full
+responses (headers included) over 1 MiB, incomplete or ambiguous framing,
+non-200 replies, invalid IDs, and nonclosing peers fail closed. No fallback
+or retry establishes identity from partial output.
+
+For TCP DNS endpoints, the identity CLI invocation uses the same ASCII DNS
+lookup policy as Docker's HTTP transport. HTTP Host uses its separate Punycode
+policy; uppercase internationalized names can produce a different wire Host.
+ASCII authorities, retained identity state, and other CLI operations keep the
+original endpoint URI. IPv6 routing scopes remain in the dial target and are
+omitted only from the HTTP Host header.
 
 `step.sandbox_exec` in record mode is brokered by the parent. It requires the
 strict nonroot profile (`65532:65532`), read-only root, dropped capabilities,

@@ -52,7 +52,7 @@ func runRecordDockerTransport(args []string) bool {
 	if args[0] == "context" {
 		return false
 	}
-	if args[0] == "info" {
+	if args[0] == "info" || slices.Equal(args, []string{"system", "dial-stdio"}) {
 		if cfg.Unavailable {
 			fmt.Fprintln(os.Stderr, "fixture-unavailable-daemon-private-canary")
 			os.Exit(7)
