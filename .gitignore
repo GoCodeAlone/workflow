@@ -67,3 +67,6 @@ cmd/wfctl/.wfctl.yaml
 cmd/wfctl/.wfctl-lock.yaml
 
 .claude/
+
+# Release binaries, UI archive, and checksums are generated here.
+/dist/
