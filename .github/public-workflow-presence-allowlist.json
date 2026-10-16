@@ -76,12 +76,6 @@
     "presence": "present"
   },
   {
-    "path": ".github/workflows/ci.yml",
-    "contextSHA256": "cd51e6225760668a51b92c71f4b40d362fe0a957b7aae04d7421a1c1282ee386",
-    "state": "active",
-    "presence": "present"
-  },
-  {
     "path": ".github/workflows/benchmark.yml",
     "contextSHA256": "f61f9a7dce18191c1aa1691ed6babcadb6718099580f42d3f7604552eeae8571",
     "state": "active",
@@ -114,7 +108,7 @@
   {
     "path": ".github/workflows/ci.yml",
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
-    "state": "staged",
+    "state": "active",
     "presence": "present"
   }
 ]
