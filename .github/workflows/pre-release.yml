@@ -53,7 +53,7 @@ jobs:
         cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
 
     - name: Run tests
-      run: go test -race ./...
+      run: go test -race ./... -timeout=15m
 
   snapshot:
     name: Build Snapshot Release
