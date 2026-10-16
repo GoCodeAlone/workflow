@@ -95,7 +95,7 @@
   },
   {
     "path": ".github/workflows/pre-release.yml",
-    "contextSHA256": "0604cdbfc06c07f363c4d78837a2961ddaa4e481d52e50382c6b4cc60b7b06fb",
+    "contextSHA256": "8cb2078c45ed2a1d3709ab31020c797188e3cc7546ee9f9cf80156d56df626e0",
     "state": "active",
     "presence": "present"
   },
@@ -109,12 +109,6 @@
     "path": ".github/workflows/ci.yml",
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "state": "active",
-    "presence": "present"
-  },
-  {
-    "path": ".github/workflows/pre-release.yml",
-    "contextSHA256": "8cb2078c45ed2a1d3709ab31020c797188e3cc7546ee9f9cf80156d56df626e0",
-    "state": "staged",
     "presence": "present"
   }
 ]
