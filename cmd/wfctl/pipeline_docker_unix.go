@@ -61,7 +61,13 @@ type pipelineDockerProcessGroupKey struct{}
 
 var pipelineDockerTLSNames = [3]string{"ca.pem", "cert.pem", "key.pem"}
 
-func resolvePipelineDockerClient(ctx context.Context) (*pipelineDockerClient, error) {
+func resolvePipelineDockerClient(ctx context.Context) (_ *pipelineDockerClient, resolveErr error) {
+	phase := "docker_resolve_cli"
+	defer func() {
+		if resolveErr != nil {
+			pipelineRecordDiagnosticFromContext(ctx).fail(phase)
+		}
+	}()
 	// Only discovery receives a snapshot of Docker's transport-selection env.
 	// All daemon calls use a private empty config, explicit host/TLS flags, and
 	// a minimal env, avoiding auth helpers, config proxies, and context changes.
@@ -78,10 +84,12 @@ func resolvePipelineDockerClient(ctx context.Context) (*pipelineDockerClient, er
 	if err != nil {
 		return nil, fmt.Errorf("pipeline Docker CLI unavailable")
 	}
+	phase = "docker_resolve_home"
 	home := snapshot["HOME"]
 	if home == "" {
 		return nil, fmt.Errorf("pipeline Docker home unavailable")
 	}
+	phase = "docker_resolve_config"
 	config := snapshot["DOCKER_CONFIG"]
 	if config == "" {
 		config = filepath.Join(home, ".docker")
@@ -97,14 +105,17 @@ func resolvePipelineDockerClient(ctx context.Context) (*pipelineDockerClient, er
 			discoveryEnv = append(discoveryEnv, key+"="+value)
 		}
 	}
-	out, err := runPipelineDockerCLI(ctx, binary, discoveryEnv, pipelineDockerCallTimeout, "--config", config, "context", "inspect")
+	phase = "docker_resolve_context"
+	out, err := runPipelineDockerCLI(pipelineDockerResolutionContext(ctx, "resolve_context"), binary, discoveryEnv, pipelineDockerCallTimeout, "--config", config, "context", "inspect")
 	if err != nil {
 		return nil, fmt.Errorf("pipeline Docker context resolution failed")
 	}
+	phase = "docker_resolve_context_metadata"
 	var contexts []pipelineDockerContext
 	if json.Unmarshal([]byte(out.Stdout), &contexts) != nil || len(contexts) != 1 {
 		return nil, fmt.Errorf("pipeline Docker context metadata invalid")
 	}
+	phase = "docker_resolve_endpoint"
 	metadata := contexts[0]
 	endpoint, ok := metadata.Endpoints["docker"]
 	if !ok || metadata.Name == "" {
@@ -113,6 +124,7 @@ func resolvePipelineDockerClient(ctx context.Context) (*pipelineDockerClient, er
 	if err := validatePipelineDockerEndpoint(endpoint.Host); err != nil {
 		return nil, err
 	}
+	phase = "docker_resolve_tls"
 	var material [3][]byte
 	tlsEnabled := false
 	verifyTLS := false
@@ -153,6 +165,7 @@ func resolvePipelineDockerClient(ctx context.Context) (*pipelineDockerClient, er
 	if (len(material[1]) == 0) != (len(material[2]) == 0) {
 		return nil, fmt.Errorf("pipeline Docker TLS client material incomplete")
 	}
+	phase = "docker_resolve_private_config"
 	dir, err := os.MkdirTemp("", "wfctl-pipeline-docker-")
 	if err != nil {
 		return nil, fmt.Errorf("pipeline Docker private config unavailable")
@@ -182,7 +195,8 @@ func resolvePipelineDockerClient(ctx context.Context) (*pipelineDockerClient, er
 			c.args = append(c.args, flag+"="+path)
 		}
 	}
-	serverID, err := c.serverID(ctx)
+	phase = "docker_resolve_identity_metadata"
+	serverID, err := c.serverID(pipelineDockerResolutionContext(ctx, "resolve_identity"))
 	if err != nil {
 		return nil, err
 	}
@@ -426,13 +440,23 @@ func runPipelineDockerCLI(ctx context.Context, binary string, env []string, time
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
-	if ctx.Err() != nil {
+	if contextErr := ctx.Err(); contextErr != nil {
+		outcome := "command"
+		switch contextErr {
+		case context.DeadlineExceeded:
+			outcome = "deadline"
+		case context.Canceled:
+			outcome = "cancelled"
+		}
+		observePipelineDockerResolutionFailure(ctx, outcome, result.ExitCode)
 		return result, fmt.Errorf("pipeline Docker operation canceled or timed out")
 	}
 	if stdout.overflow || stderr.overflow {
+		observePipelineDockerResolutionFailure(ctx, "capture", result.ExitCode)
 		return result, fmt.Errorf("pipeline Docker output exceeded capture limit")
 	}
 	if err != nil {
+		observePipelineDockerResolutionFailure(ctx, "command", result.ExitCode)
 		return result, fmt.Errorf("pipeline Docker operation failed")
 	}
 	return result, nil
