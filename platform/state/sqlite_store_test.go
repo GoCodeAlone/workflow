@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -510,25 +511,34 @@ func TestSQLiteStore_LockDoesNotBlockDifferentContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lock acme/prod: %v", err)
 	}
-	defer handle.Unlock(ctx)
-
-	lockDone := make(chan error, 1)
-	go func() {
-		other, err := store.Lock(ctx, "acme/staging", 5*time.Minute)
-		if err == nil {
-			err = other.Unlock(ctx)
+	defer func() {
+		if err := handle.Unlock(ctx); err != nil {
+			t.Errorf("Unlock acme/prod: %v", err)
 		}
-		lockDone <- err
 	}()
 
-	select {
-	case err := <-lockDone:
-		if err != nil {
-			t.Fatalf("Lock acme/staging: %v", err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Lock for different context blocked behind existing lock")
+	// The advisory handle must not retain the operation mutex. Check before
+	// the second real Lock so the old lock-lifetime bug fails without hanging.
+	if !store.mu.TryLock() {
+		t.Fatal("advisory lock handle retained the store operation mutex")
 	}
+	store.mu.Unlock()
+
+	other, err := store.Lock(ctx, "acme/staging", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Lock acme/staging: %v", err)
+	}
+	if err := other.Unlock(ctx); err != nil {
+		t.Fatalf("Unlock acme/staging: %v", err)
+	}
+
+	// Releasing the independent context must leave the first advisory lock held.
+	_, err = store.Lock(ctx, "acme/prod", 5*time.Minute)
+	var conflict *platform.LockConflictError
+	if !errors.As(err, &conflict) || conflict.ContextPath != "acme/prod" {
+		t.Fatalf("Lock acme/prod while held = %v, want its LockConflictError", err)
+	}
+	t.Log("actual second-context lock/release succeeded while the first context remained locked")
 }
 
 func TestSQLiteStore_Lock_Refresh(t *testing.T) {
