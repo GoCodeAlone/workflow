@@ -643,7 +643,9 @@ func (s *Server) handleRunWorkflow(ctx context.Context, req mcp.CallToolRequest)
 			"success": false,
 			"error":   err.Error(),
 		}
-		return marshalToolResult(result)
+		failureResult, marshalErr := marshalToolResult(result)
+		failureResult.IsError = true
+		return failureResult, marshalErr
 	}
 
 	result := map[string]any{

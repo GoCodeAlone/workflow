@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,26 @@ func TestNewInProcessServer(t *testing.T) {
 	for _, name := range expected {
 		if !toolMap[name] {
 			t.Errorf("missing expected tool: %s", name)
+		}
+	}
+}
+
+func TestInProcessInventoryOrder(t *testing.T) {
+	provider := NewInProcessServer()
+	want := provider.ListTools()
+	slices.Sort(want)
+	for range 20 {
+		names := provider.ListTools()
+		if !slices.Equal(names, want) {
+			t.Errorf("tool names must be deterministically sorted")
+		}
+		schemas := provider.ListToolSchemas()
+		schemaNames := make([]string, len(schemas))
+		for i, schema := range schemas {
+			schemaNames[i] = schema.Name
+		}
+		if !slices.Equal(schemaNames, want) {
+			t.Errorf("tool schemas must have the same sorted order")
 		}
 	}
 }

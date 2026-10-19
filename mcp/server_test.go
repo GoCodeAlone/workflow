@@ -940,6 +940,9 @@ func TestRunWorkflow_Error(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !result.IsError {
+		t.Error("engine trigger failure must be a tool error")
+	}
 
 	text := extractText(t, result)
 	var data map[string]any

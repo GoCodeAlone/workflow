@@ -3,8 +3,13 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strconv"
+	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -62,6 +67,7 @@ type InProcessServer struct {
 	tools       map[string]ToolHandlerFunc
 	schemas     map[string]ToolSchema
 	auditLogger *slog.Logger
+	requestID   atomic.Uint64
 }
 
 // NewInProcessServer creates an InProcessServer with all workflow tools registered.
@@ -118,6 +124,7 @@ func (p *InProcessServer) ListTools() []string {
 	for name := range p.tools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -127,6 +134,7 @@ func (p *InProcessServer) ListToolSchemas() []ToolSchema {
 	for _, s := range p.schemas {
 		result = append(result, s)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
@@ -140,38 +148,82 @@ func (p *InProcessServer) GetToolSchema(name string) (ToolSchema, bool) {
 // Returns the tool result, which may be of any type, or an error if the
 // tool is not found or invocation fails.
 func (p *InProcessServer) CallTool(ctx context.Context, name string, args map[string]any) (any, error) {
-	handler, ok := p.tools[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown tool: %s", name)
-	}
+	_, known := p.schemas[name]
+	status := "protocol_error"
+	defer func() {
+		if p.auditLogger != nil {
+			attributes := []any{"status", status}
+			if known {
+				attributes = append(attributes, "tool", name)
+			}
+			p.auditLogger.Info("mcp tool call", attributes...)
+		}
+	}()
 
-	argsJSON, err := json.Marshal(args)
+	// String IDs avoid JSON number precision loss while preserving per-instance
+	// uniqueness across concurrent calls and SDK cancellation registration.
+	id := strconv.FormatUint(p.requestID.Add(1), 10)
+	request, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": "tools/call",
+		"params": map[string]any{"name": name, "arguments": args},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal args: %w", err)
+		status = "invalid_arguments"
+		return nil, errors.New("MCP arguments must be JSON-serializable")
 	}
-
-	var req mcp.CallToolRequest
-	req.Params.Name = name
-	req.Params.Arguments = make(map[string]any)
-	if err := json.Unmarshal(argsJSON, &req.Params.Arguments); err != nil {
-		return nil, fmt.Errorf("unmarshal args: %w", err)
+	// Use the same SDK dispatcher as stdio, including schema validation and
+	// protocol/tool error semantics, rather than calling a raw handler.
+	encoded, err := json.Marshal(p.server.MCPServer().HandleMessage(ctx, request))
+	if err != nil {
+		return nil, errors.New("MCP response could not be encoded")
 	}
-
-	result, callErr := handler(ctx, req)
-	if p.auditLogger != nil {
-		p.auditLogger.Info("mcp tool call",
-			"tool", name,
-			"error", callErr,
-		)
+	var reply struct {
+		JSONRPC string                   `json:"jsonrpc"`
+		ID      string                   `json:"id"`
+		Result  *mcp.CallToolResult      `json:"result"`
+		Error   *mcp.JSONRPCErrorDetails `json:"error"`
 	}
-	if callErr != nil {
-		return nil, callErr
+	if err = json.Unmarshal(encoded, &reply); err != nil || reply.JSONRPC != "2.0" || reply.ID != id {
+		return nil, errors.New("invalid MCP response")
 	}
-
-	for _, c := range result.Content {
+	if reply.Error != nil {
+		if !known {
+			status = "unknown_tool"
+		}
+		// Protocol messages can contain user names or raw handler errors. The
+		// error code supplies bounded feedback without echoing those details.
+		return nil, fmt.Errorf("MCP protocol error (%d)", reply.Error.Code)
+	}
+	if reply.Result == nil {
+		return nil, errors.New("missing MCP tool result")
+	}
+	if reply.Result.IsError {
+		status = "tool_error"
+		for _, content := range reply.Result.Content {
+			if text, ok := content.(mcp.TextContent); ok {
+				return nil, fmt.Errorf("MCP tool execution failed: %s", boundedToolFeedback(text.Text))
+			}
+		}
+		return nil, errors.New("MCP tool execution failed")
+	}
+	status = "ok"
+	for _, c := range reply.Result.Content {
 		if tc, ok := c.(mcp.TextContent); ok {
 			return tc.Text, nil
 		}
 	}
-	return result, nil
+	return reply.Result, nil
+}
+
+// Bound failure feedback only; successful tool text remains unchanged.
+func boundedToolFeedback(text string) string {
+	const limit = 4096
+	if len(text) <= limit {
+		return text
+	}
+	end := limit
+	for !utf8.ValidString(text[:end]) {
+		end--
+	}
+	return text[:end] + "…"
 }
