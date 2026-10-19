@@ -36,6 +36,8 @@ MVP tool allowlist: `list_module_types`, `list_step_types`, `list_trigger_types`
 
 Input boundary: self-contained sanitized single-document YAML only. MCP string loaders do not resolve imports. Detect imports before interpreting results; nonempty imports or uncertain structure means incomplete coverage. User may supply an explicitly flattened sanitized snapshot as a separate artifact; never fetch fragments or silently omit imports. Basic validation skips workflow/trigger types and allows absent entry points; deep validation and inventories improve coverage but do not prove runtime semantics.
 
+Declared prerequisites (`requires.plugins`, `plugins.external`, engine version requirements) are separate from referenced types. Compare declarations to the default plugin inventory, recording missing/unknown versions and binaries as unmet or unknown. Known module types may validate while required plugins are absent; never install, auto-fetch or equate inventory with executable health.
+
 ## Alternatives and self-challenge
 
 - Recommended: skills + direct MCP package. A prose-only guide is cheaper but does not package repeatable workflows. A wrapper server could constrain tools but would duplicate a mature interface and create maintenance/transport surface.
@@ -72,7 +74,7 @@ None: no app/DB/browser interaction, Docker builds, deployments, hosted services
 | Workflow application runtime | deferred | no app launched; runtime acceptance stays not checked |
 | Compute | deferred | no adapter/service dependency |
 
-Maintainer tests cover missing executable, unknown/mismatched version, missing required tools, missing external module/step/trigger/workflow types, unresolved imports, malformed/invalid YAML, synthetic canary suppression, MCP protocol failures and honest unknowns. Capture real v0.86.2 false positives as well as true negatives; tests are not a replacement config validator. No fake demo output.
+Maintainer tests cover missing executable, unknown/mismatched version, missing required tools, missing external module/step/trigger/workflow types, missing declared plugin prerequisites despite known types, unresolved imports, malformed/invalid YAML, synthetic canary suppression, MCP protocol failures and honest unknowns. Capture real v0.86.2 false positives as well as true negatives; tests are not a replacement config validator. No fake demo output.
 
 ## Rollback
 
