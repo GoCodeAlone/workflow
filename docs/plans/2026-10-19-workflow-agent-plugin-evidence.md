@@ -102,3 +102,9 @@ response deadline across notifications. Real child-process and deterministic
 clock regressions each failed with their fix reverted and passed when restored.
 Final standalone export: 17 tests PASS plus real released MCP PASS. These are
 maintainer consumer fixes; plugin transport and engine behavior are unchanged.
+
+Round 2 independently re-read the full diff and reran all 17 tests plus released
+stdio smoke: **SHIP-IT**, no remaining findings. Full class scan and resolutions:
+`2026-10-19-workflow-agent-plugin-code-review.md`. Final source/PR-body audit
+repeated before draft publication; installed Autodev selected-file snapshot
+remained unchanged.
