@@ -26,11 +26,15 @@ Source: `AGENTS.md`, `docs/AGENT_GUIDE.md`, `docs/REPO_LAYOUT.md`; task's detail
 
 Root `plugin.json` + `mcp.json`, `skills/workflow-configure`, `skills/workflow-diagnose`, `skills/workflow-readiness`, shared reference, README, MIT license, minimal valid/invalid/unknown-plugin YAML fixtures, dependency-free Python stdio smoke test and package contract tests. Tests are maintainer tools, not exposed MCP capabilities.
 
-1. Configure: establish intended app; discover server/version/tools/types/schemas; propose smallest config; validate with unknown types enforced; inspect; deliver editable config and explicit runtime gaps.
+1. Configure: establish intended app; discover server/version/tools/types/schemas; propose smallest self-contained config; call basic and deep validation, compare module/step/trigger/workflow types against discovered inventories, inspect; deliver editable config and explicit coverage/runtime gaps. No replacement validator is built.
 2. Diagnose: classify missing executable, handshake/version, unavailable tool/type/plugin, syntax/validation/compatibility failures; use actual schema arguments; propose minimal repair and revalidate. Never update CLI, install plugins or run app automatically.
-3. Readiness: human-readable evidence tied to source revision/config digest, observed server version, tool inventory and relevant schemas, validation/inspection/compatibility results. Separate observed/inferred/not checked; config validation is not runtime acceptance. Missing source/version/runtime evidence remains unknown, never PASS.
+3. Readiness: per-check human-readable evidence tied to source revision and exact tested sanitized UTF-8 snapshot digest, observed server version, tool inventory and relevant schemas, basic/deep validation/inspection/compatibility results. Record redaction/partial status; original input equivalence and runtime acceptance stay unknown. Separate observed/inferred/not checked; never aggregate incomplete checks into app PASS. Missing source/version/runtime evidence remains unknown.
 
-Direct MCP entry namespaced `workflow-config`; bare `wfctl` resolves from user's PATH; `-plugin-dir ${PLUGIN_DATA}/engine-plugins` isolates manifest inventory from ambient app directories, `cwd ${PLUGIN_ROOT}`. Users can deliberately select another directory in host-local settings; no absolute machine path ships. No CLI binary bundled and no automatic download.
+Direct MCP entry namespaced `workflow-config`; bare `wfctl` resolves from user's PATH; `-plugin-dir ${PLUGIN_DATA}/engine-plugins` selects isolated startup type discovery/default manifest inventory, `cwd ${PLUGIN_ROOT}`. Skills use `list_plugins({})` only, no `data_dir` override or registry searches; this is not a filesystem sandbox. Users can deliberately select another startup directory in host-local settings; no absolute machine path ships. No CLI binary bundled and no automatic download.
+
+MVP tool allowlist: `list_module_types`, `list_step_types`, `list_trigger_types`, `list_workflow_types`, `get_module_schema`, `get_step_schema`, `generate_schema`, `get_config_skeleton`, `validate_config`, `template_validate_config`, `inspect_config`, `compat_check`, `modernize` with `apply:false`, `list_plugins` with no arguments. Tool availability and supported arguments are still discovered live.
+
+Input boundary: self-contained sanitized single-document YAML only. MCP string loaders do not resolve imports. Detect imports before interpreting results; nonempty imports or uncertain structure means incomplete coverage. User may supply an explicitly flattened sanitized snapshot as a separate artifact; never fetch fragments or silently omit imports. Basic validation skips workflow/trigger types and allows absent entry points; deep validation and inventories improve coverage but do not prove runtime semantics.
 
 ## Alternatives and self-challenge
 
@@ -68,7 +72,7 @@ None: no app/DB/browser interaction, Docker builds, deployments, hosted services
 | Workflow application runtime | deferred | no app launched; runtime acceptance stays not checked |
 | Compute | deferred | no adapter/service dependency |
 
-Maintainer tests cover missing executable, unknown/mismatched version, missing required tools, missing external type/plugin, malformed/invalid YAML, redaction policy, MCP protocol failures and honest unknowns. Capture real v0.86.2 results; no fake demo output.
+Maintainer tests cover missing executable, unknown/mismatched version, missing required tools, missing external module/step/trigger/workflow types, unresolved imports, malformed/invalid YAML, synthetic canary suppression, MCP protocol failures and honest unknowns. Capture real v0.86.2 false positives as well as true negatives; tests are not a replacement config validator. No fake demo output.
 
 ## Rollback
 
