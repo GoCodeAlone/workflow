@@ -84,6 +84,7 @@ class SmokeTests(unittest.TestCase):
             [sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=client.stderr)
         client.reader = threading.Thread(target=lambda: None)
+        client.stopping = threading.Event()
         client.reader.start()
         self.assertEqual(client.close(), b"")
         self.assertEqual(client.process.returncode, 0)
@@ -108,6 +109,73 @@ class SmokeTests(unittest.TestCase):
         client.request_id = 0
         client.messages = queue.Queue()
         with patch.object(client, "send"), patch.object(client.messages, "get", side_effect=queue.Empty):
+            with self.assertRaisesRegex(self.smoke.Failure, "^timeout$"):
+                client.request("initialize", {})
+
+    def test_broken_stdin_does_not_interrupt_cleanup(self):
+        client = self.smoke.Client.__new__(self.smoke.Client)
+        client.stderr = tempfile.TemporaryFile()
+        client.process = subprocess.Popen(
+            [sys.executable, "-c", "import os,threading; os.close(0); print('ready',flush=True); threading.Event().wait()"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=client.stderr)
+        client.reader = threading.Thread(target=lambda: None)
+        client.stopping = threading.Event()
+        client.reader.start()
+        try:
+            self.assertEqual(client.process.stdout.readline(), b"ready\n")
+            client.process.stdin.write(b"pending buffered input")
+            self.assertEqual(client.close(), b"")
+            self.assertIsNotNone(client.process.poll())
+        finally:
+            if client.process.poll() is None:
+                client.process.kill()
+                client.process.wait(timeout=3)
+            for handle in (client.process.stdin, client.process.stdout, client.stderr):
+                try:
+                    handle.close()
+                except OSError:
+                    pass
+
+    def test_full_message_queue_does_not_leave_reader_alive(self):
+        client = self.smoke.Client.__new__(self.smoke.Client)
+        client.stderr = tempfile.TemporaryFile()
+        client.process = subprocess.Popen(
+            [sys.executable, "-c", "import sys; print('{}',flush=True); sys.stdin.buffer.read()"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=client.stderr)
+        client.messages = queue.Queue(maxsize=1)
+        client.messages.put({"already": "full"})
+        client.stopping = threading.Event()
+        client.reader = threading.Thread(target=client._read, daemon=True)
+        entered = threading.Event()
+        enqueue = client._enqueue
+        def observed_enqueue(message):
+            entered.set()
+            enqueue(message)
+        try:
+            with patch.object(client, "_enqueue", side_effect=observed_enqueue):
+                client.reader.start()
+                self.assertTrue(entered.wait(timeout=3))
+                self.assertEqual(client.close(), b"")
+                self.assertFalse(client.reader.is_alive())
+        finally:
+            client.stopping.set()
+            for _ in range(4):
+                if not client.reader.is_alive():
+                    break
+                try:
+                    client.messages.get(timeout=0.1)
+                except queue.Empty:
+                    pass
+                client.reader.join(timeout=0.1)
+
+    def test_notifications_share_one_response_deadline(self):
+        client = self.smoke.Client.__new__(self.smoke.Client)
+        client.request_id = 0
+        client.messages = queue.Queue()
+        client.messages.put({"jsonrpc": "2.0", "method": "notification"})
+        client.messages.put({"jsonrpc": "2.0", "id": 1, "result": {}})
+        with patch.object(client, "send"), patch.object(self.smoke, "time", create=True) as clock:
+            clock.monotonic.side_effect = [0, 0, 11]
             with self.assertRaisesRegex(self.smoke.Failure, "^timeout$"):
                 client.request("initialize", {})
 

@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 REASONS = {"missing_executable", "version_unknown", "version_mismatch", "wrong_server",
@@ -94,6 +95,7 @@ class Client:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
         )
         self.messages = queue.Queue(maxsize=32)
+        self.stopping = threading.Event()
         self.request_id = 0
         self.tools = {}
         self.reader = threading.Thread(target=self._read, daemon=True)
@@ -101,13 +103,21 @@ class Client:
 
     def _read(self):
         try:
-            while line := self.process.stdout.readline(4 * 1024 * 1024):
+            while not self.stopping.is_set() and (line := self.process.stdout.readline(4 * 1024 * 1024)):
                 if not line.endswith(b"\n"):
                     break
-                self.messages.put(json.loads(line))
+                self._enqueue(json.loads(line))
         except (OSError, ValueError):
             pass  # The consumer receives a protocol failure, without raw output.
-        self.messages.put(None)
+        self._enqueue(None)
+
+    def _enqueue(self, message):
+        while not self.stopping.is_set():
+            try:
+                self.messages.put(message, timeout=0.1)
+                return
+            except queue.Full:
+                continue
 
     def send(self, message):
         try:
@@ -117,11 +127,15 @@ class Client:
             raise Failure("protocol_error") from None
 
     def request(self, method, params):
+        deadline = time.monotonic() + 10
         self.request_id += 1
         self.send({"id": self.request_id, "method": method, "params": params})
         for _ in range(100):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Failure("timeout")
             try:
-                message = self.messages.get(timeout=10)
+                message = self.messages.get(timeout=remaining)
             except queue.Empty:
                 raise Failure("timeout") from None
             if isinstance(message, dict) and "method" in message and "id" not in message:
@@ -137,7 +151,11 @@ class Client:
         return tool_json(self.call(name, arguments))
 
     def close(self):
-        self.process.stdin.close()  # Normal stdio shutdown is EOF, not cancellation.
+        self.stopping.set()
+        try:
+            self.process.stdin.close()  # Normal stdio shutdown is EOF, not cancellation.
+        except OSError:
+            pass  # A closed peer must not prevent termination/reaping below.
         try:
             self.process.wait(timeout=3)
         except subprocess.TimeoutExpired:
