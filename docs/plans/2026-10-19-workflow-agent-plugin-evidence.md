@@ -9,8 +9,8 @@ Captured 2026-10-19 UTC. Plan: `2026-10-19-workflow-agent-plugin.md`.
 | Public foundation and bounded design | Workflow public baseline `b12aff37cfdf40d71e72c875f4c271ec23c28178`; design + ADR committed before implementation. |
 | Independent design and plan review | `design_skeptic` and `plan_skeptic`; five substantive coverage/evidence findings resolved before scope lock, minor argument-boundary clarification resolved too. See adjacent review reports. |
 | Three-skill portable package | Task 1 `d70ba7f`; root manifests, focused skills/shared contract, public fixture, docs and license. |
-| Real released MCP + failures | Task 2 `1383f64`; 14 tests and released stdio smoke pass. |
-| Standalone extraction and privacy/coexistence audit | Export of Task 2 commit tested outside checkout; 14 tests + real stdio smoke pass with no organization access or secret input. |
+| Real released MCP + failures | Task 2 `1383f64`; initial 14 tests and released stdio smoke pass; final Task 3 lifecycle corrections `a3331d3` bring the suite to 17 tests. |
+| Standalone extraction and privacy/coexistence audit | Final export of `a3331d3` tested outside checkout; 17 tests + real stdio smoke pass with no organization access or secret input. |
 
 ## Reproducible verification
 
@@ -23,7 +23,7 @@ python example/workflow-agent-plugin/tests/mcp_smoke.py --wfctl /path/to/reviewe
 git diff --check
 ```
 
-Observed: 14 tests, zero failures; smoke exit 0; diff check exit 0.
+Observed final: 17 tests, zero failures; smoke exit 0; diff check exit 0.
 Tests were written before package/client implementation and initially failed for
 missing artifacts. Shutdown regression was reproduced as `-15 != 0`, fixed by
 EOF-first teardown, then explicitly reverted/restored: FAIL → PASS. No full Go
@@ -33,7 +33,7 @@ Standalone check: `git archive HEAD example/workflow-agent-plugin` extracted int
 a temporary directory; tests and smoke launched from outside the checkout. The
 first audit invocation accidentally resolved the venv interpreter symlink to its
 base interpreter and lacked jsonschema; using the venv executable path corrected
-the harness. The final exported package has 23 tracked files and needs only the
+the harness. The final exported package at `a3331d3` has 23 tracked files and needs only the
 reviewed wfctl plus Python/test-only jsonschema. No package changes were needed.
 
 ## Release and schema provenance
@@ -92,3 +92,13 @@ listed release. Local/stdio directory submission requires partner eligibility;
 eligibility remains unknown. No directory submission, remote service/tunnel,
 credential setup, active-session installation, visibility change or deployment
 is performed by this build. Full host/runtime acceptance must stay pending.
+
+## Independent package review corrections
+
+`package_skeptic` round 1 found one Important broken-stdin cleanup failure and
+two Minor queue/deadline failures. `a3331d3` handles broken stdin before process
+reaping, interrupts full-queue reader writes on shutdown and uses one monotonic
+response deadline across notifications. Real child-process and deterministic
+clock regressions each failed with their fix reverted and passed when restored.
+Final standalone export: 17 tests PASS plus real released MCP PASS. These are
+maintainer consumer fixes; plugin transport and engine behavior are unchanged.
