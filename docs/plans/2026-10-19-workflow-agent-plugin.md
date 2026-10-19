@@ -6,7 +6,7 @@
 
 **Architecture:** Three skills call existing wfctl MCP directly using discovered schemas. A secret-free fixture and maintainer stdio consumer test the released CLI; package validation and explicit deferred host checks bound the claims.
 
-**Tech Stack:** Markdown, Agent Plugins 1.0.0 JSON, Python 3 stdlib smoke client; jsonschema for maintainer contract tests.
+**Tech Stack:** Markdown, Agent Plugins 1.0.0 JSON, Go stdlib smoke client; existing pinned Go JSON Schema/ECMA-regex dependencies for maintainer contract tests. User-requested conversion recorded in ADR 0065.
 
 **Base branch:** main
 
@@ -29,36 +29,36 @@
 |------|-------|-------|--------|
 | 1 | Add portable Workflow assistant example | Task 1, Task 2, Task 3 | feat/workflow-agent-plugin |
 
-**Status:** Complete 2026-10-19T22:33:33Z
+**Status:** Source build completed 2026-10-19T22:33:33Z; Task 3 acceptance continuation in progress.
 
 ## Guidance and acceptance mapping
 
 Design: `2026-10-19-workflow-agent-plugin-design.md`; ADR: `decisions/0064-package-workflow-agent-example.md`.
 Repo guidance: `AGENTS.md`, `docs/AGENT_GUIDE.md`, `docs/REPO_LAYOUT.md`.
-All files are additive except a link in `docs/mcp.md`. All package content lives under `example/workflow-agent-plugin/`.
+All product content lives under `example/workflow-agent-plugin/`; `docs/mcp.md` links it. A related root Go integration test runs the nested module through the existing CI command. Workflow trust policy and CI definitions remain unchanged. No unrelated tests or shared MCP engine implementation change.
 
-Integration matrix: released wfctl stdio = runtime-integrated (Task 2); portable manifests = config-only (Task 1); Autodev coexistence = config-only (Task 3); host skill activation, app runtime and Compute = deferred (Task 3 explains why). No live app or database needed.
+Integration matrix: released wfctl stdio = runtime-integrated (Task 2); portable manifests = schema-verified (Task 1); disposable Codex loader/MCP discovery with public Autodev = verified (Task 3); model-driven skill behavior, app runtime and Compute = deferred. No live app or database needed.
 
 ### Task 1: Package the three workflows
 
-**Files:** create `example/workflow-agent-plugin/{plugin.json,mcp.json,README.md,LICENSE,references/workflow-contract.md,skills/workflow-configure/SKILL.md,skills/workflow-diagnose/SKILL.md,skills/workflow-readiness/SKILL.md,tests/test_package.py,tests/requirements.txt,tests/schemas/plugin.schema.json,tests/schemas/mcp.schema.json}`; modify `docs/mcp.md` with package link.
+**Files:** create `example/workflow-agent-plugin/{plugin.json,mcp.json,README.md,LICENSE,references/workflow-contract.md,skills/workflow-configure/SKILL.md,skills/workflow-diagnose/SKILL.md,skills/workflow-readiness/SKILL.md,tests/package_test.go,tests/schema_test.go,tests/go.mod,tests/go.sum,tests/schemas/plugin.schema.json,tests/schemas/mcp.schema.json}`; modify `docs/mcp.md` with package link. Add related `workflow_agent_plugin_test.go` integration wiring.
 
 1. Write package contract tests first: official schemas, expected namespace/three skills/metadata, portable local paths, direct command/args/env, safe shared instructions, contained relative links, no hooks/remote endpoints/credentials/private paths. Run and observe missing package failures.
 2. Add manifests: name `workflow-assistant`, version `0.1.0`, OpenAI `requires_local_executor: true`; server `workflow-config`, type `stdio`, command `wfctl`, args `mcp -plugin-dir ${PLUGIN_DATA}/engine-plugins`, cwd `${PLUGIN_ROOT}`, env `WFCTL_NO_UPDATE_CHECK=1`.
 3. Add focused skills/shared contract: discover available tool schemas + initialize server version; do not invent args; use only the design's allowlisted tools, inventory with no path override and modernization dry-run only. Basic/deep validation plus comparison against relevant discovered type inventories; compare requires.plugins/plugins.external prerequisites to default manifest inventory, retaining version/binary-health uncertainty. Detect unresolved imports and limit scope to self-contained sanitized snapshots. Source/version evidence identifies exact tested sanitized UTF-8 bytes and redacted/partial status; original equivalence unknown. No secret reads/installs/updates; untrusted data treatment; explicit unknown/runtime gaps.
 4. Add README quickstart/manual wfctl prerequisite, host capability matrix, first prompts, privacy/trust limits, verification steps, source links and distribution limits. Copy MIT license; add docs link.
-5. Verify: create a task-local venv with `python3 -m venv <test-env>` and install `python -m pip install -r example/workflow-agent-plugin/tests/requirements.txt`; use that Python for `python3 -m unittest discover -s example/workflow-agent-plugin/tests -p 'test_package.py' -v` → all PASS. Relative links resolve; official schemas accept manifests. Commit Task 1.
+5. Verify: from `example/workflow-agent-plugin/tests`, run `GOWORK=off go test -race ./...` → all PASS. Relative links resolve; unchanged official schemas accept manifests. Commit Task 1.
 
 Rollback: revert additive package/docs commit; no installed state changes.
 
 ### Task 2: Exercise the real released MCP
 
-**Files:** create `example/workflow-agent-plugin/{fixtures/{minimal,invalid,missing-plugin,missing-prerequisite,unknown-types,unresolved-import}.yaml,tests/mcp_smoke.py,tests/test_smoke.py}`.
+**Files:** create `example/workflow-agent-plugin/{fixtures/{minimal,invalid,missing-plugin,missing-prerequisite,unknown-types,unresolved-import}.yaml.txt,tests/main.go,tests/smoke_test.go}`.
 
 1. Write negative smoke-client unit tests first: missing executable, unknown/mismatched version, missing tools, protocol/tool errors, sanitized snapshot identity, no synthetic canary leakage through raw exception/config/stderr; do not present mocks as integration proof. Run and observe missing implementation failure.
 2. Implement dependency-free maintainer client: launch the manifest's command/args in temp plugin data with a minimal environment, exact executable selected via PATH; initialize, tools/list with bounded timeout; validate inputs against discovered required fields, request IDs/errors; capture only safe summaries and digests. Always stop child processes.
 3. Add secret-free loopback HTTP fixture and intentionally invalid/unknown-type/import/missing-prerequisite fixtures. Run actual discovery/inventories/schema/skeleton, basic/deep validate, inspect, compat and plugin inventory; schema-gated calls. Invalid config must fail validation; malformed YAML returns tool error; missing module is incompatible. Demonstrate basic-validation false positives for unknown workflow/trigger/step types, unresolved imports and declared absent requires.plugins/plugins.external with known http.server; show default inventory is empty and prerequisite/version/binary-health is unmet or unknown. Deep-validation/inventory coverage remains bounded. Imported input is incomplete; tested sanitized snapshot digest is distinct from source identity. A declaration is not proof of plugin runtime.
-4. Verify: `python3 example/workflow-agent-plugin/tests/mcp_smoke.py --wfctl <released-wfctl> --expect-version v0.86.2` → exit 0, 33 tools discovered at researched release, valid fixture accepted, negative fixtures rejected; runtime/host acceptance `not_checked`. Missing executable invocation → exit 1 + safe category, no traceback. `python3 -m unittest discover -s example/workflow-agent-plugin/tests -v` → all PASS. Commit Task 2.
+4. Verify: from the tests module, `GOWORK=off go run . -wfctl <released-wfctl> -expect-version v0.86.2` → exit 0, 33 tools discovered at researched release, valid fixture accepted, negative fixtures rejected; runtime/host acceptance `not_checked`. Missing executable invocation → exit 1 + safe category, no raw error. `GOWORK=off go test -race ./...` → all PASS. Commit Task 2.
 
 Rollback: revert fixtures/tests; fixture never starts a service and no binary is installed.
 
@@ -69,8 +69,19 @@ Rollback: revert fixtures/tests; fixture never starts a service and no binary is
 1. Run a fresh independent adversarial code/package review; resolve tangible findings and repeat focused verification. Preserve the same three-task/one-PR scope.
 2. Audit all added files for secrets, real user/home paths, internal domains/accounts, private dependencies and hidden executables. Check package extraction into a temp directory with no org repo or secrets, rerun official schemas and released MCP. Compare plugin/server/skill namespaces against public Autodev manifests/skills; no installed files changed. Distinguish static coexistence proof from runtime host activation.
 3. Record actual commands/results, release checksum, source revision links, schema versions/digests, validation limitations and remaining desktop acceptance gate. Do not publish raw logs/config contents containing secrets. Package tests audit the public fixture only; real-secret processing is a manual host gate.
-4. Verify scope manifest and `git diff --check`; confirm `gh api repos/GoCodeAlone/workflow --jq .private` → `false` immediately before push. Push only feature branch and create exactly one draft PR with body file; attach it to task. No merge or active plugin install. Inspect CI state once; follow pending meaningful checks without expanding to engine repairs.
+4. Verify scope manifest and `git diff --check`; confirm `gh api repos/GoCodeAlone/workflow --jq .private` → `false` immediately before push. Push only feature branch and create exactly one draft PR with body file; attach it to task. No merge or active plugin install. Follow exact-head CI to terminal status; fix source defects, report unrelated failures without silently expanding to engine repairs.
 
 Expected: isolated clean package test + MCP PASS, independent findings resolved, public branch/draft PR URL; host activation/runtime application acceptance remain explicitly deferred. If publishing blocked, retain local commits and report exact failed action and reason.
 
 Rollback: close draft PR/delete feature branch only when authorized later; no runtime effects to undo.
+
+### Acceptance continuation 2026-10-19
+
+User requested terminal exact-head hosted CI and a clear ready/not-ready verdict,
+plus disposable released-host tests only where isolation preserves live state.
+Task 3 continues these acceptance checks; no new platform or PR scope. Fixture
+paths listed in Tasks 1/2 now end `.yaml.txt` to keep intentional failures out of
+recursive runnable-example discovery. The smoke test reads identical YAML bytes.
+The user subsequently requested idiomatic Go verification with all previous
+assertions preserved. ADR 0065 replaces the new Python consumer/tests in place;
+the task count, feature scope and single draft PR remain unchanged.

@@ -48,7 +48,7 @@ plugins; do not assume live inventory changes reload the server's type registry.
 
 | Surface | Package intent and verification status |
 |---|---|
-| Local Codex supporting the portable format | Intended local skills + stdio integration. Official schemas and real stdio calls tested; host installation, activation and tool selection **not yet tested**. |
+| Local Codex supporting the portable format | Codex CLI 0.163.0 loaded this package and public Autodev 6.6.3 together in a disposable offline home: all three skills registered and the host discovered 33 tools/5 resources from wfctl v0.86.2. Model-driven selection and complete prompt behavior **not yet tested**. |
 | ChatGPT desktop with local execution/plugin support | Same intended package, subject to account/workspace features. Complete desktop activation **not yet tested**. |
 | Other Agent Plugins clients | Requires skills + stdio + both placeholders; no host certification claimed. |
 | ChatGPT browser, remote/cloud executor | Cannot directly run this local executable. No remote endpoint, tunnel or hosted bridge included. |
@@ -84,7 +84,7 @@ The real v0.86.2 interface differs from portions of its reference documentation:
 The [shared contract](references/workflow-contract.md) defines the exact workflow
 limits. Successful validation does not prove runtime startup, resolved secrets,
 external services, authentication, migrations, routes, health or compatibility
-with another release. The [minimal fixture](fixtures/minimal.yaml) only declares
+with another release. The [minimal fixture](fixtures/minimal.yaml.txt) only declares
 a loopback HTTP server with an ephemeral port; it has no endpoint/business logic
 and the smoke test does not start it.
 
@@ -104,28 +104,30 @@ CLI binary and host permissions before connecting.
 [Autodev](https://github.com/GoCodeAlone/autonomous-dev-kit/blob/main/docs/README.codex.md)
 remains a separate generic development plugin. This package has distinct plugin,
 server and skill names, no hooks, no settings writes, no session lifecycle and no
-dependency on Autodev. Static coexistence checks do not prove simultaneous host
-activation. [Compute's adapter](https://github.com/GoCodeAlone/workflow-plugin-compute)
+dependency on Autodev. Disposable CLI registration/discovery proves both packages
+can load together; it does not prove model-driven behavior with both active.
+[Compute's adapter](https://github.com/GoCodeAlone/workflow-plugin-compute)
 retains its separate boundary; scheduling, proofs and accounting stay in Compute.
 
 ## Maintainer verification
 
-Python 3.10+ is needed only for tests; the plugin itself uses the host and wfctl.
-From this directory, create an isolated test environment and run:
+Go 1.27.2+ is needed only for tests; the plugin itself uses the host and wfctl.
+The standalone test module reuses the repository's pinned public JSON Schema
+validator and ECMA-regex adapter. From this directory, run:
 
 ```sh
-python3 -m venv /tmp/workflow-plugin-test-env
-/tmp/workflow-plugin-test-env/bin/python -m pip install -r tests/requirements.txt
-/tmp/workflow-plugin-test-env/bin/python -m unittest discover -s tests -v
-python3 tests/mcp_smoke.py --wfctl /path/to/reviewed/wfctl --expect-version v0.86.2
+cd tests
+GOWORK=off go test -race ./...
+GOWORK=off go run . -wfctl /path/to/reviewed/wfctl -expect-version v0.86.2
 ```
 
-Choose a fresh temporary venv path if that example path already exists. The smoke
-client uses only bundled public fixtures, launches the actual manifest command
+The smoke client uses only bundled public fixtures, launches the actual manifest command
 with temporary plugin data/minimal environment, and emits safe summaries and
 digests. It tests positive/negative configs and known upstream false positives.
 It does not accept user YAML or read organization repositories/secrets. Missing
 executable/version/tools or protocol failures return a bounded failure category.
+Fixture files use `.yaml.txt` because they include intentional failures and must
+stay outside the repository's recursive runnable `.yaml` example discovery.
 Unit-test doubles cover failures; only the real release run is MCP integration
 proof. Vendored schemas and their license are documented in
 [tests/schemas/README.md](tests/schemas/README.md).

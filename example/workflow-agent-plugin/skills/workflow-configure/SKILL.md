@@ -18,7 +18,7 @@ Use this for Workflow YAML configuration, not generic feature development.
 3. Produce the smallest editable YAML satisfying the request. A skeleton is a
    starting point and may contain empty required fields. Populate from observed
    schemas; keep credentials as references and avoid private domains/accounts.
-   The bundled `fixtures/minimal.yaml` is a secret-free server config, not a
+   The bundled `fixtures/minimal.yaml.txt` is a secret-free server config, not a
    functioning application endpoint or deployment.
 4. Run basic and deep checks, compare relevant type inventories and declared
    prerequisites, then inspect the same sanitized snapshot. Run current-registry

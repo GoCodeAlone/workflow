@@ -1,127 +1,139 @@
 # Workflow Assistant build evidence
 
 Captured 2026-10-19 UTC. Plan: `2026-10-19-workflow-agent-plugin.md`.
+Source: [draft PR #1083](https://github.com/GoCodeAlone/workflow/pull/1083).
 
 ## Milestones
 
 | milestone | evidence |
 |---|---|
-| Public foundation and bounded design | Workflow public baseline `b12aff37cfdf40d71e72c875f4c271ec23c28178`; design + ADR committed before implementation. |
-| Independent design and plan review | `design_skeptic` and `plan_skeptic`; five substantive coverage/evidence findings resolved before scope lock, minor argument-boundary clarification resolved too. See adjacent review reports. |
-| Three-skill portable package | Task 1 `d70ba7f`; root manifests, focused skills/shared contract, public fixture, docs and license. |
-| Real released MCP + failures | Task 2 `1383f64`; initial 14 tests and released stdio smoke pass; final Task 3 lifecycle corrections `a3331d3` bring the suite to 17 tests. |
-| Standalone extraction and privacy/coexistence audit | Final export of `a3331d3` tested outside checkout; 17 tests + real stdio smoke pass with no organization access or secret input. |
+| Public foundation/design | Public baseline `b12aff37cfdf40d71e72c875f4c271ec23c28178`; ADR/design committed before implementation. |
+| Independent design/plan review | Five substantive coverage/evidence findings and one argument-boundary clarification resolved before scope lock; adjacent reports retain details. |
+| Portable package | Three skills, root manifests, shared contract, public fixtures/license; direct existing wfctl MCP. |
+| Released MCP proof | Real v0.86.2 discovery and six fixture cases; known validator false positives retained explicitly. |
+| Go conversion | User-requested replacement of Python consumer/tests, ADR 0065; existing pinned public schema dependencies only. |
+| Discovery correction | Failure fixtures renamed `.yaml.txt`, bytes unchanged, outside recursive runnable `.yaml` discovery. |
+| Disposable host proof | Codex CLI 0.163.0 loaded Workflow Assistant 0.1.0 and public Autodev 6.6.3 together; 3 Workflow skills, 33 MCP tools, 5 resources. |
 
 ## Reproducible verification
 
-From repository root, using a task-local virtual environment with
-`example/workflow-agent-plugin/tests/requirements.txt` installed:
+From `example/workflow-agent-plugin/tests` using Go 1.27.2:
 
 ```sh
-python -m unittest discover -s example/workflow-agent-plugin/tests -v
-python example/workflow-agent-plugin/tests/mcp_smoke.py --wfctl /path/to/reviewed/wfctl --expect-version v0.86.2
-git diff --check
+GOWORK=off go test -race -count=1 ./...
+GOWORK=off go vet ./...
+GOWORK=off go run . -wfctl /path/to/reviewed/wfctl -expect-version v0.86.2
 ```
 
-Observed final: 17 tests, zero failures; smoke exit 0; diff check exit 0.
-Tests were written before package/client implementation and initially failed for
-missing artifacts. Shutdown regression was reproduced as `-15 != 0`, fixed by
-EOF-first teardown, then explicitly reverted/restored: FAIL → PASS. No full Go
-suite/lint or Docker build was run: no Go, engine, workflow/CI or build files changed.
+The corrected race-enabled suite passed: 22 substantive top-level tests plus
+the subprocess helper entry. Vet and released MCP smoke passed. Independent
+review identified an invalid-UTF8 snapshot identity regression; strict rejection
+now occurs before child launch, with additional strict protocol decoding. Both
+fixes failed when reverted and passed after restoration. A synchronized
+notification test proves notifications entered the path before its deadline;
+context-cancellation mutation also fails as expected. The root integration test
+file executed the actual nested race suite successfully (9.105 seconds), and
+its vet/format checks passed without compiling the full engine. No Python/pip dependency remains in the
+package. The runnable smoke uses Go stdlib only; schema libraries are test-only.
+No Workflow engine/private module is imported. The inherited build cache is
+preserved. Existing repository versions are reused: jsonschema/v6 v6.0.3,
+regexp2 v1.11.0 and indirect x/text v0.42.0. ECMA negative lookahead in the
+unchanged official schema requires the regex adapter; no weaker schema is used.
 
-Standalone check: `git archive HEAD example/workflow-agent-plugin` extracted into
-a temporary directory; tests and smoke launched from outside the checkout. The
-first audit invocation accidentally resolved the venv interpreter symlink to its
-base interpreter and lacked jsonschema; using the venv executable path corrected
-the harness. The final exported package at `a3331d3` has 23 tracked files and needs only the
-reviewed wfctl plus Python/test-only jsonschema. No package changes were needed.
+EOF-first cleanup, full-queue cancellation and one overall notification deadline
+each failed when deliberately reverted and passed after restoration. Tests cover
+broken stdin and actual child-process canary output. Doubles are not integration
+proof; the released executable run is. A standalone copy outside the checkout
+passed the final 22-test race suite with dependency/toolchain downloads disabled and the actual
+released MCP smoke. No organization access or secret input was needed.
 
-## Release and schema provenance
+A related root Go integration test runs the nested-module race suite through
+the existing CI command. A direct workflow step was discarded after local
+policy correctly rejected its unstaged context; the three-PR trust lifecycle
+remains intact. No workflow/authority or unrelated test/benchmark policy changes. No local root build, Docker build,
+live application, database or browser was used.
 
-- [Released wfctl v0.86.2](https://github.com/GoCodeAlone/workflow/releases/tag/v0.86.2), published 2026-10-04. Workspace-local Darwin arm64 asset, SHA256 verified against release `checksums.txt`: `020e8a56927bcbcccbcab2e4ef88fa09a98b22046873c117bc17b06ee042933a`. Installed CLI remained v0.85.4.
-- Real initialization: `wfctl-mcp`, `v0.86.2`, MCP `2024-11-05`; tools/list returned 33 tools. Complete discovered tool metadata digest: `cd0a7901b69cde79d23d05b3f3fb188d18ea785166cbb01b9b90ffdd603d37a5`.
-- Agent Plugins 1.0.0 official schemas fetched 2026-10-19, validated with jsonschema 4.26.0. Plugin schema SHA256 `0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883`; MCP schema SHA256 `6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb`. Copies/license/provenance retained in package tests. OpenAI extension semantics remain outside portable schema validation.
-- [Fixture source](https://github.com/GoCodeAlone/workflow/tree/1383f64/example/workflow-agent-plugin/fixtures) uses exact committed UTF-8 bytes. Minimal fixture SHA256 `5c622dee665432094842b38494b25fc37fd184ae0184167649e71bfb5c49f3f8`. Secret-free, unredacted public fixture; this digest does not identify any customer app.
+## Provenance
 
-## Observed behavior and limits
+- [wfctl v0.86.2](https://github.com/GoCodeAlone/workflow/releases/tag/v0.86.2), published 2026-10-04. Darwin arm64 SHA256 verified against release checksums: `020e8a56927bcbcccbcab2e4ef88fa09a98b22046873c117bc17b06ee042933a`. Installed CLI remains v0.85.4.
+- Real initialization: `wfctl-mcp v0.86.2`, legacy MCP `2024-11-05`, 33 tools. Go inventory JSON SHA256 `ada560c5e9f9306b33c0d8374de7d89f1ad3409eaba3527625c1e5a3a019e7f0`. This hashes Go encoding/json bytes; historical Python serialization hashes are not interchangeable.
+- Official Agent Plugins 1.0.0 schemas fetched 2026-10-19, unchanged. Plugin SHA256 `0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883`; MCP SHA256 `6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb`. Copies/license/provenance under tests/schemas. Host extension semantics require separate evidence.
+- Minimal public fixture SHA256 `5c622dee665432094842b38494b25fc37fd184ae0184167649e71bfb5c49f3f8`. Filename correction preserves exact UTF-8 bytes; no customer application is identified.
+- [Codex rust-v0.163.0](https://github.com/openai/codex/releases/tag/rust-v0.163.0), published 2026-10-15. Archive SHA256 verified against release asset digest `61c4d9a92521bdb42b0c1d9f87c673f6da628a06de5945cbdd9a0010632f6d10`; executable SHA256 `8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31`.
+- Public Autodev v6.6.3 tag: `06e28925f6df133d342c4cd6924103223045c46f`; installed user copy not used as fixture.
 
-| check | actual result | coverage |
+## Actual behavior and limits
+
+| check | result | coverage |
 |---|---|---|
-| Basic + deep minimal | accepted | static fixture only |
-| Inspection | one module | parsed topology |
-| Compatibility | compatible at running v0.86.2 | module/step registry, no target-version argument |
+| Basic/deep minimal + inspection | accepted; one module | static topology only |
+| Compatibility | compatible at v0.86.2 | current registry; no target-version argument |
 | Malformed YAML | tool error | expected negative |
-| Missing external module | validation rejected, incompatible | expected negative |
-| Unknown workflow/trigger/step | basic accepted; deep rejected; unknown inventories absent | shows skipped basic checks; no complete semantic validator claim |
-| Missing import | basic accepted | import coverage incomplete; no resolver added |
-| Known type + absent declared plugin | basic/compat accepted, default inventory empty | prerequisite unmet; version/binary health unknown |
-| Missing executable | safe failure category, exit 1 | no install attempted |
-| Installed older CLI | real `version_mismatch`, exit 1 | existing binary unchanged |
-| Unknown version/wrong server/missing tool/schema/protocol/timeout | unit negative cases rejected | failure doubles are not integration proof |
-| Synthetic canary | exceptions plus real child stdout/stderr suppressed | consumer error-path proof; actual desktop/model redaction not certified |
-| Teardown | normal EOF exit | no cancellation error; bounded terminate/kill fallback |
-| Server stderr | known inline-version deprecation only | fixture intentionally exercises deprecated requirement version syntax; no unexpected stderr |
+| Missing module | validation rejected/incompatible | expected negative |
+| Unknown workflow/trigger/step | basic accepts; deep rejects; inventories lack types | basic skips checks |
+| Missing import | basic accepts | imports unresolved, coverage incomplete |
+| Known type + missing prerequisite | basic/compat accept; inventory empty | prerequisite unmet; binary/version unknown |
+| Missing/older executable | bounded missing_executable/version_mismatch | no install/update attempted |
+| Unknown version/server/tool/schema/protocol/timeout | unit negatives reject | doubles, not integration proof |
+| Synthetic canary | raw errors/config/child stdout/stderr suppressed | consumer error paths, not model redaction |
+| Teardown | EOF; bounded signal fallback | child/reader regressions exercised |
+| wfctl stderr | known prerequisite-version deprecation only | other stderr fails |
+| Example discovery | explicit minimal `.yaml.txt` validates; failure vectors excluded | no unrelated example/test modified |
 
-## Privacy, coexistence and operational boundary
+## Disposable host and coexistence
 
-Audited all 31 changed source files at Task 2 for machine home paths, private
-keys, realistic token literals and internal-domain URLs: zero matches. Reviewed
-package/docs/fixtures manually for private repositories, credentials, accounts
-and infrastructure: public sources and deliberate example names only. Executable
-content is maintainer Python tests, not a hook or MCP shell tool. No CLI bundled.
+Supported local marketplace commands registered public package copies in fresh
+home/state/temp/work directories. File-only auth stores contained no auth files.
+Analytics, history, feedback, hooks, apps, daemon auto-start and remote plugins
+were disabled. An outer OS sandbox denied network and writes outside the
+disposable test directory; containment probes confirmed both denials. User-home
+contents outside the authorized task workspace and keychain lookup were denied
+by policy. No shared app, daemon, database, browser or installed-session state
+was used.
 
-Installed Autodev read-only snapshot: 201 selected manifest/Markdown/shell files
-unchanged; plugin/server/three skill namespaces do not overlap. No installed
-plugin/session configuration was written or reloaded. This is config-only
-coexistence proof. No shared app, database or browser actions, heavy builds,
-deployments, credentials, persistent access or telemetry were introduced.
+Only initialize/initialized, plugin/list, plugin/read, skills/list and
+mcpServerStatus/list were called over private stdio, with explicit gateway OAuth
+mode. No thread, model turn or authentication API. Reader threads were joined
+before evidence persistence.
 
-## Deferred acceptance and distribution
+| result | observed |
+|---|---|
+| Disposable installed/enabled plugins | Workflow Assistant 0.1.0; public Autodev 6.6.3 |
+| Skills | 3 Workflow, 27 Autodev, 5 host built-ins; no collisions/load errors |
+| Paths | all discovered skills inside disposable state |
+| Host-launched MCP | workflow-config linked to Workflow plugin; wfctl-mcp v0.86.2 |
+| Inventory | 33 tools, 5 resources; no error/remaining page |
+| Process | EOF exit 0; drained stderr empty |
 
-| integration | level | remaining proof |
+Runtime manifests, contract and all three skills byte-match reviewed source.
+Independent review: SHIP-IT for bounded loading/discovery claims, with two minor
+evidence caveats corrected and rerun. Raw host logs contain generated device
+identifiers and remain private scratch; they are not publication artifacts.
+
+Installed Autodev snapshot: 201 selected manifest/Markdown/shell files unchanged.
+Public package/docs/fixtures are audited for private paths, keys, credentials,
+internal domains/accounts and dependencies before publication. The full upstream
+MCP surface remains visible: skill instructions are not an OS sandbox. Compute
+retains scheduling, proofs and accounting; no operational expansion.
+
+## Acceptance and distribution
+
+| integration | result | remaining |
 |---|---|---|
-| Released stdio MCP | runtime-integrated | passed above |
-| Portable manifests | config-only | official schemas pass; host extension behavior not proven |
-| ChatGPT/Codex activation | deferred | authorized clean isolated desktop install, discovery/tool selection, all three workflows and negative/injection cases |
-| Simultaneous Autodev activation | config-only | live host coexistence deferred; existing installation preserved |
-| Application runtime | deferred | no app server launched; startup/health/dependencies/secrets/routes not checked |
-| Compute | deferred | no dependency or scheduling/proof/accounting expansion |
+| Released MCP and portable schemas | passed | other CLI releases/host semantics untested |
+| Codex loader/discovery with Autodev | passed isolated test | model selection, prompts/follow-ups, injection/negative behavior |
+| ChatGPT desktop | not tested | full authorized isolated desktop acceptance |
+| Application runtime | not tested | startup/health/secrets/dependencies/routes |
+| Compute | outside scope | no expansion |
 
-Source is suitable for draft GitHub review, not an install-certified or publicly
-listed release. Local/stdio directory submission requires partner eligibility;
-eligibility remains unknown. No directory submission, remote service/tunnel,
-credential setup, active-session installation, visibility change or deployment
-is performed by this build. Full host/runtime acceptance must stay pending.
+Ready for draft source review, **not an install-certified/customer release**.
+PR stays draft. Final exact-head hosted CI must be reported from terminal check
+results. Earlier head `4c4814b` exposed the fixture discovery defect corrected
+here; its benchmark parser rejected an unrelated upstream Sonic Go 1.27 warning
+before comparing samples. No benchmark policy was weakened.
 
-## Independent package review corrections
-
-`package_skeptic` round 1 found one Important broken-stdin cleanup failure and
-two Minor queue/deadline failures. `a3331d3` handles broken stdin before process
-reaping, interrupts full-queue reader writes on shutdown and uses one monotonic
-response deadline across notifications. Real child-process and deterministic
-clock regressions each failed with their fix reverted and passed when restored.
-Final standalone export: 17 tests PASS plus real released MCP PASS. These are
-maintainer consumer fixes; plugin transport and engine behavior are unchanged.
-
-Round 2 independently re-read the full diff and reran all 17 tests plus released
-stdio smoke: **SHIP-IT**, no remaining findings. Full class scan and resolutions:
-`2026-10-19-workflow-agent-plugin-code-review.md`. Final source/PR-body audit
-repeated before draft publication; installed Autodev selected-file snapshot
-remained unchanged.
-
-## Source publication
-
-Public repository visibility was freshly confirmed before the branch push.
-Delivered [draft PR #1083](https://github.com/GoCodeAlone/workflow/pull/1083)
-on `feat/workflow-agent-plugin`, attached to the task. Exactly one PR was created;
-no merge, release tag, active-session installation or directory submission.
-Initial hosted CI checks were queued/running, with no submitted reviews; CI is
-pending rather than claimed green. No CI workflow was changed.
-
-A standalone ZIP of the reviewed package tree was also produced locally:
-`workflow-assistant-0.1.0.zip`, 31,718 bytes, SHA256
-`4c4fe511442c40a31006957700ca1ea9092cc33f8e817a9e7cea4510be111f8f`.
-It contains the same package content tested at `a3331d3`; it was not uploaded to
-the Plugin Directory or installed. Source-build scope is complete; clean desktop
-activation, simultaneous live Autodev activation and application runtime remain
-the explicit deferred acceptance gates above.
+Public GitHub distribution is separate from directory eligibility. Local/stdio
+Plugin Directory submission requires approved-partner eligibility, still unknown.
+No submission, remote endpoint/tunnel, credential setup, active-session install,
+visibility change, merge or deployment. Final archive digest belongs with the
+exact-source result; the earlier Python archive is superseded.

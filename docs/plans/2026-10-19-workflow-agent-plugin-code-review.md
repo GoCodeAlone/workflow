@@ -45,3 +45,37 @@ fixtures, negative/privacy tests, bounded evidence, preserved Autodev/Compute,
 and no forbidden hooks/installer/platform/hosted service/telemetry. Source
 publication is the remaining Task 3 operation. Full desktop activation is an
 explicit authorized deferral, not inferred integration proof.
+
+## Go conversion — independent REQUEST-CHANGES
+
+The user requested Go verification; ADR 0065 replaces the initial Python test
+implementation. Historical rounds above do not certify this replacement.
+
+| ID | severity/class | finding | resolution |
+|---|---|---|---|
+| G1 | Important / silent coercion | Invalid UTF-8 is replaced by Go JSON encoding while original bytes were hashed; real released smoke reproduced a false tested-snapshot identity. | Strict fixture UTF-8 rejection before child launch; strict protocol decode too. Independent real-binary repro now fails safely without evidence; launch-marker regression and revert/restore proof pass. |
+| G2 | Minor / vacuous assertion | A short notification timeout could expire before a slow child sends notifications. | Child readiness barrier plus at least two consumed notifications; deadline-renewal mutation fails and restored test passes. |
+
+Independent reviewer mapped all four prior package contracts and thirteen smoke
+contracts to Go equivalents, verified unchanged schemas/six fixture digests,
+focused CI wiring and bounded host claims. Race tests, vet and released MCP
+passed before these findings; passing happy paths did not resolve G1/G2.
+Additional focused cancellation coverage and removal of unnecessary Unix PATH
+assumptions are included in the correction. All mandatory bug classes were
+scanned; no feature/platform scope drift found.
+
+Corrected Go verification independently passed: 22 substantive tests plus helper
+under race detection (7.561 seconds), vet, actual v0.86.2 smoke (33 tools, same
+binary/fixture digests), and the actual root integration test file (8.953 seconds
+including nested race suite). Root wiring preserves the existing workflow trust
+policy and introduces no workflow/authority change. Installed-host discovery
+claims remain bounded to the separately reviewed disposable test.
+
+## Corrected Go round — SHIP-IT
+
+Independent final scan: no Critical, Important or Minor findings remain. All
+mandatory classes were rescanned: symmetry, error handling, comment/body drift,
+edge cases, concurrency, coercion, dead code, scope, root causes, boundary wiring,
+integration use, hermeticity, portability and vacuous assertions. This verdict
+approves bounded draft source, not complete customer host/runtime acceptance.
+Exact-head hosted CI is an external acceptance gate tracked on PR 1083.

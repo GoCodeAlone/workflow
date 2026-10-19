@@ -24,7 +24,7 @@ Source: `AGENTS.md`, `docs/AGENT_GUIDE.md`, `docs/REPO_LAYOUT.md`; task's detail
 
 ## Components and workflows
 
-Root `plugin.json` + `mcp.json`, `skills/workflow-configure`, `skills/workflow-diagnose`, `skills/workflow-readiness`, shared reference, README, MIT license, minimal valid/invalid/unknown-plugin YAML fixtures, dependency-free Python stdio smoke test and package contract tests. Tests are maintainer tools, not exposed MCP capabilities.
+Root `plugin.json` + `mcp.json`, `skills/workflow-configure`, `skills/workflow-diagnose`, `skills/workflow-readiness`, shared reference, README, MIT license, minimal valid/invalid/unknown-plugin YAML fixtures, Go stdlib stdio smoke consumer and package contract tests using the repository's pinned schema dependencies. Tests are maintainer tools, not exposed MCP capabilities. ADR 0065 records the user-requested Go conversion.
 
 1. Configure: establish intended app; discover server/version/tools/types/schemas; propose smallest self-contained config; call basic and deep validation, compare module/step/trigger/workflow types against discovered inventories, inspect; deliver editable config and explicit coverage/runtime gaps. No replacement validator is built.
 2. Diagnose: classify missing executable, handshake/version, unavailable tool/type/plugin, syntax/validation/compatibility failures; use actual schema arguments; propose minimal repair and revalidate. Never update CLI, install plugins or run app automatically.
@@ -81,3 +81,12 @@ Maintainer tests cover missing executable, unknown/mismatched version, missing r
 Delete/uninstall this standalone package in an authorized future test session or revert its additive commit. Existing CLI, plugins, sessions and applications are untouched. No migration or service rollback.
 
 Decision: `decisions/0064-package-workflow-agent-example.md`.
+
+### Backport 2026-10-19: negative fixture discovery
+
+Cause: repository example tests and `wfctl validate --dir` recursively consume
+`.yaml`/`.yml`; negative package vectors caused three directory-validation
+failures. Store all six vectors as `.yaml.txt` and update the smoke consumer,
+links and an explicit discovery-isolation test. Bytes/semantic cases unchanged;
+no engine exclusions or replacement validator. Same three tasks/one PR; no
+manifest change. Actual host/CI continuation remains within Task 3 acceptance.
