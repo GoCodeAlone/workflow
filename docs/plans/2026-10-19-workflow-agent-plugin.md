@@ -29,7 +29,7 @@
 |------|-------|-------|--------|
 | 1 | Add portable Workflow assistant example | Task 1, Task 2, Task 3 | feat/workflow-agent-plugin |
 
-**Status:** Locked 2026-10-19T22:20:46Z
+**Status:** Complete 2026-10-19T22:33:33Z
 
 ## Guidance and acceptance mapping
 

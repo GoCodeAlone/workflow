@@ -108,3 +108,20 @@ stdio smoke: **SHIP-IT**, no remaining findings. Full class scan and resolutions
 `2026-10-19-workflow-agent-plugin-code-review.md`. Final source/PR-body audit
 repeated before draft publication; installed Autodev selected-file snapshot
 remained unchanged.
+
+## Source publication
+
+Public repository visibility was freshly confirmed before the branch push.
+Delivered [draft PR #1083](https://github.com/GoCodeAlone/workflow/pull/1083)
+on `feat/workflow-agent-plugin`, attached to the task. Exactly one PR was created;
+no merge, release tag, active-session installation or directory submission.
+Initial hosted CI checks were queued/running, with no submitted reviews; CI is
+pending rather than claimed green. No CI workflow was changed.
+
+A standalone ZIP of the reviewed package tree was also produced locally:
+`workflow-assistant-0.1.0.zip`, 31,718 bytes, SHA256
+`4c4fe511442c40a31006957700ca1ea9092cc33f8e817a9e7cea4510be111f8f`.
+It contains the same package content tested at `a3331d3`; it was not uploaded to
+the Plugin Directory or installed. Source-build scope is complete; clean desktop
+activation, simultaneous live Autodev activation and application runtime remain
+the explicit deferred acceptance gates above.
