@@ -123,6 +123,7 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(false, true),
 		server.WithInstructions(serverInstructions),
+		server.WithInputSchemaValidation(),
 	)
 
 	// Load types from installed plugin manifests so that plugin-provided types
@@ -256,6 +257,7 @@ func (s *Server) registerTools() {
 			mcp.WithDescription("Generate a skeleton/template workflow YAML configuration for a given set of module types. Useful for bootstrapping new workflow configs."),
 			mcp.WithArray("module_types",
 				mcp.Required(),
+				mcp.WithStringItems(),
 				mcp.Description("List of module type strings to include in the skeleton config (e.g., ['http.server', 'http.router', 'http.handler'])"),
 			),
 		),
@@ -595,10 +597,12 @@ func (s *Server) handleGetConfigSkeleton(_ context.Context, req mcp.CallToolRequ
 	}
 
 	var moduleTypes []string
-	for _, t := range typesSlice {
-		if s, ok := t.(string); ok {
-			moduleTypes = append(moduleTypes, s)
+	for i, value := range typesSlice {
+		moduleType, ok := value.(string)
+		if !ok {
+			return mcp.NewToolResultError(fmt.Sprintf("module_types[%d] must be a string", i)), nil
 		}
+		moduleTypes = append(moduleTypes, moduleType)
 	}
 
 	if len(moduleTypes) == 0 {
