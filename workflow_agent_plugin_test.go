@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -15,11 +14,7 @@ import (
 func TestWorkflowAgentPluginPackage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	goBinary := "go"
-	if runtime.GOOS == "windows" {
-		goBinary += ".exe"
-	}
-	cmd := exec.CommandContext(ctx, filepath.Join(runtime.GOROOT(), "bin", goBinary), "test", "-race", "-count=1", "-timeout=90s", "./...")
+	cmd := exec.CommandContext(ctx, "go", "test", "-race", "-count=1", "-timeout=90s", "./...")
 	cmd.Dir = filepath.Join("example", "workflow-agent-plugin", "tests")
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	if output, err := cmd.CombinedOutput(); err != nil {

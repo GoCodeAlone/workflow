@@ -79,3 +79,10 @@ edge cases, concurrency, coercion, dead code, scope, root causes, boundary wirin
 integration use, hermeticity, portability and vacuous assertions. This verdict
 approves bounded draft source, not complete customer host/runtime acceptance.
 Exact-head hosted CI is an external acceptance gate tracked on PR 1083.
+
+Hosted lint on `2289194` found SA1019 in the root integration test's use of
+deprecated runtime.GOROOT. The correction uses standard PATH-based `exec` lookup
+for Go, without suppressions. Independent narrow review: SHIP-IT; exact-file vet,
+race test including nested suite (8.975 seconds), diff check all pass. Official
+CI linter v2.14.0 was checksum-verified and run task-locally against that file:
+zero issues. Package source/tree/archive are unchanged by this wrapper fix.

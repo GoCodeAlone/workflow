@@ -132,6 +132,13 @@ results. Earlier head `4c4814b` exposed the fixture discovery defect corrected
 here; its benchmark parser rejected an unrelated upstream Sonic Go 1.27 warning
 before comparing samples. No benchmark policy was weakened.
 
+Head `2289194` passed hosted example validation, builds, example lint, policy and
+security checks. Root lint found a deprecated runtime.GOROOT use in the new
+integration test. PATH-based Go lookup fixes that single diagnostic; the exact
+CI linter v2.14.0 reports zero issues locally, and independent wrapper review,
+vet and race execution pass. A subsequent exact-head CI run remains required;
+the standalone package tree/archive did not change.
+
 Public GitHub distribution is separate from directory eligibility. Local/stdio
 Plugin Directory submission requires approved-partner eligibility, still unknown.
 No submission, remote endpoint/tunnel, credential setup, active-session install,
