@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,6 +27,8 @@ const stdioPublicYAML = "modules:\n  - name: public_web\n    type: http.server\n
 const stdioCanary = "SYNTHETIC_STDIO_PRIVATE_CANARY"
 const handlerEntered = "WFCTL_MCP_TEST_HANDLER_ENTERED"
 const handlerCancelled = "WFCTL_MCP_TEST_HANDLER_CANCELLED"
+const stdioPublicDocs = "Workflow MCP synthetic public documentation fixture\nmarker: PUBLIC_MCP_DOCS_20261019\n"
+const stdioDocsMarker = "PUBLIC_MCP_DOCS_20261019"
 
 // This dependency double exercises Workflow's existing optional engine tool
 // through the real SDK transport; it cannot execute application workflows.
@@ -53,11 +56,12 @@ func TestMCPStdioLegacyHelperProcess(t *testing.T) {
 		return
 	}
 	var err error
+	documentation := os.Getenv("WFCTL_MCP_TEST_DOCUMENTATION")
 	switch mode {
 	case "transport":
-		err = workflowmcp.NewServer("plugins", workflowmcp.WithEngine(&stdioBlockingEngine{})).ServeStdio()
+		err = workflowmcp.NewServer("plugins", workflowmcp.WithEngine(&stdioBlockingEngine{}), workflowmcp.WithDocumentationFile(documentation)).ServeStdio()
 	case "production":
-		err = runMCP([]string{"-plugin-dir", "plugins", "-documentation-file", "public-reference.md"})
+		err = runMCP([]string{"-plugin-dir", "plugins", "-documentation-file", documentation})
 	default:
 		os.Exit(2)
 	}
@@ -77,8 +81,9 @@ type stdioReply struct {
 	ID      json.RawMessage `json:"id"`
 	Result  json.RawMessage `json:"result"`
 	Error   *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
+		Code    int             `json:"code"`
+		Message string          `json:"message"`
+		Data    json.RawMessage `json:"data"`
 	} `json:"error"`
 }
 
@@ -88,30 +93,33 @@ type stdioFrame struct {
 }
 
 type stdioContractClient struct {
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	frames      chan stdioFrame
-	barriers    chan string
-	done        chan struct{}
-	readersDone chan struct{}
-	stopReaders chan struct{}
-	writers     sync.WaitGroup
-	waitErr     error // Published by closing done.
-	stderrMu    sync.Mutex
-	stderr      strings.Builder
-	stderrErr   bool
-	next        int
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	frames        chan stdioFrame
+	barriers      chan string
+	done          chan struct{}
+	readersDone   chan struct{}
+	stopReaders   chan struct{}
+	writers       sync.WaitGroup
+	waitErr       error // Published by closing done.
+	stderrMu      sync.Mutex
+	stderr        strings.Builder
+	stderrErr     bool
+	next          int
+	modern        bool
+	serverVersion string
 }
 
 func startStdioContract(t *testing.T, transport bool) *stdioContractClient {
 	t.Helper()
 	root := t.TempDir()
-	for _, dir := range []string{"plugins", "tmp"} {
+	for _, dir := range []string{"plugins", "tmp", "fixtures"} {
 		if err := os.Mkdir(filepath.Join(root, dir), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "public-reference.md"), []byte("# Public synthetic reference\n"), 0o600); err != nil {
+	documentation := filepath.Join(root, "fixtures", "DOCUMENTATION.md")
+	if err := os.WriteFile(documentation, []byte(stdioPublicDocs), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	bin, err := os.Executable()
@@ -124,13 +132,13 @@ func startStdioContract(t *testing.T, transport bool) *stdioContractClient {
 		mode = "transport"
 	} else if override := os.Getenv("WFCTL_MCP_TEST_BINARY"); override != "" {
 		bin = override
-		args = []string{"mcp", "-plugin-dir", "plugins", "-documentation-file", "public-reference.md"}
+		args = []string{"mcp", "-plugin-dir", "plugins", "-documentation-file", documentation}
 	}
 	c := &stdioContractClient{frames: make(chan stdioFrame, 32), barriers: make(chan string, 8), done: make(chan struct{}), readersDone: make(chan struct{}), stopReaders: make(chan struct{})}
 	c.cmd = exec.Command(bin, args...) //nolint:gosec // Explicit test-owned executable, never user tool input.
 	c.cmd.Dir = root
 	// No ambient HOME, CODEX_HOME, plugin locations, credentials or app config.
-	c.cmd.Env = []string{"PATH=/usr/bin:/bin", "TMPDIR=" + filepath.Join(root, "tmp"), "WFCTL_NO_UPDATE_CHECK=1", "WFCTL_DIFFCACHE=disabled", "WFCTL_MCP_TEST_HELPER=" + mode}
+	c.cmd.Env = []string{"TMPDIR=" + filepath.Join(root, "tmp"), "WFCTL_NO_UPDATE_CHECK=1", "WFCTL_DIFFCACHE=disabled", "WFCTL_MCP_TEST_HELPER=" + mode, "WFCTL_MCP_TEST_DOCUMENTATION=" + documentation}
 	c.stdin, err = c.cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -238,8 +246,8 @@ func startStdioContract(t *testing.T, transport bool) *stdioContractClient {
 		}
 		c.stderrMu.Lock()
 		defer c.stderrMu.Unlock()
-		if strings.Contains(c.stderr.String(), stdioCanary) {
-			t.Error("raw synthetic canary leaked to stderr")
+		if strings.Contains(c.stderr.String(), stdioCanary) || strings.Contains(c.stderr.String(), stdioDocsMarker) {
+			t.Error("raw synthetic canary/documentation marker leaked to stderr")
 		}
 		if c.stderrErr {
 			t.Error("stderr reader failed; canary audit incomplete")
@@ -295,9 +303,26 @@ func (c *stdioContractClient) receive(t *testing.T, id string) stdioReply {
 
 func (c *stdioContractClient) request(t *testing.T, method string, params any) stdioReply {
 	t.Helper()
+	if c.modern {
+		copy := map[string]any{"_meta": stdioJulyMeta()}
+		if params != nil {
+			for key, value := range params.(map[string]any) {
+				copy[key] = value
+			}
+		}
+		params = copy
+	}
 	c.next++
 	c.send(t, map[string]any{"jsonrpc": "2.0", "id": c.next, "method": method, "params": params})
-	return c.receive(t, fmt.Sprint(c.next))
+	reply := c.receive(t, fmt.Sprint(c.next))
+	if c.modern && reply.Error == nil {
+		c.assertJulyMetadata(t, reply, method)
+	}
+	return reply
+}
+
+func stdioJulyMeta() map[string]any {
+	return map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": map[string]any{}}
 }
 
 func (c *stdioContractClient) initialize(t *testing.T, version string) {
@@ -310,6 +335,10 @@ func (c *stdioContractClient) initialize(t *testing.T, version string) {
 	if reply.Error != nil || json.Unmarshal(reply.Result, &result) != nil || result.ProtocolVersion != version || result.ServerInfo.Name != "wfctl-mcp" || result.ServerInfo.Version == "" {
 		t.Fatal("initialize failed to negotiate requested legacy version and server identity")
 	}
+	if c.serverVersion != "" && c.serverVersion != result.ServerInfo.Version {
+		t.Fatal("server identity changed between modern and legacy requests")
+	}
+	c.serverVersion = result.ServerInfo.Version
 	c.send(t, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
 }
 
@@ -447,42 +476,73 @@ func TestMCPStdioLegacy(t *testing.T) {
 			if reply := c.receive(t, "null"); reply.Error == nil || reply.Error.Code != -32700 {
 				t.Fatal("malformed JSON must return parse error")
 			}
-			// This proves notification robustness only: production tools may finish
-			// before cancellation arrives. In-flight proof uses the helper below.
-			c.next++
-			id := c.next
-			c.send(t, map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": "list_module_types", "arguments": map[string]any{}}})
-			c.send(t, map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": id}})
-			reply := c.receive(t, fmt.Sprint(id))
-			if reply.Error != nil {
-				if reply.Error.Code != -32800 || !strings.Contains(strings.ToLower(reply.Error.Message), "cancel") {
-					t.Fatal("unexpected cancellation protocol error")
-				}
-			} else {
-				var result struct {
-					IsError bool `json:"isError"`
-				}
-				if json.Unmarshal(reply.Result, &result) != nil {
-					t.Fatal("invalid cancellation result")
-				}
-				text := assertStdioTool(t, reply, result.IsError)
-				if result.IsError && !strings.Contains(strings.ToLower(text), "cancel") {
-					t.Fatal("unexpected cancellation tool error")
-				}
-			}
-			c.call(t, "list_module_types", map[string]any{}, false)
+			c.cancellationRobustness(t)
 			c.finish(t, false)
 		})
 	}
 }
 
+func (c *stdioContractClient) cancellationRobustness(t *testing.T) {
+	t.Helper()
+	// Production tools may finish before cancellation arrives. This is only
+	// notification robustness; the entered-handler helper proves cancellation.
+	c.next++
+	id := c.next
+	params := map[string]any{"name": "list_module_types", "arguments": map[string]any{}}
+	if c.modern {
+		params["_meta"] = stdioJulyMeta()
+	}
+	c.send(t, map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params})
+	c.send(t, map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": id}})
+	reply := c.receive(t, fmt.Sprint(id))
+	if reply.Error != nil {
+		if reply.Error.Code != -32800 || !strings.Contains(strings.ToLower(reply.Error.Message), "cancel") {
+			t.Fatal("unexpected cancellation protocol error")
+		}
+	} else {
+		if c.modern {
+			c.assertJulyMetadata(t, reply, "tools/call")
+		}
+		var result struct {
+			IsError bool `json:"isError"`
+		}
+		if json.Unmarshal(reply.Result, &result) != nil {
+			t.Fatal("invalid cancellation result")
+		}
+		text := assertStdioTool(t, reply, result.IsError)
+		if result.IsError && !strings.Contains(strings.ToLower(text), "cancel") {
+			t.Fatal("unexpected cancellation tool error")
+		}
+	}
+	c.call(t, "list_module_types", map[string]any{}, false)
+}
+
 func TestMCPStdioLegacyCooperativeCancellation(t *testing.T) {
+	stdioCooperativeCancellation(t, false)
+}
+
+func TestMCPStdioJulyCooperativeCancellation(t *testing.T) {
+	stdioCooperativeCancellation(t, true)
+}
+
+func stdioCooperativeCancellation(t *testing.T, modern bool) {
+	t.Helper()
 	c := startStdioContract(t, true)
-	c.initialize(t, "2025-11-25")
+	c.modern = modern
+	if modern {
+		c.julyDiscovery(t)
+		c.julyDocumentation(t)
+	} else {
+		c.initialize(t, "2025-11-25")
+	}
 	c.inventory(t, true)
 	c.next++
 	id := c.next
-	c.send(t, map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": "run_workflow", "arguments": map[string]any{"workflow_type": "public", "action": "block_until_cancelled", "data": map[string]any{"synthetic": stdioCanary}}}})
+	params := map[string]any{"name": "run_workflow", "arguments": map[string]any{"workflow_type": "public", "action": "block_until_cancelled", "data": map[string]any{"synthetic": stdioCanary}}}
+	if modern {
+		params["_meta"] = stdioJulyMeta()
+	}
+	c.send(t, map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": params})
 	for _, barrier := range []string{handlerEntered, handlerCancelled} {
 		select {
 		case actual := <-c.barriers:
@@ -496,7 +556,11 @@ func TestMCPStdioLegacyCooperativeCancellation(t *testing.T) {
 			c.send(t, map[string]any{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": map[string]any{"requestId": id}})
 		}
 	}
-	text := assertStdioTool(t, c.receive(t, fmt.Sprint(id)), true)
+	reply := c.receive(t, fmt.Sprint(id))
+	if modern {
+		c.assertJulyMetadata(t, reply, "tools/call")
+	}
+	text := assertStdioTool(t, reply, true)
 	var result struct {
 		Success *bool  `json:"success"`
 		Error   string `json:"error"`
@@ -519,4 +583,210 @@ func TestMCPStdioLegacySIGTERM(t *testing.T) {
 	c.initialize(t, "2025-11-25")
 	c.call(t, "list_module_types", map[string]any{}, false)
 	c.finish(t, true)
+}
+
+func (c *stdioContractClient) assertJulyMetadata(t *testing.T, reply stdioReply, method string) {
+	t.Helper()
+	var result struct {
+		ResultType string                     `json:"resultType"`
+		TTLMs      *int64                     `json:"ttlMs"`
+		CacheScope string                     `json:"cacheScope"`
+		Meta       map[string]json.RawMessage `json:"_meta"`
+	}
+	if json.Unmarshal(reply.Result, &result) != nil || result.ResultType != "complete" {
+		t.Fatalf("%s missing complete resultType: %s", method, reply.Result)
+	}
+	var identity struct{ Name, Version string }
+	if json.Unmarshal(result.Meta["io.modelcontextprotocol/serverInfo"], &identity) != nil || identity.Name != "wfctl-mcp" || identity.Version == "" {
+		t.Fatal("July result lacks Workflow server identity metadata")
+	}
+	if c.serverVersion != "" && c.serverVersion != identity.Version {
+		t.Fatal("server identity changed between requests")
+	}
+	c.serverVersion = identity.Version
+	switch method {
+	case "server/discover", "tools/list", "resources/list", "resources/templates/list", "resources/read":
+		if result.TTLMs == nil || *result.TTLMs != 0 || result.CacheScope != "private" {
+			t.Fatalf("%s lacks explicit ttlMs:0/cacheScope:private: %s", method, reply.Result)
+		}
+	}
+	if method != "resources/read" && strings.Contains(string(reply.Result), stdioDocsMarker) {
+		t.Fatal("documentation marker escaped the explicitly requested resource result")
+	}
+}
+
+func assertStdioVersions(t *testing.T, versions []string) {
+	t.Helper()
+	want := []string{"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"}
+	slices.Sort(versions)
+	if !slices.Equal(versions, want) {
+		t.Fatalf("unexpected discovered protocol versions: %v", versions)
+	}
+}
+
+func (c *stdioContractClient) julyDiscovery(t *testing.T) {
+	t.Helper()
+	reply := c.request(t, "server/discover", nil)
+	var result struct {
+		SupportedVersions []string                   `json:"supportedVersions"`
+		Capabilities      map[string]json.RawMessage `json:"capabilities"`
+	}
+	if reply.Error != nil || json.Unmarshal(reply.Result, &result) != nil {
+		t.Fatal("stateless discovery failed")
+	}
+	assertStdioVersions(t, result.SupportedVersions)
+	if len(result.Capabilities) != 2 {
+		t.Fatal("unexpected optional capabilities/extensions advertised")
+	}
+	for _, name := range []string{"tools", "resources"} {
+		var capability map[string]bool
+		if json.Unmarshal(result.Capabilities[name], &capability) != nil || len(capability) != 1 || !capability["listChanged"] {
+			t.Fatalf("unexpected %s capability", name)
+		}
+	}
+}
+
+func (c *stdioContractClient) julyDocumentation(t *testing.T) {
+	t.Helper()
+	reply := c.request(t, "resources/read", map[string]any{"uri": "workflow://docs/full-reference"})
+	var result struct {
+		Contents []struct{ URI, MimeType, Text string } `json:"contents"`
+	}
+	if reply.Error != nil || json.Unmarshal(reply.Result, &result) != nil || len(result.Contents) != 1 {
+		t.Fatal("full-reference resource failed")
+	}
+	content := result.Contents[0]
+	if content.URI != "workflow://docs/full-reference" || content.MimeType != "text/markdown" || content.Text != stdioPublicDocs || !strings.Contains(content.Text, stdioDocsMarker) {
+		t.Fatal("full-reference must serve the exact explicitly supplied synthetic DOCUMENTATION.md bytes")
+	}
+}
+
+func TestMCPStdioJuly(t *testing.T) {
+	for _, transport := range []bool{false, true} {
+		name := "production"
+		if transport {
+			name = "controlled-engine-transport"
+		}
+		t.Run(name, func(t *testing.T) {
+			c := startStdioContract(t, transport)
+			c.modern = true // No initialize or initialized notification in this path.
+			c.julyDiscovery(t)
+			t.Logf("observed wfctl-mcp version %s", c.serverVersion)
+			c.inventory(t, transport)
+			var previous []string
+			for range 3 {
+				reply := c.request(t, "tools/list", nil)
+				var result struct {
+					Tools []struct{ Name string } `json:"tools"`
+				}
+				if reply.Error != nil || json.Unmarshal(reply.Result, &result) != nil {
+					t.Fatal("tools/list failed")
+				}
+				var names []string
+				for _, tool := range result.Tools {
+					names = append(names, tool.Name)
+				}
+				if !slices.IsSorted(names) || (previous != nil && !slices.Equal(previous, names)) {
+					t.Fatal("wire tool order must be sorted and repeatable")
+				}
+				previous = names
+			}
+			reply := c.request(t, "resources/templates/list", nil)
+			var templates struct {
+				Templates []json.RawMessage `json:"resourceTemplates"`
+			}
+			if reply.Error != nil || json.Unmarshal(reply.Result, &templates) != nil || len(templates.Templates) != 0 {
+				t.Fatal("unexpected resource templates")
+			}
+			c.julyDocumentation(t)
+			var report struct {
+				Valid *bool `json:"valid"`
+			}
+			text := c.call(t, "validate_config", map[string]any{"yaml_content": stdioPublicYAML}, false)
+			if json.Unmarshal([]byte(text), &report) != nil || report.Valid == nil || !*report.Valid {
+				t.Fatal("valid July config rejected")
+			}
+			c.call(t, "validate_config", map[string]any{"yaml_content": stdioCanary, "strict": "false"}, true)
+			c.call(t, "get_config_skeleton", map[string]any{"module_types": []any{"http.server", 73}}, true)
+			text = c.call(t, "validate_config", map[string]any{"yaml_content": "modules:\n  - name: absent\n    type: public.uninstalled\n"}, false)
+			if json.Unmarshal([]byte(text), &report) != nil || report.Valid == nil || *report.Valid {
+				t.Fatal("July analytical negative must remain successful valid:false")
+			}
+			c.sendRaw(t, "{")
+			if reply := c.receive(t, "null"); reply.Error == nil || reply.Error.Code != -32700 {
+				t.Fatal("malformed JSON must return parse error")
+			}
+			c.cancellationRobustness(t)
+			c.finish(t, false) // Drains all frames: unsolicited logging/notification replies fail.
+		})
+	}
+}
+
+func TestMCPStdioJulySIGTERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Process.Signal(SIGTERM) is unsupported on Windows; framing and EOF are tested separately")
+	}
+	c := startStdioContract(t, false)
+	c.modern = true
+	c.julyDiscovery(t)
+	c.call(t, "list_module_types", nil, false)
+	c.finish(t, true)
+}
+
+func TestMCPStdioJulyProtocolErrorsAndIsolation(t *testing.T) {
+	c := startStdioContract(t, false)
+	c.modern = true
+	c.julyDiscovery(t)
+	for _, caps := range []any{nil, "wrong-shaped", []any{}, false} {
+		meta := map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28"}
+		if caps != nil {
+			meta["io.modelcontextprotocol/clientCapabilities"] = caps
+		}
+		reply := c.request(t, "tools/list", map[string]any{"_meta": meta})
+		if reply.Error == nil || reply.Error.Code != -32602 {
+			t.Fatalf("missing/wrong-shaped capabilities must return -32602: %+v", reply.Error)
+		}
+	}
+	reply := c.request(t, "tools/list", map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": nil}})
+	if reply.Error == nil || reply.Error.Code != -32602 {
+		t.Fatal("explicit null capabilities must return -32602")
+	}
+	meta := stdioJulyMeta()
+	meta["io.modelcontextprotocol/protocolVersion"] = "2099-01-01"
+	reply = c.request(t, "server/discover", map[string]any{"_meta": meta})
+	var unsupported struct {
+		Supported []string `json:"supported"`
+		Requested string   `json:"requested"`
+	}
+	if reply.Error == nil || reply.Error.Code != -32022 || json.Unmarshal(reply.Error.Data, &unsupported) != nil || unsupported.Requested != "2099-01-01" {
+		t.Fatal("unsupported modern version must return -32022 with supported/requested data")
+	}
+	assertStdioVersions(t, unsupported.Supported)
+	for _, method := range []string{"initialize", "ping"} {
+		if reply := c.request(t, method, nil); reply.Error == nil || reply.Error.Code != -32601 {
+			t.Fatalf("modern %s must return -32601", method)
+		}
+	}
+	// Real persistent transport: modern -> legacy handshake -> modern -> legacy.
+	// A fresh empty capabilities object on every modern call is mandatory;
+	// requests missing it above must fail even after a successful discovery.
+	c.modern = false
+	c.initialize(t, "2025-11-25")
+	for range 2 {
+		reply := c.request(t, "tools/list", nil)
+		var legacy map[string]json.RawMessage
+		if reply.Error != nil || json.Unmarshal(reply.Result, &legacy) != nil {
+			t.Fatal("legacy request after July failed")
+		}
+		for _, field := range []string{"resultType", "ttlMs", "cacheScope", "_meta"} {
+			if _, present := legacy[field]; present {
+				t.Fatalf("July %s leaked into legacy result", field)
+			}
+		}
+		c.modern = true
+		c.julyDiscovery(t)
+		c.modern = false
+	}
+	c.call(t, "list_module_types", nil, false)
+	c.finish(t, false)
 }

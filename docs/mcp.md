@@ -2,14 +2,14 @@
 
 `wfctl mcp` exposes Workflow configuration tools and documentation to local
 [Model Context Protocol](https://modelcontextprotocol.io/) clients over stdio.
-The server is part of the CLI, so its handshake version comes from the same
-build. Run `wfctl version` to identify that executable.
+The server is part of the CLI, so its reported version comes from the same build.
+Run `wfctl version` to identify that executable.
 
-The corrected input validation, error propagation and annotations below describe
-this source change. Released `v0.86.2` predates these corrections; downloading a
-release or using `go install ...@latest` does not guarantee this source behavior
-until a Workflow release includes it. Record the actual executable version and
-source revision rather than applying these claims to an older binary.
+The corrected tool contracts and July protocol support below describe this
+source build. Released `v0.86.2` predates these changes; downloading a release or
+using `go install ...@latest` does not guarantee this behavior until a Workflow
+release includes it. Record the actual executable version and source revision
+rather than applying these claims to an older binary.
 
 For a portable assistant package with configure, diagnose and readiness skills,
 see the [Workflow Assistant example](../example/workflow-agent-plugin/README.md).
@@ -139,6 +139,11 @@ tool advertises writable/destructive/open-world behavior. These annotations
 are descriptive hints, not authorization or a filesystem sandbox. Local process
 permissions remain the access boundary.
 
+Further input/output resource budgets, filesystem confinement, rate limiting and
+general output redaction are deferred. Offline schema audits, synthetic canary
+checks and private-cache tests establish specific boundaries, not generic
+security compliance.
+
 ## Catalog refresh and protocol coverage
 
 Plugin-provided schema types are loaded from manifests at server startup.
@@ -147,30 +152,76 @@ Restart after installing or changing manifests to refresh those types.
 plugin rules per call. Neither implies that all catalogs reload automatically,
 or that a plugin binary has been accepted by a runtime.
 
-The current mcp-go v0.54.1 transport supports legacy initialization for
-`2024-11-05`, `2025-03-26`, `2025-06-18` and `2025-11-25`. Tests exercise these
-four revisions over actual CLI stdio. July 2026 protocol support and an SDK
-upgrade belong to the separate follow-up change; they are not claimed here.
+The current mcp-go v1.3.0 transport is tested through the built CLI in both models:
+
+| Protocol revisions | Connection model over local stdio |
+|--------------------|-----------------------------------|
+| `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25` | Legacy `initialize`, then `notifications/initialized` |
+| `2026-07-28` | Stateless `server/discover` and per-request metadata, without `initialize` or `notifications/initialized` |
+
+For July requests, include both namespaced keys in `params._meta` on every
+request. For example, the tested discovery request has this shape:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "server/discover",
+  "params": {
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  }
+}
+```
+
+Ordinary July results carry `resultType:"complete"` and Workflow server identity
+metadata. Supported discovery/list/read results carry `ttlMs:0` and
+`cacheScope:"private"`, including the local full-reference resource. The July
+protocol requires result/cache metadata; the private, zero-TTL values are
+Workflow's conservative choice for local data. Cache hints do not redact content
+or enforce client storage behavior. Legacy calls retain their response shape.
+Existing initialization clients already worked; upgrading the SDK adds the July
+connection model while preserving them. The SDK had already received maintenance
+before this change; this is a further upgrade from v0.54.1.
+
 EOF exits successfully. On SIGTERM the current SDK returns context cancellation,
 and the CLI exits with status 1; tests require bounded shutdown and process
 reaping. Cancellation-notification robustness is tested on the CLI; cooperative
 in-flight cancellation is separately proved with the existing engine-provider
 seam and real SDK stdio, not a production workflow.
 
+## Protocol, directory policy and optional features
+
+The [July protocol changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+define the wire metadata above. Separately, OpenAI's
+[directory annotation policy](https://developers.openai.com/plugins/plugin-guidelines#correct-annotation)
+requires explicit, accurate effect hints. Those hints describe tools; protocol
+tests do not establish directory eligibility or certify an OpenAI host.
+
+Tools continue to return text content, including JSON reports encoded as text;
+there is no structured-output migration. No hosted transport, authentication
+flow, tasks, UI or Compute integration is added or certified. Desktop/mobile
+activation, remote HTTP behavior and real engine workflow execution are outside
+this wire evidence.
+
 ## Tests and implementation
 
 ```sh
 GOWORK=off go test ./mcp -count=1
-GOWORK=off go test ./cmd/wfctl -run TestMCPStdioLegacy -count=1
+GOWORK=off go test ./cmd/wfctl -run 'TestMCPStdioLegacy|TestMCPStdioJuly' -count=1
 ```
 
 To exercise a newly built CLI instead of the test executable's `runMCP` helper,
 set `WFCTL_MCP_TEST_BINARY` to that executable's absolute path for the second
 command. The cancellation helper always runs in a separate test process with a
 blocking fake engine, even with that override. Tests use isolated temporary
-working/plugin directories and a minimal environment. Transport evidence on one
-OS does not certify other hosts or operating systems.
+working/plugin directories, explicit synthetic documentation and a minimal
+environment. They inspect actual wire responses, including negative calls,
+per-request version/capability isolation and private-cache metadata. Transport
+evidence on one OS does not certify other hosts or operating systems.
 
 Implementation: [CLI entry](../cmd/wfctl/mcp.go), [server](../mcp/server.go),
 [tool reference](mcp-tools-reference.md), and
-[SDK dependency](https://github.com/mark3labs/mcp-go/tree/v0.54.1).
+[SDK dependency](https://github.com/mark3labs/mcp-go/tree/v1.3.0).

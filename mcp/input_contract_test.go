@@ -189,7 +189,15 @@ func TestMCPSchemaInventory(t *testing.T) {
 		{"engine", NewServer("", WithEngine(&inputContractEngine{}))},
 	} {
 		t.Run(variant.name, func(t *testing.T) {
-			for name, registered := range variant.srv.MCPServer().ListTools() {
+			tools := variant.srv.MCPServer().ListTools()
+			want := 33
+			if variant.name == "engine" {
+				want++
+			}
+			if len(tools) != want {
+				t.Fatalf("offline schema inventory: got %d, want %d", len(tools), want)
+			}
+			for name, registered := range tools {
 				t.Run(name, func(t *testing.T) {
 					data, err := json.Marshal(registered.Tool.InputSchema)
 					if len(registered.Tool.RawInputSchema) != 0 {
@@ -227,7 +235,10 @@ func TestMCPSchemaInventoryGuard(t *testing.T) {
 		{"HTTP ref", `{"$ref":"https://example.invalid/schema.json"}`, true},
 		{"file ref", `{"properties":{"nested":{"$ref":"file:///never-read.json"}}}`, true},
 		{"relative ref", `{"$ref":"other.json"}`, true},
+		{"absolute ref", `{"$ref":"/never-read.json"}`, true},
+		{"Windows absolute ref", `{"$ref":"C:/never-read.json"}`, true},
 		{"dynamic HTTP ref", `{"$dynamicRef":"https://example.invalid/schema.json"}`, true},
+		{"recursive file ref", `{"$recursiveRef":"file:///never-read.json"}`, true},
 		{"fragment ref", `{"$defs":{"value":{"type":"string"}},"properties":{"value":{"$ref":"#/$defs/value"}}}`, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
