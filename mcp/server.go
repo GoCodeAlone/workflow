@@ -124,6 +124,7 @@ func NewServer(pluginDir string, opts ...ServerOption) *Server {
 		server.WithResourceCapabilities(false, true),
 		server.WithInstructions(serverInstructions),
 		server.WithInputSchemaValidation(),
+		server.WithCacheHints(0, mcp.CacheScopePrivate),
 	)
 
 	// Load types from installed plugin manifests so that plugin-provided types
