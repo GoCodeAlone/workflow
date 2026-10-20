@@ -38,6 +38,8 @@ var reasons = map[string]bool{
 var requiredTools = []string{"list_module_types", "list_step_types", "list_trigger_types", "list_workflow_types", "get_module_schema", "get_config_skeleton", "validate_config", "inspect_config", "compat_check", "template_validate_config", "list_plugins"}
 
 const deprecation = "[DEPRECATED] requires.plugins[].version and requires.plugins[].source in app.yaml are deprecated. Run 'wfctl migrate plugins' to migrate to wfctl.yaml + .wfctl-lock.yaml."
+const sonicFallback = "WARNING: sonic/ast only supports (go1.17~1.26 and amd64 CPU) or (go1.20~1.26 and arm64 CPU), but your environment is not suitable and will fallback to encoding/json"
+const maxStderrBytes = 1024 * 1024
 
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 func fileDigest(path string) (string, error) {
@@ -343,7 +345,8 @@ func (c *client) close() ([]byte, error) {
 		close(c.stopping)
 		_ = c.stdin.Close() // EOF first; broken stdin must not prevent reaping.
 		waited := make(chan struct{})
-		go func() { _ = c.cmd.Wait(); close(waited) }()
+		var waitErr error
+		go func() { waitErr = c.cmd.Wait(); close(waited) }()
 		wait := func() bool {
 			timer := time.NewTimer(3 * time.Second)
 			defer timer.Stop()
@@ -355,6 +358,7 @@ func (c *client) close() ([]byte, error) {
 			}
 		}
 		if !wait() {
+			c.closeErr = failure("check_failed")
 			_ = c.cmd.Process.Signal(syscall.SIGTERM)
 			if !wait() {
 				_ = c.cmd.Process.Kill()
@@ -362,6 +366,9 @@ func (c *client) close() ([]byte, error) {
 					c.closeErr = failure("timeout")
 				}
 			}
+		}
+		if c.closeErr == nil && waitErr != nil {
+			c.closeErr = failure("check_failed")
 		}
 		_ = c.stdout.Close()
 		timer := time.NewTimer(time.Second)
@@ -372,9 +379,11 @@ func (c *client) close() ([]byte, error) {
 			c.closeErr = failure("timeout")
 		}
 		if _, err := c.stderr.Seek(0, io.SeekStart); err == nil {
-			c.closedStderr, err = io.ReadAll(io.LimitReader(c.stderr, 1024*1024+1))
+			c.closedStderr, err = io.ReadAll(io.LimitReader(c.stderr, maxStderrBytes+1))
 			if err != nil {
 				c.closeErr = failure("internal_error")
+			} else if len(c.closedStderr) > maxStderrBytes && c.closeErr == nil {
+				c.closeErr = failure("unexpected_stderr")
 			}
 		} else {
 			c.closeErr = failure("internal_error")
@@ -467,7 +476,7 @@ func runSmoke(ctx context.Context, opts options) (map[string]any, error) {
 	}
 	defer c.close()
 	s := session{client: c}
-	initialized := s.request("initialize", map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "workflow-package-smoke", "version": "0.1.0"}})
+	initialized := s.request("initialize", map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "workflow-package-smoke", "version": "0.1.1"}})
 	info := object(initialized["serverInfo"])
 	if s.err == nil {
 		s.err = checkVersion(info, opts.expected)
@@ -534,10 +543,9 @@ func runSmoke(ctx context.Context, opts options) (map[string]any, error) {
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	for _, line := range strings.Split(strings.TrimSuffix(string(stderr), "\n"), "\n") {
-		if len(stderr) != 0 && line != deprecation {
-			return nil, failure("unexpected_stderr")
-		}
+	stderrStatus, err := classifyStderr(stderr)
+	if err != nil {
+		return nil, err
 	}
 	binaryHash, err := fileDigest(binary)
 	if err != nil {
@@ -551,10 +559,6 @@ func runSmoke(ctx context.Context, opts options) (map[string]any, error) {
 	for name, data := range fixtures {
 		fixtureHashes[name] = digest(data)
 	}
-	stderrStatus := "empty"
-	if len(stderr) != 0 {
-		stderrStatus = "known_deprecation_only"
-	}
 	return map[string]any{
 		"status": "passed", "scope": "bundled_public_fixtures_only", "captured_at": time.Now().UTC().Format(time.RFC3339Nano), "server": map[string]any{"name": info["name"], "version": info["version"]},
 		"release_source": "https://github.com/GoCodeAlone/workflow/tree/" + opts.expected, "binary_sha256": binaryHash, "tool_count": len(tools), "tool_inventory_sha256": digest(inventory), "fixture_sha256": fixtureHashes,
@@ -562,6 +566,29 @@ func runSmoke(ctx context.Context, opts options) (map[string]any, error) {
 		"stderr": stderrStatus, "fixture_source_commit": "not_recorded_by_smoke", "redacted": false,
 		"runtime_acceptance": "not_checked", "desktop_activation": "not_checked", "plugin_binary_health": "not_checked", "original_input_equivalence": "not_checked",
 	}, nil
+}
+func classifyStderr(stderr []byte) (string, error) {
+	if len(stderr) == 0 {
+		return "empty", nil
+	}
+	var hasDeprecation, hasSonic bool
+	for _, line := range strings.Split(strings.TrimSuffix(string(stderr), "\n"), "\n") {
+		switch line {
+		case deprecation:
+			hasDeprecation = true
+		case sonicFallback:
+			hasSonic = true
+		default:
+			return "", failure("unexpected_stderr")
+		}
+	}
+	if hasSonic {
+		if hasDeprecation {
+			return "known_deprecation_and_sonic_fallback", nil
+		}
+		return "known_sonic_fallback_only", nil
+	}
+	return "known_deprecation_only", nil
 }
 func mainWith(ctx context.Context, args []string, out io.Writer, run func(context.Context, options) (map[string]any, error)) int {
 	flags := flag.NewFlagSet("workflow-package-smoke", flag.ContinueOnError)
