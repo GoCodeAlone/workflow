@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "workflow-config": {
+      "type": "stdio",
+      "command": "wfctl",
+      "args": ["mcp", "-plugin-dir", "${PLUGIN_DATA}/engine-plugins"],
+      "cwd": "${PLUGIN_ROOT}",
+      "env": {"WFCTL_NO_UPDATE_CHECK": "1"}
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# String-based MCP checks do not resolve this deliberately absent fragment.
+imports:
+  - missing-fragment.yaml
+modules:
+  - name: web
+    type: http.server
+    config:
+      address: "127.0.0.1:0"

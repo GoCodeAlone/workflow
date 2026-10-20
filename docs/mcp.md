@@ -4,6 +4,10 @@ The workflow engine includes a built-in [Model Context Protocol (MCP)](https://m
 
 The MCP server is integrated into the `wfctl` CLI as the `mcp` subcommand. Use `wfctl mcp` to start it. This ensures the MCP server version always matches the CLI and engine version, and benefits from automatic updates via `wfctl update`.
 
+For a portable assistant package with configure, diagnose and readiness skills,
+see the [Workflow Assistant example](../example/workflow-agent-plugin/README.md).
+It connects directly to this MCP server and documents validation and host limits.
+
 ## Features
 
 The MCP server provides:
