@@ -1,0 +1,7 @@
+# Public static-validation fixture. No route or business logic is supplied.
+# The MCP smoke test never starts this server.
+modules:
+  - name: web
+    type: http.server
+    config:
+      address: "127.0.0.1:0"

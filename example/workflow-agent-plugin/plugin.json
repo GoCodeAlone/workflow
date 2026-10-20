@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "workflow-assistant",
+  "version": "0.1.0",
+  "description": "Configure and diagnose public Workflow apps with wfctl MCP and produce bounded readiness evidence.",
+  "author": {"name": "GoCodeAlone", "url": "https://github.com/GoCodeAlone"},
+  "homepage": "https://github.com/GoCodeAlone/workflow/tree/main/example/workflow-agent-plugin",
+  "repository": "https://github.com/GoCodeAlone/workflow",
+  "license": "MIT",
+  "keywords": ["workflow", "configuration", "mcp", "validation"],
+  "extensions": {"com.openai": {"requires_local_executor": true}}
+}
