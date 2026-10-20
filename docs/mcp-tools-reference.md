@@ -73,9 +73,9 @@ but undocumented names do not select alternate behavior.
 - `modernize` defaults `apply:false`. `apply:true` returns `fixed_yaml` when fixes
   exist; it does not save a file. `rules` and `exclude_rules` are comma-separated
   rule IDs. Plugin-declared rules can be read from the startup plugin directory.
-- `infer_pipeline_context` requires `pipeline_name`; omit `after_step` for initial
-  context. Its advertised `openapi_spec` field is currently unused by the
-  handler, so supplying it does not enrich the result.
+- `infer_pipeline_context` requires `pipeline_name`; omitting `after_step`
+  includes outputs from all pipeline steps. Its advertised `openapi_spec` field
+  is currently unused by the handler, so supplying it does not enrich the result.
 - `get_config_examples` lists examples when `name` is omitted. Named examples
   come from the discovered `example/` catalog; this is not an arbitrary path
   reader. Catalog contents depend on the server's local installation.

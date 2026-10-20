@@ -62,7 +62,7 @@ func (s *Server) registerWfctlTools() {
 				mcp.Description("The YAML content of the new configuration"),
 			),
 			mcp.WithBoolean("check_breaking",
-				mcp.Description("Include breaking change detection for stateful modules (default: true)"),
+				mcp.Description("Compatibility argument, currently ignored; breaking-change detection always runs"),
 			),
 		),
 		s.handleDiffConfigs,
@@ -118,8 +118,9 @@ func (s *Server) registerWfctlTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("template_validate_config",
 			toolBehavior(true, false, false),
-			mcp.WithDescription("Deep validation of a workflow config against known module types, step types, "+
-				"trigger types, dependencies, and template expressions. More comprehensive than validate_config."),
+			mcp.WithDescription("Validate module types, pipeline step and trigger types, config-key hints, "+
+				"and dependencies in a workflow config. Use validate_template_expressions for static "+
+				"template-expression and step-reference checks."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("The YAML content of the workflow configuration"),

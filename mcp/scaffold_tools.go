@@ -19,11 +19,11 @@ func (s *Server) registerScaffoldTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("scaffold_ci",
 			toolBehavior(true, false, false),
-			mcp.WithDescription("Generate a ci: YAML section for a workflow config based on the application type. "+
+			mcp.WithDescription("Generate a ci: YAML section using application features inferred from the description. "+
 				"Produces build (binaries/containers/assets), test (unit/integration/e2e), and deploy sub-sections "+
-				"with sensible defaults. Pass the existing YAML config and an app description."),
+				"with sensible defaults."),
 			mcp.WithString("yaml_content",
-				mcp.Description("Existing workflow YAML config to analyze (optional, used to detect app type)"),
+				mcp.Description("Compatibility argument for existing workflow YAML, currently ignored; features are inferred from description"),
 			),
 			mcp.WithString("description",
 				mcp.Required(),
