@@ -14,11 +14,12 @@ with explicit coverage limits. No service, dashboard or orchestration platform.
 ## Prerequisites and local setup
 
 Supply a trusted `wfctl` executable yourself. This package does not bundle,
-download or update it. The tested release is
-[v0.86.2](https://github.com/GoCodeAlone/workflow/releases/tag/v0.86.2).
+download or update it. Package 0.1.1's maintainer smoke was tested with the Darwin
+arm64 assets from [v0.86.2](https://github.com/GoCodeAlone/workflow/releases/tag/v0.86.2)
+and [v0.87.0](https://github.com/GoCodeAlone/workflow/releases/tag/v0.87.0).
 Choose the asset for your OS/architecture and verify its checksum against that
 release's `checksums.txt` before using it. Follow the
-[public CLI setup guide](https://github.com/GoCodeAlone/workflow/blob/v0.86.2/docs/mcp.md).
+[public CLI setup guide](https://github.com/GoCodeAlone/workflow/blob/v0.87.0/docs/mcp.md).
 `wfctl version` should report the selected version. Other releases are untested;
 the skills discover tools dynamically and retain unknown version claims.
 
@@ -48,7 +49,7 @@ plugins; do not assume live inventory changes reload the server's type registry.
 
 | Surface | Package intent and verification status |
 |---|---|
-| Local Codex supporting the portable format | Codex CLI 0.163.0 loaded this package and public Autodev 6.6.3 together in a disposable offline home: all three skills registered and the host discovered 33 tools/5 resources from wfctl v0.86.2. Model-driven selection and complete prompt behavior **not yet tested**. |
+| Local Codex supporting the portable format | Historical package **0.1.0** probe: Codex CLI 0.163.0 loaded it and public Autodev 6.6.3 together in a disposable offline home; all three skills registered and the host discovered 33 tools/5 resources from wfctl v0.86.2. Package 0.1.1 has separate maintainer smoke evidence, with unchanged skills/MCP manifest; fresh host activation, model-driven selection and complete prompt behavior **not yet tested**. |
 | ChatGPT desktop with local execution/plugin support | Same intended package, subject to account/workspace features. Complete desktop activation **not yet tested**. |
 | Other Agent Plugins clients | Requires skills + stdio + both placeholders; no host certification claimed. |
 | ChatGPT browser, remote/cloud executor | Cannot directly run this local executable. No remote endpoint, tunnel or hosted bridge included. |
@@ -69,7 +70,7 @@ SHA256 if available, the supplied source commit/path, observed server version,
 tools/schemas used and separate check outcomes. Redaction/partial status and
 equivalence to original input are distinct. No aggregate deploy-ready badge.
 
-The real v0.86.2 interface differs from portions of its reference documentation:
+The tested interfaces differ from portions of the v0.86.2 reference documentation:
 
 - `get_module_schema` takes `module_type`; `get_step_schema` takes `step_type`.
 - `compat_check` takes `yaml_content`. It checks the running module/step registry;
@@ -118,7 +119,7 @@ validator and ECMA-regex adapter. From this directory, run:
 ```sh
 cd tests
 GOWORK=off go test -race ./...
-GOWORK=off go run . -wfctl /path/to/reviewed/wfctl -expect-version v0.86.2
+GOWORK=off go run . -wfctl /path/to/reviewed/wfctl -expect-version v0.87.0
 ```
 
 The smoke client uses only bundled public fixtures, launches the actual manifest command
@@ -126,6 +127,14 @@ with temporary plugin data/minimal environment, and emits safe summaries and
 digests. It tests positive/negative configs and known upstream false positives.
 It does not accept user YAML or read organization repositories/secrets. Missing
 executable/version/tools or protocol failures return a bounded failure category.
+Released-version matching remains strict; snapshots and source pseudo-versions
+are rejected. The client recognizes only the exact legacy plugin-deprecation
+notice and the exact Sonic Go 1.27 `encoding/json` fallback warning observed in
+v0.87.0. It reports symbolic stderr statuses (`empty`, `known_deprecation_only`,
+`known_sonic_fallback_only`, or `known_deprecation_and_sonic_fallback`) after
+fixture checks and successful child shutdown. Changed, extra or malformed
+diagnostics fail as `unexpected_stderr`; raw stderr is never included. Package
+0.1.0's smoke rejected that new warning; 0.1.1 adds this bounded classification.
 Fixture files use `.yaml.txt` because they include intentional failures and must
 stay outside the repository's recursive runnable `.yaml` example discovery.
 Unit-test doubles cover failures; only the real release run is MCP integration
