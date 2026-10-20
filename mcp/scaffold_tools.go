@@ -18,11 +18,12 @@ import (
 func (s *Server) registerScaffoldTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("scaffold_ci",
-			mcp.WithDescription("Generate a ci: YAML section for a workflow config based on the application type. "+
+			toolBehavior(true, false, false),
+			mcp.WithDescription("Generate a ci: YAML section using application features inferred from the description. "+
 				"Produces build (binaries/containers/assets), test (unit/integration/e2e), and deploy sub-sections "+
-				"with sensible defaults. Pass the existing YAML config and an app description."),
+				"with sensible defaults."),
 			mcp.WithString("yaml_content",
-				mcp.Description("Existing workflow YAML config to analyze (optional, used to detect app type)"),
+				mcp.Description("Compatibility argument for existing workflow YAML, currently ignored; features are inferred from description"),
 			),
 			mcp.WithString("description",
 				mcp.Required(),
@@ -32,6 +33,7 @@ func (s *Server) registerScaffoldTools() {
 				mcp.Description("Go binary entrypoint path (default: ./cmd/server)"),
 			),
 			mcp.WithArray("environments",
+				mcp.WithStringItems(),
 				mcp.Description("Deployment environment names to include (e.g. ['staging', 'production'])"),
 			),
 		),
@@ -40,6 +42,7 @@ func (s *Server) registerScaffoldTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("scaffold_environment",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Generate an environments: YAML section for a workflow config. "+
 				"Creates per-environment configuration blocks with provider, region, env vars, "+
 				"secrets provider, and exposure method (tailscale, cloudflare, port-forward)."),
@@ -48,6 +51,7 @@ func (s *Server) registerScaffoldTools() {
 				mcp.Description("Deployment provider: docker, kubernetes, aws-ecs, gcp-cloudrun, digitalocean"),
 			),
 			mcp.WithArray("environments",
+				mcp.WithStringItems(),
 				mcp.Description("Environment names to generate (default: ['local', 'staging', 'production'])"),
 			),
 			mcp.WithString("secrets_provider",
@@ -62,6 +66,7 @@ func (s *Server) registerScaffoldTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("scaffold_infra",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Generate an infra: YAML section by analyzing the workflow config's modules. "+
 				"Detects database, cache, and messaging module types and suggests matching cloud resources "+
 				"(e.g. database.postgres → RDS instance, cache.redis → ElastiCache cluster)."),
@@ -82,6 +87,7 @@ func (s *Server) registerScaffoldTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("detect_secrets",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Scan a workflow YAML config and return a list of secret candidates: "+
 				"fields whose names (dsn, apiKey, token, password, signingKey, clientSecret) or values "+
 				"(${...} env var references) indicate secrets that should be managed externally."),
@@ -95,6 +101,7 @@ func (s *Server) registerScaffoldTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("detect_ports",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Scan a workflow YAML config and return a list of ports used by the application. "+
 				"Checks http.server, grpc.server, and other network-listening module configs."),
 			mcp.WithString("yaml_content",
@@ -107,6 +114,7 @@ func (s *Server) registerScaffoldTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("generate_bootstrap",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Generate a CI platform bootstrap file that calls wfctl ci run. "+
 				"Reads the ci.deploy.environments section from the config to create per-environment "+
 				"deploy jobs. Supports github-actions and gitlab-ci platforms."),
@@ -124,6 +132,7 @@ func (s *Server) registerScaffoldTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("detect_infra_needs",
+			toolBehavior(true, false, true),
 			mcp.WithDescription("Analyze a workflow YAML config's modules and suggest the infrastructure "+
 				"components needed to run the application in production. Returns a structured list of "+
 				"infrastructure requirements (databases, caches, message brokers, storage buckets) "+
