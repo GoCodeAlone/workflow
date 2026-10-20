@@ -5,9 +5,9 @@ library uses the same tool registrations and SDK input validation. An embedder
 that attaches an engine with `WithEngine` / `WithInProcessEngine` additionally
 exposes `run_workflow` (34 tools). It is absent from the default CLI.
 
-The corrected validation, error and annotation contracts describe this source
-change. Released `v0.86.2` predates them; a release download or `go install
-...@latest` may differ until a Workflow release includes the corrections. Match
+The corrected tool contracts and July protocol support describe this source
+build. Released `v0.86.2` predates them; a release download or `go install
+...@latest` may differ until a Workflow release includes the changes. Match
 claims to the executable's version/source, not only this reference.
 
 Use live `tools/list` for this executable's complete schemas and descriptions;
@@ -120,6 +120,26 @@ The engine-only tool reports `success:false` with `isError:true` when its provid
 fails; successful execution reports `success:true`. It can have arbitrary
 external or destructive effects, so an embedder must supply authorization.
 
+## Protocol envelopes and cache hints
+
+With mcp-go v1.3.0, the CLI supports legacy initialization for `2024-11-05`,
+`2025-03-26`, `2025-06-18` and `2025-11-25`, plus the stateless `2026-07-28`
+model. July uses `server/discover` without initialization; every request supplies
+`io.modelcontextprotocol/protocolVersion` and
+`io.modelcontextprotocol/clientCapabilities` in `params._meta`. Capabilities are
+per request, not inherited from an earlier call. See the
+[tested request example](mcp.md#catalog-refresh-and-protocol-coverage).
+
+Ordinary July results add `resultType:"complete"` and Workflow identity metadata.
+This completion label does not change the tool's `isError` or analytical report
+semantics. `server/discover`, `tools/list`, `resources/list`,
+`resources/templates/list` and `resources/read` results advertise `ttlMs:0` and
+`cacheScope:"private"`; resource templates are currently an empty inventory.
+The cache fields are required protocol metadata, while their zero/private values
+are this server's local-data policy. They do not sanitize returned content.
+Legacy responses retain their earlier shape. Text content remains supported;
+this change does not add `structuredContent` or output schemas.
+
 ## Metadata and input boundaries
 
 All 33 default tools explicitly advertise `readOnlyHint:true` and
@@ -138,6 +158,14 @@ redaction guarantee exists. Basic string-loaded config analysis does not resolve
 imports. CI analysis does use file/import context and can read local references.
 Manifest discovery proves metadata availability, not executable/plugin or runtime
 acceptance. See [server setup and limits](mcp.md).
+
+Further input/output resource budgets, filesystem confinement, rate limiting and
+general redaction remain deferred. The tests cover specific schema, canary,
+cancellation and cache boundaries; they do not certify generic security
+compliance. OpenAI's directory annotation policy is separate from protocol
+compatibility. Neither implies directory eligibility, host activation or support
+for optional hosted transport, authentication, tasks or UI features; this change
+also leaves Compute integration unchanged.
 
 ## Separate application integrations
 
