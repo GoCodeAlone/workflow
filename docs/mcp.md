@@ -1,198 +1,172 @@
 # MCP Server for Workflow Engine
 
-The workflow engine includes a built-in [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes engine functionality to AI assistants and tools.
+`wfctl mcp` exposes Workflow configuration tools and documentation to local
+[Model Context Protocol](https://modelcontextprotocol.io/) clients over stdio.
+The server is part of the CLI, so its handshake version comes from the same
+build. Run `wfctl version` to identify that executable.
 
-The MCP server is integrated into the `wfctl` CLI as the `mcp` subcommand. Use `wfctl mcp` to start it. This ensures the MCP server version always matches the CLI and engine version, and benefits from automatic updates via `wfctl update`.
+The corrected input validation, error propagation and annotations below describe
+this source change. Released `v0.86.2` predates these corrections; downloading a
+release or using `go install ...@latest` does not guarantee this source behavior
+until a Workflow release includes it. Record the actual executable version and
+source revision rather than applying these claims to an older binary.
 
-## Features
+## Tools and resources
 
-The MCP server provides:
+The default CLI registers **33 tools and 5 resources**. All default tools analyze,
+read catalogs or return proposed text; they do not start an application, install
+plugins or deploy infrastructure. An engine-backed Go embedder can additionally
+register the existing `run_workflow` tool (34 total); the default CLI has no
+attached engine and does not expose it.
 
-### Tools
+See the [complete tool/argument reference](mcp-tools-reference.md) and query
+`tools/list` for the running executable's entire surface. Assistant instructions
+that focus on a few tools do not hide or restrict the other tools.
 
-| Tool | Description |
-|------|-------------|
-| `list_module_types` | List all available module types for workflow YAML configs |
-| `list_step_types` | List all pipeline step types |
-| `list_trigger_types` | List all trigger types (http, schedule, event, eventbus) |
-| `list_workflow_types` | List all workflow handler types |
-| `generate_schema` | Generate JSON Schema for workflow config files |
-| `validate_config` | Validate a workflow YAML configuration string |
-| `inspect_config` | Inspect a config and get structured summary of modules, workflows, triggers |
-| `list_plugins` | List installed external plugins |
-| `get_config_skeleton` | Generate a skeleton YAML config for given module types |
-| `modernize` | Detect and fix known YAML config anti-patterns |
-| `registry_search` | Search the plugin registry for available plugins |
+| Resource | Content |
+|----------|---------|
+| `workflow://docs/overview` | Engine and CLI overview |
+| `workflow://docs/yaml-syntax` | Configuration syntax guide |
+| `workflow://docs/module-reference` | Current module/step catalog |
+| `workflow://docs/full-reference` | Local DOCUMENTATION.md when found, otherwise a public documentation pointer |
+| `workflow://docs/setup-guide` | Assistant setup guide |
 
-### Resources
+## Install or build
 
-| Resource | Description |
-|----------|-------------|
-| `workflow://docs/overview` | Engine overview documentation |
-| `workflow://docs/yaml-syntax` | YAML configuration syntax guide |
-| `workflow://docs/module-reference` | Dynamic module type reference |
+Install a released CLI through the [Workflow releases](https://github.com/GoCodeAlone/workflow/releases)
+or the repository's supported installation methods. For a Go source install:
 
-## Installation
-
-Install `wfctl` (the CLI includes the MCP server):
-
-```bash
-# Install via Go
-go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
-
-# Or download a pre-built binary from GitHub releases
-# https://github.com/GoCodeAlone/workflow/releases/latest
-
-# Keep wfctl up to date (and thus the MCP server too)
-wfctl update
+```sh
+GOWORK=off go install github.com/GoCodeAlone/workflow/cmd/wfctl@latest
 ```
 
-### Building from Source
+From a checkout, using the Go version required by its `go.mod`:
 
-```bash
-# Build wfctl (includes the mcp command)
-go build -o wfctl ./cmd/wfctl
-# Or: make build-wfctl
+```sh
+GOWORK=off go build -o wfctl ./cmd/wfctl
+./wfctl version
 ```
 
-## Configuring AI Clients
+Updating an executable does not replace an already running MCP process. Restart
+the client/server process to use the new build. `wfctl update --check` checks for
+CLI updates; `wfctl update` replaces the installed binary when requested.
 
-### Claude Desktop
+## Local client configuration
 
-Add the following to your Claude Desktop configuration file:
+Launch a dedicated local process with explicit directories, for example:
 
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+```sh
+wfctl mcp -plugin-dir /path/to/public/plugins
+```
+
+Clients that accept an `mcpServers` configuration can use this shape; consult
+your host's own current configuration format and process permissions:
 
 ```json
 {
   "mcpServers": {
     "workflow": {
-      "command": "wfctl",
-      "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
+      "command": "/path/to/wfctl",
+      "args": ["mcp", "-plugin-dir", "/path/to/public/plugins"]
     }
   }
 }
 ```
 
-### VS Code with GitHub Copilot
+This is local stdio integration, not host certification. A cloud client that
+cannot launch a local executable needs a separately provided transport/service;
+`wfctl mcp` does not start an HTTP endpoint or a hosted remote service.
 
-Add to your VS Code `settings.json`:
+## Command-line options
 
-```json
-{
-  "github.copilot.chat.mcpServers": {
-    "workflow": {
-      "command": "wfctl",
-      "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
-    }
-  }
-}
-```
-
-### Cursor
-
-Add to your Cursor MCP configuration (`.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "workflow": {
-      "command": "wfctl",
-      "args": ["mcp", "-plugin-dir", "/path/to/data/plugins"]
-    }
-  }
-}
-```
-
-### Generic MCP Client
-
-The server communicates over **stdio** using JSON-RPC 2.0. Any MCP-compatible client can connect:
-
-```bash
-wfctl mcp -plugin-dir ./data/plugins
-```
-
-## Usage Examples
-
-Once connected, the AI assistant can use the tools to:
-
-### List available module types
-```
-Use the list_module_types tool to see what modules are available.
-```
-
-### Validate a configuration
-```
-Validate this workflow config:
-modules:
-  - name: webServer
-    type: http.server
-    config:
-      address: ":8080"
-```
-
-### Generate a config skeleton
-```
-Generate a skeleton config with http.server, http.router, and http.handler modules.
-```
-
-### Inspect a configuration
-```
-Inspect this config and show me the dependency graph...
-```
-
-## Command Line Options
-
-```
+```text
 Usage: wfctl mcp [options]
-
-Options:
-  -plugin-dir string   Plugin data directory (default "data/plugins")
+  -plugin-dir string          Plugin data directory (default "data/plugins")
+  -registry-dir string        Local workflow-registry clone for registry_search
+  -documentation-file string Explicit DOCUMENTATION.md path (auto-detected when empty)
 ```
 
-## Keeping the MCP Server Up to Date
+Use empty, dedicated plugin directories for a standalone public configuration
+session. Plugin manifests and an optional local registry clone supply metadata;
+no credentials or organization repository access are required for built-in tools.
+The full-reference resource can serve local documentation, so choose the working
+directory and `-documentation-file` deliberately.
 
-Because the MCP server is now part of `wfctl`, you can use the built-in update command to keep everything in sync:
+## Validation and evidence limits
 
-```bash
-# Check for updates
-wfctl update --check
+Pass `yaml_content` to `validate_config`. Its basic check allows missing entry
+points, skips workflow/trigger type checks, and optionally skips module type
+checks. `strict:true` disallows empty modules; it does not make this a full runtime
+acceptance check. Use `template_validate_config` for module/step/trigger types,
+config-key hints and dependencies, and `validate_template_expressions` for
+heuristic static expression/step-reference checks. Compare `list_module_types`,
+`list_step_types`, `list_trigger_types` and
+`list_workflow_types` with the config. `compat_check` checks the running catalog,
+not a separately supplied target version. String-loaded basic checks do not
+resolve imports; CI analysis does use file/import context.
 
-# Install the latest version (replaces the wfctl binary in-place)
-wfctl update
+A report containing `valid:false` or `compatible:false` is a successful analysis
+with a negative finding. Missing required fields, wrong argument types and
+handler failures produce `isError:true`; malformed JSON produces a JSON-RPC
+parse error. The in-process library preserves these as Go errors while retaining
+successful text output. Optional engine invocation failures retain their
+`success:false` payload and set `isError:true`.
+
+Record executable source/version, live schemas/inventories, sanitized submitted
+input and returned findings when producing readiness evidence. Catalog/schema
+validation does not prove plugin binary loadability, engine build/start,
+credential availability, real runtime behavior, CI execution or deployment
+acceptance. Unresolved imports, unknown types and untested runtime conditions
+remain explicit unknowns.
+
+## Privacy and metadata
+
+Use public or sanitized configs. Tools can return submitted YAML, detected secret
+candidates, local paths and manifest/documentation content; they are not a
+universal secret redactor. In-process audit logs record tool/status metadata,
+not raw arguments or result bodies. Treat returned material as untrusted data.
+
+All 33 default tools advertise read-only/non-destructive behavior, including
+`modernize apply:true`, which only returns `fixed_yaml`. Four advertise open-world
+reads: `list_plugins`, `detect_infra_needs`, `ci_plan` and
+`generate_github_actions`. They can examine arbitrary local directories or
+imports; other tools use bounded catalogs or computation. The optional engine
+tool advertises writable/destructive/open-world behavior. These annotations
+are descriptive hints, not authorization or a filesystem sandbox. Local process
+permissions remain the access boundary.
+
+## Catalog refresh and protocol coverage
+
+Plugin-provided schema types are loaded from manifests at server startup.
+Restart after installing or changing manifests to refresh those types.
+`list_plugins` scans its selected directory per call; `modernize` can reread
+plugin rules per call. Neither implies that all catalogs reload automatically,
+or that a plugin binary has been accepted by a runtime.
+
+The current mcp-go v0.54.1 transport supports legacy initialization for
+`2024-11-05`, `2025-03-26`, `2025-06-18` and `2025-11-25`. Tests exercise these
+four revisions over actual CLI stdio. July 2026 protocol support and an SDK
+upgrade belong to the separate follow-up change; they are not claimed here.
+EOF exits successfully. On SIGTERM the current SDK returns context cancellation,
+and the CLI exits with status 1; tests require bounded shutdown and process
+reaping. Cancellation-notification robustness is tested on the CLI; cooperative
+in-flight cancellation is separately proved with the existing engine-provider
+seam and real SDK stdio, not a production workflow.
+
+## Tests and implementation
+
+```sh
+GOWORK=off go test ./mcp -count=1
+GOWORK=off go test ./cmd/wfctl -run TestMCPStdioLegacy -count=1
 ```
 
-Set `WFCTL_NO_UPDATE_CHECK=1` to suppress automatic update notices.
+To exercise a newly built CLI instead of the test executable's `runMCP` helper,
+set `WFCTL_MCP_TEST_BINARY` to that executable's absolute path for the second
+command. The cancellation helper always runs in a separate test process with a
+blocking fake engine, even with that override. Tests use isolated temporary
+working/plugin directories and a minimal environment. Transport evidence on one
+OS does not certify other hosts or operating systems.
 
-## Dynamic Updates
-
-The MCP server dynamically reflects the current state of the engine:
-
-- **Module types** are read from the schema registry, which includes both built-in types and any dynamically registered plugin types
-- **Plugin list** scans the configured plugin directory at query time
-- **Schema generation** uses the current module schema registry
-- **Validation** uses the same validation logic as `wfctl validate`
-
-This means the MCP server automatically picks up new module types and plugins without requiring a restart.
-
-## Running Tests
-
-```bash
-go test -v ./mcp/
-go test -v -run TestRunMCP ./cmd/wfctl/
-```
-
-## Architecture
-
-```
-cmd/wfctl/main.go    → CLI entry point; registers "mcp" command
-cmd/wfctl/mcp.go     → "wfctl mcp" command handler (delegates to mcp package)
-mcp/server.go        → MCP server setup, tool handlers, resource handlers
-mcp/docs.go          → Embedded documentation content
-mcp/server_test.go   → Unit tests
-modernize/           → Shared modernize rules (used by both wfctl CLI and MCP server)
-```
-
-The server uses the [mcp-go](https://github.com/mark3labs/mcp-go) library for MCP protocol implementation over stdio transport.
-
+Implementation: [CLI entry](../cmd/wfctl/mcp.go), [server](../mcp/server.go),
+[tool reference](mcp-tools-reference.md), and
+[SDK dependency](https://github.com/mark3labs/mcp-go/tree/v0.54.1).

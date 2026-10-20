@@ -162,13 +162,22 @@ func (s *Server) ServeStdio() error {
 	return server.ServeStdio(s.mcpServer)
 }
 
+// toolBehavior records effects explicitly without changing the SDK's idempotence hint.
+func toolBehavior(readOnly, destructive, openWorld bool) mcp.ToolOption {
+	return func(tool *mcp.Tool) {
+		mcp.WithReadOnlyHintAnnotation(readOnly)(tool)
+		mcp.WithDestructiveHintAnnotation(destructive)(tool)
+		mcp.WithOpenWorldHintAnnotation(openWorld)(tool)
+	}
+}
+
 // registerTools registers all workflow engine tools with the MCP server.
 func (s *Server) registerTools() {
 	// list_module_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_module_types",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("List all available workflow module types that can be used in the 'modules' section of a workflow YAML config. Returns built-in types plus types from installed plugins (loaded from plugin_dir at server startup)."),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListModuleTypes,
 	)
@@ -176,8 +185,8 @@ func (s *Server) registerTools() {
 	// list_step_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_step_types",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("List all available pipeline step types that can be used in pipeline definitions. Returns built-in steps plus steps from installed plugins (loaded from plugin_dir at server startup)."),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListStepTypes,
 	)
@@ -185,8 +194,8 @@ func (s *Server) registerTools() {
 	// list_trigger_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_trigger_types",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("List all available trigger types (e.g., http, schedule, event, eventbus) that can start workflow execution. Includes types from installed plugins."),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListTriggerTypes,
 	)
@@ -194,8 +203,8 @@ func (s *Server) registerTools() {
 	// list_workflow_types
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_types",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("List all available workflow handler types (e.g., http, messaging, statemachine, scheduler, integration, event, pipeline) that define how workflows process work. Includes types from installed plugins."),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListWorkflowTypes,
 	)
@@ -203,8 +212,8 @@ func (s *Server) registerTools() {
 	// generate_schema
 	s.mcpServer.AddTool(
 		mcp.NewTool("generate_schema",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Generate the JSON Schema for workflow configuration YAML files. This schema describes all valid fields, module types, and structure for authoring workflow configs."),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGenerateSchema,
 	)
@@ -212,6 +221,7 @@ func (s *Server) registerTools() {
 	// validate_config
 	s.mcpServer.AddTool(
 		mcp.NewTool("validate_config",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Validate a workflow YAML configuration string. Returns validation results including any errors found. Use this to check if a YAML config is well-formed and uses valid module types."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
@@ -230,6 +240,7 @@ func (s *Server) registerTools() {
 	// inspect_config
 	s.mcpServer.AddTool(
 		mcp.NewTool("inspect_config",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Inspect a workflow YAML configuration and return a structured summary of its modules, workflows, triggers, pipelines, and dependency graph."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
@@ -242,11 +253,11 @@ func (s *Server) registerTools() {
 	// list_plugins
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_plugins",
+			toolBehavior(true, false, true),
 			mcp.WithDescription("List installed external plugins from the plugin directory."),
 			mcp.WithString("data_dir",
 				mcp.Description("Plugin data directory. Defaults to 'data/plugins'"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleListPlugins,
 	)
@@ -254,6 +265,7 @@ func (s *Server) registerTools() {
 	// get_config_skeleton
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_config_skeleton",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Generate a skeleton/template workflow YAML configuration for a given set of module types. Useful for bootstrapping new workflow configs."),
 			mcp.WithArray("module_types",
 				mcp.Required(),
@@ -268,6 +280,7 @@ func (s *Server) registerTools() {
 	if s.engine != nil {
 		s.mcpServer.AddTool(
 			mcp.NewTool("run_workflow",
+				toolBehavior(false, true, true),
 				mcp.WithDescription("Trigger a workflow execution on the attached engine. Requires the server to be started with an engine (WithEngine option). "+
 					"Provide the workflow type, action, and optional data payload."),
 				mcp.WithString("workflow_type",

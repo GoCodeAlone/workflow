@@ -1,395 +1,148 @@
 # MCP Tools Reference
 
-Complete reference for all MCP tools available through `wfctl mcp` and the
-in-process MCP library. Tools are organized by namespace.
-
-## wfctl Tools
-
-### Config Validation
-
-#### `validate_config`
-
-Validate a workflow YAML configuration string.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `yaml_content` | string | yes | YAML config content to validate |
-| `skip_unknown_types` | bool | no | Skip unknown module/step type errors |
-| `strict` | bool | no | Fail on any warning |
-
-**Example:**
-```json
-{
-  "tool": "validate_config",
-  "arguments": {
-    "yaml_content": "modules:\n  - name: server\n    type: http.server\n    config:\n      address: ':8080'\n"
-  }
-}
-```
-
-**Returns:** Validation result with errors and warnings.
-
----
-
-#### `template_validate_config`
-
-Validate a workflow config that uses template expressions.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | string | yes | YAML config with template expressions |
-| `context` | object | no | Template context variables for expression evaluation |
-
----
-
-#### `inspect_config`
-
-Inspect a config and get a structured summary.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `yaml_content` | string | yes | YAML config content |
-
-**Returns:** Structured summary with module names/types, workflow definitions, pipeline triggers, step counts.
-
----
-
-#### `diff_configs`
-
-Compute a semantic diff between two workflow configs.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `old_yaml` | string | yes | Base config YAML |
-| `new_yaml` | string | yes | Proposed config YAML |
-
-**Returns:** Structured diff showing added/modified/removed modules, pipelines, and steps.
-
----
-
-#### `modernize`
-
-Detect and fix known YAML config anti-patterns.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | string | yes | YAML config to modernize |
-| `dry_run` | bool | no | Report fixes without applying them |
-
-**Returns:** Modernized config with fix descriptions.
-
----
-
-#### `compat_check`
-
-Check config compatibility with a specific engine version.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | string | yes | YAML config to check |
-| `target_version` | string | yes | Engine version to check against (e.g., `v0.5.0`) |
-
----
-
-### Type Discovery
-
-#### `list_module_types`
-
-List all available module types.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `category` | string | no | Filter by category (e.g., `database`, `http`, `agent`) |
-| `plugin` | string | no | Filter by plugin name |
-
----
-
-#### `list_step_types`
-
-List all pipeline step types.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `category` | string | no | Filter by category |
-
----
-
-#### `list_trigger_types`
-
-List all trigger types.
-
----
-
-#### `list_workflow_types`
-
-List all workflow handler types.
-
----
-
-#### `list_plugins`
-
-List installed external plugins.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `include_uninstalled` | bool | no | Include plugins from the registry that aren't installed |
-
----
-
-### Schema & Documentation
-
-#### `get_module_schema`
-
-Get the JSON Schema for a specific module type.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `type` | string | yes | Module type (e.g., `http.server`, `storage.sqlite`) |
-
-**Example:**
-```json
-{"tool": "get_module_schema", "arguments": {"type": "agent.guardrails"}}
-```
-
----
-
-#### `get_step_schema`
-
-Get the JSON Schema for a specific step type.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `type` | string | yes | Step type (e.g., `step.agent_execute`, `step.db_query`) |
-
----
-
-#### `get_config_skeleton`
-
-Generate a skeleton YAML config for given module types.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `module_types` | array | yes | List of module types to include |
-| `include_optional` | bool | no | Include optional config fields |
-
----
-
-#### `get_config_examples`
-
-Get example configs for a module or step type.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `type` | string | yes | Module or step type |
-
----
-
-#### `get_module_schema` / `get_step_schema` / `get_template_functions`
-
-Get the template functions available in workflow expressions.
-
----
-
-### Code Generation & Scaffolding
-
-#### `generate_schema`
-
-Generate a JSON Schema for workflow config files.
-
----
-
-#### `scaffold_ci`
-
-Generate a `ci:` YAML section (build / test / deploy sub-sections) for a workflow config, tailored to the app type.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `description` | string | yes | Short description of the application (e.g. 'Go API server with Postgres') |
-| `yaml_content` | string | no | Existing workflow config to analyze (used to detect app type) |
-| `binary_path` | string | no | Go binary entrypoint path (default: `./cmd/server`) |
-| `environments` | array | no | Deployment environment names to include (e.g. `['staging', 'production']`) |
-
----
-
-#### `ci_plan`
-
-Analyze a workflow config and emit a platform-neutral `CIPlan` JSON via the config-derived cigen engine (deploy phases with per-phase scoped secrets, migrations spec, smoke test, plan-guard, warnings). Render it with `generate_github_actions` or `wfctl ci generate --from-plan`.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `yaml_content` | string | yes | The YAML content of the workflow configuration |
-| `phase_config_yaml` | string | no | YAML of a prerequisite phase config (creates a two-phase plan) |
-| `wfctl_version` | string | no | wfctl version to pin in the plan (default: latest) |
-
----
-
-#### `generate_github_actions`
-
-Render CI/CD workflow YAML from a workflow config. The CI workflow (`files`/`ci_yaml`) is config-derived via the cigen engine (scoped secrets, migrations step, smoke job, plan-guard); also returns the `plan` (CIPlan) and legacy template-based `cd_yaml`/`release_yaml` (which use the `registry`/`platforms` inputs).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `yaml_content` | string | yes | The YAML content of the workflow configuration |
-| `registry` | string | no | Container registry for the legacy CD/release output (default: `ghcr.io`) |
-| `platforms` | string | no | Build platforms for the legacy CD/release output (default: `linux/amd64,linux/arm64`) |
-| `phase_config_yaml` | string | no | YAML of a prerequisite phase config (creates a two-phase plan) |
-| `wfctl_version` | string | no | wfctl version to pin in the plan (default: latest) |
-
----
-
-#### `scaffold_environment`
-
-Generate an `environments:` YAML section (per-environment provider, env vars, secrets provider, exposure method) for a workflow config.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `provider` | string | yes | Deployment provider: `docker`, `kubernetes`, `aws-ecs`, `gcp-cloudrun`, `digitalocean` |
-| `environments` | array | no | Environment names to generate (default: `['local', 'staging', 'production']`) |
-| `secrets_provider` | string | no | Secrets provider: `env`, `aws-secrets-manager`, `gcp-secret-manager`, `vault` (default: `env`) |
-| `exposure` | string | no | Exposure method for the `local` environment: `tailscale`, `cloudflare`, `port-forward` (default: `port-forward`) |
-
----
-
-#### `scaffold_infra`
-
-Generate an `infra:` YAML section by analyzing the config's modules (e.g. `database.postgres` → RDS, `cache.redis` → ElastiCache).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `yaml_content` | string | yes | Workflow YAML config content to analyze for infrastructure needs |
-| `provider` | string | yes | Cloud provider for resources: `aws`, `gcp`, `azure`, `digitalocean` |
-| `environment` | string | no | Environment name for resource sizing (default: `production`) |
-
----
-
-#### `generate_bootstrap`
-
-Generate a complete bootstrap config for a new workflow application.
-
----
-
-#### `contract_generate`
-
-Generate API contracts (OpenAPI spec) from a workflow config.
-
----
-
-### Introspection & Analysis
-
-#### `api_extract`
-
-Extract API endpoints from a workflow config.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | string | yes | YAML config |
-| `format` | string | no | Output format (`openapi`, `markdown`, `table`) |
-
----
-
-#### `detect_project_features`
-
-Detect features and capabilities used in a project.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | string | yes | YAML config |
-
----
-
-#### `detect_infra_needs`
-
-Analyze a config and detect infrastructure requirements.
-
----
-
-#### `detect_ports`
-
-Detect all ports used by a workflow config.
-
----
-
-#### `detect_secrets`
-
-Detect secret references in a workflow config.
-
----
-
-#### `infer_pipeline_context`
-
-Infer the runtime context available at each step in a pipeline.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `config` | string | yes | YAML config |
-| `pipeline` | string | yes | Pipeline name to analyze |
-
----
-
-#### `manifest_analyze`
-
-Analyze a plugin manifest for compatibility.
-
----
-
-#### `registry_search`
-
-Search the plugin registry for available plugins.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | yes | Search query |
-| `category` | string | no | Filter by category |
-
----
-
-#### `validate_template_expressions`
-
-Validate template expressions in a workflow config.
-
----
-
-## LSP Tools
-
-The Language Server Protocol (LSP) tools provide IDE-like diagnostics for
-workflow YAML files.
-
-#### `mcp:lsp:diagnose`
-
-Run diagnostics on a YAML workflow config.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `content` | string | yes | YAML content to diagnose |
-| `uri` | string | no | File URI for context |
-
-**Returns:** List of diagnostics with severity (error, warning, hint), line/column, and message.
-
----
-
-#### `mcp:lsp:complete`
-
-Get completion suggestions at a position in a YAML file.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `content` | string | yes | YAML content |
-| `line` | int | yes | 0-indexed line number |
-| `character` | int | yes | 0-indexed character position |
-
----
-
-#### `mcp:lsp:hover`
-
-Get hover documentation at a position in a YAML file.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `content` | string | yes | YAML content |
-| `line` | int | yes | 0-indexed line number |
-| `character` | int | yes | 0-indexed character position |
-
----
+`wfctl mcp` exposes **33 tools and 5 resources** over local stdio. The in-process
+library uses the same tool registrations and SDK input validation. An embedder
+that attaches an engine with `WithEngine` / `WithInProcessEngine` additionally
+exposes `run_workflow` (34 tools). It is absent from the default CLI.
+
+The corrected validation, error and annotation contracts describe this source
+change. Released `v0.86.2` predates them; a release download or `go install
+...@latest` may differ until a Workflow release includes the corrections. Match
+claims to the executable's version/source, not only this reference.
+
+Use live `tools/list` for this executable's complete schemas and descriptions;
+this table lists every registered argument. `string[]` means an array containing
+only strings. Optional fields may be omitted; a supplied value must have its
+advertised type. Extra top-level argument fields currently remain permitted,
+but undocumented names do not select alternate behavior.
+
+## Built-in tool inventory
+
+| Tool | Required arguments | Optional arguments | Purpose |
+|------|--------------------|--------------------|---------|
+| `list_module_types` | — | — | Available module metadata. |
+| `list_step_types` | — | — | Available pipeline step metadata. |
+| `list_trigger_types` | — | — | Available trigger metadata. |
+| `list_workflow_types` | — | — | Available workflow-handler metadata. |
+| `generate_schema` | — | — | Workflow configuration JSON Schema. |
+| `validate_config` | `yaml_content: string` | `strict: boolean`, `skip_unknown_types: boolean` | Basic configuration validation report. |
+| `inspect_config` | `yaml_content: string` | — | Modules, dependencies, workflows, triggers and pipeline summary. |
+| `list_plugins` | — | `data_dir: string` | Installed plugin manifests; data_dir overrides the startup catalog path. |
+| `get_config_skeleton` | `module_types: string[]` | — | Skeleton YAML for requested module types. |
+| `run_workflow` | `workflow_type: string`, `action: string` | `data: object` | Conditional engine execution; absent from wfctl mcp. |
+| `get_module_schema` | `module_type: string` | — | Module config fields and example. |
+| `get_step_schema` | `step_type: string` | — | Step config keys and example. |
+| `get_template_functions` | — | — | Template function catalog. |
+| `validate_template_expressions` | `yaml_content: string` | — | Static template-reference diagnostics. |
+| `infer_pipeline_context` | `yaml_content: string`, `pipeline_name: string` | `after_step: string`, `openapi_spec: string` | Static context inferred before/after a pipeline step. |
+| `get_config_examples` | — | `name: string` | List examples, or return one by name. |
+| `api_extract` | `yaml_content: string` | `title: string`, `version: string`, `include_schemas: boolean` | Extracted OpenAPI 3.0 specification. |
+| `diff_configs` | `old_yaml: string`, `new_yaml: string` | `check_breaking: boolean` | Semantic change and breaking-change report. |
+| `manifest_analyze` | `yaml_content: string` | `name: string` | Application deployment manifest inferred from workflow YAML. |
+| `contract_generate` | `yaml_content: string` | `baseline_json: string` | API contract snapshot; optional baseline comparison. |
+| `compat_check` | `yaml_content: string` | — | Module/step compatibility with this server’s catalog. |
+| `template_validate_config` | `yaml_content: string` | `strict: boolean` | Module/step/trigger types, config-key hints and dependency diagnostics. |
+| `generate_github_actions` | `yaml_content: string` | `registry: string`, `platforms: string`, `phase_config_yaml: string`, `wfctl_version: string` | Config-derived CI plan and GitHub Actions files, plus legacy CD/release output. |
+| `ci_plan` | `yaml_content: string` | `phase_config_yaml: string`, `wfctl_version: string` | Config-derived platform-neutral CIPlan. |
+| `detect_project_features` | `yaml_content: string` | — | Application feature summary. |
+| `modernize` | `yaml_content: string` | `apply: boolean`, `rules: string`, `exclude_rules: string` | Findings and optional fixed_yaml returned in memory. |
+| `registry_search` | — | `query: string`, `type: string`, `tier: string`, `include_private: boolean` | Search a configured local workflow-registry clone. |
+| `scaffold_ci` | `description: string` | `yaml_content: string`, `binary_path: string`, `environments: string[]` | Proposed ci: section. |
+| `scaffold_environment` | `provider: string` | `environments: string[]`, `secrets_provider: string`, `exposure: string` | Proposed environments: section. |
+| `scaffold_infra` | `yaml_content: string`, `provider: string` | `environment: string` | Proposed infra: section. |
+| `detect_secrets` | `yaml_content: string` | — | Secret candidates and environment references; not secret removal. |
+| `detect_ports` | `yaml_content: string` | — | Application port inventory. |
+| `generate_bootstrap` | `yaml_content: string`, `platform: string` | — | CI bootstrap YAML invoking wfctl ci run. |
+| `detect_infra_needs` | `yaml_content: string` | `provider: string`, `plugins_dir: string` | Suggested infrastructure requirements; optionally reads plugin manifests. |
+
+## Behavior and defaults
+
+- `validate_config` defaults `strict:false` and `skip_unknown_types:false`.
+  Strict mode disallows an empty module list. The basic check permits absent
+  entry points and skips workflow/trigger type checks even with strict mode;
+  skipping unknown types also skips the module type check. It does not build or
+  start an engine. Use `template_validate_config` for deeper checks and compare
+  the module, step, trigger and workflow inventories explicitly.
+- `template_validate_config` defaults `strict:false`; strict mode treats its
+  warnings as failure. It checks module/step/trigger types, config-key hints and
+  dependencies; despite its name, it does not analyze template expressions.
+  Use `validate_template_expressions` for heuristic static template-expression
+  and step-reference checks. Neither tool evaluates templates at runtime.
+- `compat_check` checks the running server's catalog. It has no `target_version`
+  argument and does not prove that plugin binaries can load or an app can run.
+- `modernize` defaults `apply:false`. `apply:true` returns `fixed_yaml` when fixes
+  exist; it does not save a file. `rules` and `exclude_rules` are comma-separated
+  rule IDs. Plugin-declared rules can be read from the startup plugin directory.
+- `infer_pipeline_context` requires `pipeline_name`; omit `after_step` for initial
+  context. Its advertised `openapi_spec` field is currently unused by the
+  handler, so supplying it does not enrich the result.
+- `get_config_examples` lists examples when `name` is omitted. Named examples
+  come from the discovered `example/` catalog; this is not an arbitrary path
+  reader. Catalog contents depend on the server's local installation.
+- `api_extract` defaults its API `version` to `1.0.0` and `include_schemas:true`;
+  `title` comes from the config or `Workflow API`. There is no `format` argument.
+- `diff_configs` advertises `check_breaking`, but its current handler does not
+  read that field; breaking-change analysis is always included.
+  `contract_generate` consumes `baseline_json`, not an OpenAPI document, for
+  optional contract comparison.
+- `ci_plan` and `generate_github_actions` re-analyze the supplied config through
+  cigen. `phase_config_yaml` being nonempty selects a prerequisite phase's
+  logical path; its contents are not currently analyzed. `wfctl_version` defaults
+  to `latest`. The GitHub renderer returns `plan`, `files`, `ci_yaml` and legacy
+  CD/release fields. `registry` (`ghcr.io`) and `platforms`
+  (`linux/amd64,linux/arm64`) affect that legacy output. These tools do not consume
+  an edited CIPlan; use `wfctl ci generate --from-plan` for that CLI operation.
+- `scaffold_ci` requires a description; `binary_path` defaults to `./cmd/server`.
+  Its advertised optional `yaml_content` is currently unused by the handler;
+  application features are inferred from the description.
+  `scaffold_environment` defaults to local/staging/production environments,
+  `secrets_provider:env`, and `exposure:port-forward`. `scaffold_infra` defaults
+  its environment to production. These return proposed YAML without deploying.
+- `generate_bootstrap` accepts `platform:github-actions` or `gitlab-ci`; it
+  generates CI bootstrap text rather than an application or installed runner.
+- `detect_infra_needs` defaults its provider to `aws`; `plugins_dir` selects a
+  directory whose plugin manifests can contribute requirements.
+- `registry_search` reads the startup `-registry-dir` clone and defaults
+  `include_private:false`. `query`, `type` and `tier` are optional local filters;
+  no configured clone produces a tool error. It does not query a remote service.
+
+## Result and error contract
+
+Tools return MCP text content: either YAML/text or a JSON report encoded in the
+text field. Required-field/type violations and handler failures have
+`isError:true`. A parsed analysis reporting `valid:false` or `compatible:false`
+remains a successful tool invocation: inspect its report, not only `isError`.
+Malformed JSON produces a JSON-RPC parse error. The in-process adapter returns a
+nonnil Go error for protocol/tool failures and preserves successful text results,
+including analytical negatives. Audit logging records tool/status metadata only.
+
+The engine-only tool reports `success:false` with `isError:true` when its provider
+fails; successful execution reports `success:true`. It can have arbitrary
+external or destructive effects, so an embedder must supply authorization.
+
+## Metadata and input boundaries
+
+All 33 default tools explicitly advertise `readOnlyHint:true` and
+`destructiveHint:false`: analysis and generation do not persist customer changes.
+`modernize apply:true` is included. CI analysis uses temporary implementation
+files that are removed after use. `openWorldHint:true` applies to `list_plugins`,
+`detect_infra_needs`, `ci_plan` and `generate_github_actions`, which can inspect
+caller-selected local directories or file imports. Other tools use bounded local
+catalogs or in-memory computation and advertise `openWorldHint:false`.
+`run_workflow` advertises false/true/true for readOnly/destructive/openWorld.
+These hints are descriptive metadata, not an OS filesystem sandbox.
+
+Supply sanitized YAML and public/synthetic values. Results may repeat submitted
+configuration, paths, manifests and detected secret candidates; no general
+redaction guarantee exists. Basic string-loaded config analysis does not resolve
+imports. CI analysis does use file/import context and can read local references.
+Manifest discovery proves metadata availability, not executable/plugin or runtime
+acceptance. See [server setup and limits](mcp.md).
+
+## Separate application integrations
+
+The integrations below do not add tools to the default `wfctl mcp` inventory.
+LSP diagnostics/completion/hover are not registered by this stdio server.
 
 ## Workflow-Defined MCP Tools
 
@@ -456,46 +209,21 @@ modules:
       audit_tool_calls: true
 ```
 
-## In-Process vs External MCP Server
+## In-process and stdio use
 
-| Feature | In-Process | External (stdio/HTTP) |
-|---------|------------|----------------------|
-| Latency | <1ms | 5-50ms |
-| Setup | Zero (built-in) | Requires subprocess or HTTP server |
-| Tool access | All wfctl tools | All wfctl tools |
-| Security | Agent process boundary | Process isolation |
-| Multi-agent | Shared instance | Per-agent instances |
-| Use case | Self-improvement loops | IDE integration, Claude Desktop |
-
-### In-Process Usage (workflow-plugin-agent)
+`NewInProcessServer` provides the Go `MCPProvider` interface with sorted inventory
+methods and the same validated calls. `wfctl mcp` launches a separate local
+process over stdio; it does not start an HTTP server. Neither mode introduces
+an authentication or filesystem-isolation boundary by itself.
 
 ```go
-// In-process MCP server — no HTTP overhead
-mcp := mcp.NewInProcessServer(
-    mcp.WithInProcessPluginDir("/data/plugins"),
+provider := mcp.NewInProcessServer(
+    mcp.WithInProcessPluginDir("/path/to/public/plugins"),
     mcp.WithInProcessAuditLog(logger),
 )
-
-result, err := mcp.CallTool(ctx, "validate_config", map[string]any{
-    "config": proposedYAML,
+result, err := provider.CallTool(ctx, "validate_config", map[string]any{
+    "yaml_content": proposedYAML,
 })
 ```
 
-### External Usage (wfctl mcp)
-
-```bash
-# Start MCP server for Claude Desktop or other IDE
-wfctl mcp
-```
-
-Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-```json
-{
-  "mcpServers": {
-    "workflow": {
-      "command": "wfctl",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+For CLI launch options and generic client configuration, see [MCP server](mcp.md).

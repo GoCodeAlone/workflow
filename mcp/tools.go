@@ -21,6 +21,7 @@ func (s *Server) registerNewTools() {
 	// get_module_schema
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_module_schema",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Return the full configuration schema for a given module type. "+
 				"Includes description, config fields (key, type, description, required, default, options), "+
 				"inputs, outputs, and an example usage snippet."),
@@ -28,7 +29,6 @@ func (s *Server) registerNewTools() {
 				mcp.Required(),
 				mcp.Description("The module type string (e.g. 'http.server', 'messaging.broker')"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGetModuleSchema,
 	)
@@ -36,13 +36,13 @@ func (s *Server) registerNewTools() {
 	// get_step_schema
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_step_schema",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Return the schema for a given pipeline step type. "+
 				"Includes description, config keys with types and descriptions, and an example usage snippet."),
 			mcp.WithString("step_type",
 				mcp.Required(),
 				mcp.Description("The step type string (e.g. 'step.set', 'step.http_call')"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGetStepSchema,
 	)
@@ -50,9 +50,9 @@ func (s *Server) registerNewTools() {
 	// get_template_functions
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_template_functions",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Return the complete list of available Go template functions for pipeline templates. "+
 				"Each function includes its name, signature, description, and an example usage."),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGetTemplateFunctions,
 	)
@@ -60,6 +60,7 @@ func (s *Server) registerNewTools() {
 	// validate_template_expressions
 	s.mcpServer.AddTool(
 		mcp.NewTool("validate_template_expressions",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Validate template expressions ({{ ... }}) in a YAML pipeline config string. "+
 				"Checks for forward references, self-references, undefined step references, "+
 				"and hyphenated step name dot-access patterns that require index syntax."),
@@ -74,6 +75,7 @@ func (s *Server) registerNewTools() {
 	// infer_pipeline_context
 	s.mcpServer.AddTool(
 		mcp.NewTool("infer_pipeline_context",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Infer the available template variables at a specific point in a pipeline. "+
 				"Analyzes preceding step outputs to tell you what .steps.* fields are available, "+
 				"plus trigger, body, and meta context. Useful for authoring template expressions."),
@@ -91,7 +93,6 @@ func (s *Server) registerNewTools() {
 			mcp.WithString("openapi_spec",
 				mcp.Description("Optional OpenAPI 3.0 JSON/YAML spec to enrich request body schema context"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleInferPipelineContext,
 	)
@@ -99,13 +100,13 @@ func (s *Server) registerNewTools() {
 	// get_config_examples
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_config_examples",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("List and optionally return example workflow config files from the example/ directory. "+
 				"When called without a name, lists all available examples. "+
 				"When called with a name, returns the full content of that example."),
 			mcp.WithString("name",
 				mcp.Description("Name of a specific example to fetch (e.g. 'api-server-config'). Omit to list all examples."),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGetConfigExamples,
 	)

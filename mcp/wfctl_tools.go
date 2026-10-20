@@ -26,6 +26,7 @@ import (
 func (s *Server) registerWfctlTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("api_extract",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Extract an OpenAPI 3.0 specification from a workflow YAML config. "+
 				"Parses HTTP-triggered workflows and pipelines to produce a complete API spec "+
 				"with inferred request/response schemas."),
@@ -42,13 +43,13 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithBoolean("include_schemas",
 				mcp.Description("Attempt to infer request/response schemas from step types (default: true)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleAPIExtract,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("diff_configs",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Compare two workflow YAML configurations and report what changed. "+
 				"Detects added/removed/changed modules and pipelines, flags stateful module changes, "+
 				"and identifies breaking changes."),
@@ -63,13 +64,13 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithBoolean("check_breaking",
 				mcp.Description("Include breaking change detection for stateful modules (default: true)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleDiffConfigs,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("manifest_analyze",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Analyze a workflow YAML config and produce an infrastructure requirements manifest. "+
 				"Reports databases, services, event buses, storage, external APIs, ports, sidecars, "+
 				"and resource estimates (CPU, memory, disk)."),
@@ -80,13 +81,13 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithString("name",
 				mcp.Description("Override the manifest name (default: derived from config)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleManifestAnalyze,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("contract_generate",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Generate an API contract snapshot from a workflow config. "+
 				"Extracts endpoints, modules, step types, and event topics. "+
 				"Optionally compares against a baseline contract JSON to detect breaking changes."),
@@ -97,26 +98,26 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithString("baseline_json",
 				mcp.Description("Previous contract JSON for comparison (optional)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleContractGenerate,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("compat_check",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Check whether a workflow config is compatible with the current engine version. "+
 				"Reports which module and step types are available in the engine."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("The YAML content of the workflow configuration"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleCompatCheck,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("template_validate_config",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Deep validation of a workflow config against known module types, step types, "+
 				"trigger types, dependencies, and template expressions. More comprehensive than validate_config."),
 			mcp.WithString("yaml_content",
@@ -126,13 +127,13 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithBoolean("strict",
 				mcp.Description("Fail on warnings in addition to errors (default: false)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleTemplateValidateConfig,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("generate_github_actions",
+			toolBehavior(true, false, true),
 			mcp.WithDescription("Render CI/CD workflow YAML from a workflow config. The CI workflow (the 'files'/'ci_yaml' result) is config-derived via the cigen engine (analyze -> CIPlan -> render): required secrets scoped per deploy phase, a 'wfctl migrations up' step when ci.migrations is set, a health-check smoke job, plugin-install steps when plugins are used, and a plan-guard that fails on a replace/destroy - not a fixed template. Also returns the 'plan' (CIPlan) and legacy template-based 'cd_yaml'/'release_yaml' (these use the registry/platforms inputs). This tool re-analyzes the config on each call and renders GitHub Actions ONLY - it does NOT accept a pre-built/edited CIPlan. Use the ci_plan tool to preview the CIPlan; to render an edited plan or a GitLab CI workflow, use the wfctl CLI ('wfctl ci generate --from-plan' / '--platform gitlab_ci')."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
@@ -150,13 +151,13 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithString("wfctl_version",
 				mcp.Description("wfctl version to pin in the plan (default: latest)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleGenerateGithubActions,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("ci_plan",
+			toolBehavior(true, false, true),
 			mcp.WithDescription("Analyze a workflow YAML config and emit a platform-neutral CIPlan JSON using the config-derived cigen engine. "+
 				"The plan describes project name, wfctl version, deploy phases (with secrets scoped per phase), the secrets union, "+
 				"migrations spec, smoke test URL, plan guard, and warnings. "+
@@ -171,26 +172,26 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithString("wfctl_version",
 				mcp.Description("wfctl version to pin in the plan (default: latest)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleCIPlan,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("detect_project_features",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Analyze a workflow config to detect what features the project uses. "+
 				"Reports presence of UI, auth, database, plugins, HTTP, and lists all module types."),
 			mcp.WithString("yaml_content",
 				mcp.Required(),
 				mcp.Description("The YAML content of the workflow configuration"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleDetectProjectFeatures,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("modernize",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Detect and optionally fix known YAML config anti-patterns. "+
 				"Reports issues like hyphenated step names, template syntax in conditional fields, "+
 				"missing db_query mode, dot-access patterns, absolute dbPaths, empty routes, "+
@@ -210,13 +211,13 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithString("exclude_rules",
 				mcp.Description("Comma-separated list of rule IDs to skip"),
 			),
-			mcp.WithReadOnlyHintAnnotation(false),
 		),
 		s.handleModernize,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("registry_search",
+			toolBehavior(true, false, false),
 			mcp.WithDescription("Search the workflow plugin registry for available plugins. "+
 				"Returns plugin manifests matching the query, with capabilities, versions, and download information. "+
 				"Queries the local clone of the GoCodeAlone/workflow-registry repository."),
@@ -232,7 +233,6 @@ func (s *Server) registerWfctlTools() {
 			mcp.WithBoolean("include_private",
 				mcp.Description("Include private/proprietary plugins (default: false)"),
 			),
-			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		s.handleRegistrySearch,
 	)
