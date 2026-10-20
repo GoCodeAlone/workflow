@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -189,6 +191,23 @@ func TestKnownWarningDoesNotMaskChildExitFailure(t *testing.T) {
 	got, classificationErr := classifyStderr(stderr)
 	if classificationErr != nil || got != "known_sonic_fallback_only" {
 		t.Fatal("helper did not emit the known diagnostic")
+	}
+}
+
+func TestEscalatedExitZeroDoesNotPassShutdown(t *testing.T) {
+	c := helperClient(t, "term-zero")
+	select {
+	case ready := <-c.messages:
+		if object(ready)["ready"] != true {
+			t.Fatal("signal helper not ready")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("signal helper readiness timeout")
+	}
+	_, err := c.close()
+	wantFailure(t, err, "check_failed")
+	if c.cmd.ProcessState == nil || !c.cmd.ProcessState.Success() {
+		t.Fatal("helper did not handle SIGTERM with exit 0")
 	}
 }
 
@@ -397,6 +416,12 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, sonicFallback)
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		os.Exit(2)
+	case "term-zero":
+		terminated := make(chan os.Signal, 1)
+		signal.Notify(terminated, syscall.SIGTERM)
+		fmt.Fprintln(os.Stderr, sonicFallback)
+		fmt.Fprintln(os.Stdout, `{"ready":true}`)
+		<-terminated
 	case "launch-marker":
 		if err := os.WriteFile(os.Getenv("SMOKE_LAUNCH_MARKER"), []byte("launched"), 0600); err != nil {
 			os.Exit(2)

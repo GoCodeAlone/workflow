@@ -357,6 +357,7 @@ func (c *client) close() ([]byte, error) {
 			}
 		}
 		if !wait() {
+			c.closeErr = failure("check_failed")
 			_ = c.cmd.Process.Signal(syscall.SIGTERM)
 			if !wait() {
 				_ = c.cmd.Process.Kill()

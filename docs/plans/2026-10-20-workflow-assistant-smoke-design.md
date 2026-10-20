@@ -52,3 +52,7 @@ and fixture failures keep their earlier precedence. Forced termination also
 fails while cleanup still reaps the child and reader. Independent review found
 this necessary to enforce the chosen successful-shutdown boundary within Task 1's
 same helper/test files. The one-PR/one-task scope manifest and lock are unchanged.
+Spec review also identified a child that handles forced SIGTERM with exit 0;
+its genuine-child regression failed before correction. Record required signal
+escalation as `check_failed` regardless of final exit status, while retaining
+bounded cleanup and timeout precedence.
