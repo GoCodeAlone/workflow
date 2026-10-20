@@ -27,7 +27,7 @@
 | 1 | fix: enforce shared MCP tool contracts and metadata | Task 1, Task 2, Task 3 | fix/mcp-tool-contracts |
 | 2 | fix: support July 2026 MCP while preserving legacy stdio | Task 4, Task 5, Task 6 | fix/mcp-july-compatibility |
 
-**Status:** Locked 2026-10-19T23:39:01Z
+**Status:** Complete 2026-10-20T00:57:24Z
 
 PR 2 follows merged PR 1 (or is explicitly stacked for review); never silently collapse, drop or enlarge these PRs. Both begin draft. Source changes, branch creation, commits and publication remain future work pending the parent's execution decision under existing user authorization. Rebase/precedent inspection must preserve concurrent changes. Before implementation, independent adversarial review and design-to-plan alignment must pass and the owner must lock this manifest; this local draft itself is not a scope lock. No additional human approval gate is introduced.
 
