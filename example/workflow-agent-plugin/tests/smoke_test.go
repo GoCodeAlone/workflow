@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -195,6 +196,9 @@ func TestKnownWarningDoesNotMaskChildExitFailure(t *testing.T) {
 }
 
 func TestEscalatedExitZeroDoesNotPassShutdown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not support catching SIGTERM")
+	}
 	c := helperClient(t, "term-zero")
 	select {
 	case ready := <-c.messages:
