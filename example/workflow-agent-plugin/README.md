@@ -135,6 +135,8 @@ v0.87.0. It reports symbolic stderr statuses (`empty`, `known_deprecation_only`,
 fixture checks and successful child shutdown. Changed, extra or malformed
 diagnostics fail as `unexpected_stderr`; raw stderr is never included. Package
 0.1.0's smoke rejected that new warning; 0.1.1 adds this bounded classification.
+Stderr above the client's 1 MiB capture limit also fails, so truncation cannot
+hide an unknown suffix behind recognized notices.
 Fixture files use `.yaml.txt` because they include intentional failures and must
 stay outside the repository's recursive runnable `.yaml` example discovery.
 Unit-test doubles cover failures; only the real release run is MCP integration

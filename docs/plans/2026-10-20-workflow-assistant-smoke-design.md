@@ -56,3 +56,9 @@ Spec review also identified a child that handles forced SIGTERM with exit 0;
 its genuine-child regression failed before correction. Record required signal
 escalation as `check_failed` regardless of final exit status, while retaining
 bounded cleanup and timeout precedence.
+Quality review disproved another existing assumption: the bounded stderr read
+did not reject overflow, so an exact-known prefix of 1 MiB + 1 bytes hid an
+unknown suffix. A genuine-child canary test reproduced RED. Reject captured
+stderr above 1 MiB as bounded `unexpected_stderr` before classification, retaining
+earlier cleanup failures. This enforces Task 1's injected-output rejection in the
+same files; the manifest and lock remain unchanged.

@@ -39,6 +39,7 @@ var requiredTools = []string{"list_module_types", "list_step_types", "list_trigg
 
 const deprecation = "[DEPRECATED] requires.plugins[].version and requires.plugins[].source in app.yaml are deprecated. Run 'wfctl migrate plugins' to migrate to wfctl.yaml + .wfctl-lock.yaml."
 const sonicFallback = "WARNING: sonic/ast only supports (go1.17~1.26 and amd64 CPU) or (go1.20~1.26 and arm64 CPU), but your environment is not suitable and will fallback to encoding/json"
+const maxStderrBytes = 1024 * 1024
 
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
 func fileDigest(path string) (string, error) {
@@ -378,9 +379,11 @@ func (c *client) close() ([]byte, error) {
 			c.closeErr = failure("timeout")
 		}
 		if _, err := c.stderr.Seek(0, io.SeekStart); err == nil {
-			c.closedStderr, err = io.ReadAll(io.LimitReader(c.stderr, 1024*1024+1))
+			c.closedStderr, err = io.ReadAll(io.LimitReader(c.stderr, maxStderrBytes+1))
 			if err != nil {
 				c.closeErr = failure("internal_error")
+			} else if len(c.closedStderr) > maxStderrBytes && c.closeErr == nil {
+				c.closeErr = failure("unexpected_stderr")
 			}
 		} else {
 			c.closeErr = failure("internal_error")

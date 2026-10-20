@@ -215,6 +215,33 @@ func TestEscalatedExitZeroDoesNotPassShutdown(t *testing.T) {
 	}
 }
 
+func TestOversizedStderrIsRejectedWithoutEcho(t *testing.T) {
+	c := helperClient(t, "stderr-overflow")
+	select {
+	case ready := <-c.messages:
+		if object(ready)["ready"] != true {
+			t.Fatal("overflow helper not ready")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("overflow helper readiness timeout")
+	}
+	var out bytes.Buffer
+	status := mainWith(t.Context(), nil, &out, func(context.Context, options) (map[string]any, error) {
+		_, err := c.close()
+		return nil, err
+	})
+	var report map[string]any
+	if status != 1 || json.Unmarshal(out.Bytes(), &report) != nil || report["reason"] != "unexpected_stderr" {
+		t.Fatal("oversized stderr did not fail with a bounded category")
+	}
+	if strings.Contains(out.String(), "CANARY") || strings.Contains(out.String(), "WARNING") {
+		t.Fatal("raw stderr leaked")
+	}
+	if c.cmd.ProcessState == nil || !c.cmd.ProcessState.Success() {
+		t.Fatal("overflow helper did not exit cleanly")
+	}
+}
+
 func TestRealChildCanaryOutputIsSuppressed(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -426,6 +453,14 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, sonicFallback)
 		fmt.Fprintln(os.Stdout, `{"ready":true}`)
 		<-terminated
+	case "stderr-overflow":
+		knownPrefix := strings.TrimSuffix(strings.Repeat(deprecation+"\n", 28)+strings.Repeat(sonicFallback+"\n", 6326), "\n")
+		if len(knownPrefix) != 1024*1024+1 {
+			os.Exit(2)
+		}
+		fmt.Fprint(os.Stderr, knownPrefix+"\nSYNTHETIC_OVERFLOW_CANARY")
+		fmt.Fprintln(os.Stdout, `{"ready":true}`)
+		_, _ = io.Copy(io.Discard, os.Stdin)
 	case "launch-marker":
 		if err := os.WriteFile(os.Getenv("SMOKE_LAUNCH_MARKER"), []byte("launched"), 0600); err != nil {
 			os.Exit(2)
