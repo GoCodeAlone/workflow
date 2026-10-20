@@ -1,0 +1,15 @@
+# Known module with unknown workflow, trigger and pipeline step types.
+modules:
+  - name: web
+    type: http.server
+    config:
+      address: "127.0.0.1:0"
+workflows:
+  example-unknown-workflow: {}
+triggers:
+  example-unknown-trigger: {}
+pipelines:
+  check:
+    steps:
+      - name: absent
+        type: step.example_uninstalled

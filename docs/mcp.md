@@ -11,6 +11,10 @@ release or using `go install ...@latest` does not guarantee this source behavior
 until a Workflow release includes it. Record the actual executable version and
 source revision rather than applying these claims to an older binary.
 
+For a portable assistant package with configure, diagnose and readiness skills,
+see the [Workflow Assistant example](../example/workflow-agent-plugin/README.md).
+It connects directly to this MCP server and documents validation and host limits.
+
 ## Tools and resources
 
 The default CLI registers **33 tools and 5 resources**. All default tools analyze,
