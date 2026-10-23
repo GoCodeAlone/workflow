@@ -2,13 +2,12 @@
 package registrygithub
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
-	"sort"
+	"regexp"
+	"strings"
 
 	"github.com/GoCodeAlone/workflow/plugin/registry"
 )
@@ -84,129 +83,38 @@ func (g *GHCRProvider) Push(ctx registry.Context, cfg registry.ProviderConfig, i
 	return nil
 }
 
-// Prune deletes package versions beyond retention.keep_latest via the GH API.
+// Prune fails closed until whole-version deletion can protect deployed and
+// rollback digests and require approval of the exact deletion action.
 func (g *GHCRProvider) Prune(ctx registry.Context, cfg registry.ProviderConfig) error {
 	ret := cfg.Registry.Retention
-	if ret == nil || ret.KeepLatest <= 0 {
+	if ret == nil {
 		return nil
 	}
-
-	token, err := resolveToken(cfg)
-	if err != nil {
+	if _, _, err := parseGHCRPath(cfg.Registry.Path); err != nil {
 		return err
 	}
-
-	if ctx.DryRun() {
-		fmt.Fprintf(ctx.Out(), "[dry-run] GH API: list package versions for %s, keep latest %d\n",
-			cfg.Registry.Path, ret.KeepLatest)
-		return nil
+	if ret.KeepLatest <= 0 {
+		return fmt.Errorf("github registry %q: retention.keep_latest must be positive", cfg.Registry.Name)
 	}
-
-	// Derive org + package name from the registry path (ghcr.io/<org>/<package>).
-	org, pkg, err := parseGHCRPath(cfg.Registry.Path)
-	if err != nil {
-		return err
+	if ret.UntaggedTTL != "" {
+		return fmt.Errorf("github registry %q: retention.untagged_ttl is unsupported; whole-version deletion cannot enforce untagged age", cfg.Registry.Name)
 	}
-
-	versions, err := listPackageVersions(ctx, token, org, pkg)
-	if err != nil {
-		return fmt.Errorf("list versions for %s/%s: %w", org, pkg, err)
-	}
-
-	// Sort newest first by created_at (API returns ISO 8601 strings; lexicographic sort works).
-	sort.Slice(versions, func(i, j int) bool {
-		return versions[i].CreatedAt > versions[j].CreatedAt
-	})
-
-	for i, v := range versions {
-		if i < ret.KeepLatest {
-			continue
-		}
-		if err := deletePackageVersion(ctx, token, org, pkg, v.ID); err != nil {
-			fmt.Fprintf(ctx.Out(), "warn: failed to delete version %d: %v\n", v.ID, err)
-		} else {
-			fmt.Fprintf(ctx.Out(), "deleted version %d (%s)\n", v.ID, v.CreatedAt)
-		}
-	}
-	return nil
+	return fmt.Errorf("github registry %q: pruning disabled: deployed/rollback digests must be protected and explicit approval of each deletion is required; recoverability has not been established", cfg.Registry.Name)
 }
 
-type ghPackageVersion struct {
-	ID        int    `json:"id"`
-	CreatedAt string `json:"created_at"`
-}
-
-func listPackageVersions(ctx registry.Context, token, org, pkg string) ([]ghPackageVersion, error) {
-	url := fmt.Sprintf("https://api.github.com/orgs/%s/packages/container/%s/versions?per_page=100", org, pkg)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GH API %s: %s", resp.Status, body)
-	}
-
-	var versions []ghPackageVersion
-	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
-		return nil, err
-	}
-	return versions, nil
-}
-
-func deletePackageVersion(ctx registry.Context, token, org, pkg string, versionID int) error {
-	url := fmt.Sprintf("https://api.github.com/orgs/%s/packages/container/%s/versions/%d", org, pkg, versionID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("GH API DELETE %s: %s", resp.Status, body)
-	}
-	return nil
-}
+var pruneComponent = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$`)
 
 func parseGHCRPath(path string) (org, pkg string, err error) {
-	// path: ghcr.io/<org>/<package>  or  ghcr.io/<org> (pkg == org)
-	// Strip "ghcr.io/" prefix.
-	const prefix = "ghcr.io/"
-	rest := path
-	if len(path) > len(prefix) && path[:len(prefix)] == prefix {
-		rest = path[len(prefix):]
+	parts := strings.Split(path, "/")
+	if len(parts) < 3 || parts[0] != "ghcr.io" {
+		return "", "", fmt.Errorf("GHCR prune requires an exact ghcr.io/<org>/<package> path")
 	}
-	parts := splitTwo(rest, '/')
-	if len(parts) == 2 {
-		return parts[0], parts[1], nil
-	}
-	return rest, rest, nil
-}
-
-func splitTwo(s string, sep byte) []string {
-	for i := 0; i < len(s); i++ {
-		if s[i] == sep {
-			return []string{s[:i], s[i+1:]}
+	for _, part := range parts[1:] {
+		if !pruneComponent.MatchString(part) {
+			return "", "", fmt.Errorf("GHCR prune requires an exact ghcr.io/<org>/<package> path")
 		}
 	}
-	return []string{s}
+	return parts[1], strings.Join(parts[2:], "/"), nil
 }
 
 func resolveToken(cfg registry.ProviderConfig) (string, error) {
