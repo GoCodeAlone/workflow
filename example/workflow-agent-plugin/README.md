@@ -49,7 +49,7 @@ plugins; do not assume live inventory changes reload the server's type registry.
 
 | Surface | Package intent and verification status |
 |---|---|
-| Local Codex supporting the portable format | Historical package **0.1.0** probe: Codex CLI 0.163.0 loaded it and public Autodev 6.6.3 together in a disposable offline home; all three skills registered and the host discovered 33 tools/5 resources from wfctl v0.86.2. Package 0.1.1 has separate maintainer smoke evidence, with unchanged skills/MCP manifest; fresh host activation, model-driven selection and complete prompt behavior **not yet tested**. |
+| Local Codex supporting the portable format | Historical package **0.1.0** probe: Codex CLI 0.163.0 loaded it and public Autodev 6.6.3 together in a disposable offline home; all three skills registered and the host discovered 33 tools/5 resources from wfctl v0.86.2. Package 0.1.1 has separate real released-binary smoke evidence. A later 11-turn disposable backend/model run completed but failed clean acceptance: supporting-file reads were unavailable, three cases used out-of-scope tools, and WebSocket certificate errors fell back to HTTPS. This unreleased instruction patch has offline checks only; model behavior after the patch remains **untested**. |
 | ChatGPT desktop with local execution/plugin support | Same intended package, subject to account/workspace features. Complete desktop activation **not yet tested**. |
 | Other Agent Plugins clients | Requires skills + stdio + both placeholders; no host certification claimed. |
 | ChatGPT browser, remote/cloud executor | Cannot directly run this local executable. No remote endpoint, tunnel or hosted bridge included. |
@@ -98,9 +98,37 @@ adds no telemetry or external endpoint. Upstream wfctl and host policies apply.
 
 Skills restrict themselves to discovery/schema/config checks, treat config and
 tool text as untrusted data, and summarize errors without copying sensitive raw
-output. The complete upstream tool surface is still available under host
-permissions; skill instructions are not a security sandbox. Review the trusted
-CLI binary and host permissions before connecting.
+output. The portable manifest exposes the complete upstream tool surface unless the
+host separately filters it. Skill instructions are not a security sandbox or
+call-time authorization. Review the trusted CLI binary and host permissions
+before connecting. Each main skill carries the minimum boundary and stops
+Workflow MCP calls if the shared contract cannot be read; text-only reporting of
+unavailable checks is still possible.
+
+### Optional Codex tool policy
+
+On Codex versions supporting per-plugin MCP policy, an operator can restrict
+this plugin's server to the 14 in-scope tool names. The
+[host-local example](references/codex-tool-policy.toml.txt) belongs in a separately
+approved disposable profile's config.toml, never in mcp.json. Replace
+reviewed-marketplace with the exact installed marketplace identifier. Keep the
+plugin's transport unchanged; a separate top-level mcp_servers entry would create
+a different connection. This example is not loaded automatically, does not edit
+active profiles, and is not a portable Agent Plugins feature.
+
+Verify the actual discovered inventory after applying the policy. A 14-name
+inventory establishes discovery filtering; call-time enforcement needs separate
+host evidence. Filtering names does not validate arguments (including
+list_plugins path overrides or a non-dry-run modernize request), prevent sensitive input, or
+prove runtime acceptance. Other hosts require their own supported controls.
+
+Before any authenticated model test, verify that the host's actual read-only
+execution path can read the installed main skills and shared contract. Compare
+those bytes to the reviewed package. Successful skills/list registration is
+insufficient. If the read fails, stop before sign-in/model turns and repair or
+use a supported isolated host without relaxing sandbox permissions. HTTPS
+success also does not prove the host's WebSocket transport works. GUI activation
+must be checked independently.
 
 [Autodev](https://github.com/GoCodeAlone/autonomous-dev-kit/blob/main/docs/README.codex.md)
 remains a separate generic development plugin. This package has distinct plugin,
@@ -113,6 +141,10 @@ retains its separate boundary; scheduling, proofs and accounting stay in Compute
 ## Maintainer verification
 
 Go 1.27.2+ is needed only for tests; the plugin itself uses the host and wfctl.
+The Go-only [offline acceptance support](tests/internal/acceptance/README.md)
+adds retained-record scope/argument lint and installed-file prerequisite checks.
+It runs through the same existing nested Go suite; no Python dependency or
+workflow permission change is needed.
 The standalone test module reuses the repository's pinned public JSON Schema
 validator and ECMA-regex adapter. From this directory, run:
 

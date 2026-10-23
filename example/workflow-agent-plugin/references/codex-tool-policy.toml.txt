@@ -1,0 +1,10 @@
+# Optional host-local example, never a portable manifest or active-profile edit.
+# Replace reviewed-marketplace with the actual installed marketplace identifier.
+# Applies only on Codex versions supporting per-plugin MCP tool policy.
+[plugins."workflow-assistant@reviewed-marketplace".mcp_servers."workflow-config"]
+enabled_tools = [
+  "list_module_types", "list_step_types", "list_trigger_types", "list_workflow_types",
+  "get_module_schema", "get_step_schema", "get_config_skeleton", "validate_config",
+  "template_validate_config", "inspect_config", "compat_check", "list_plugins",
+  "modernize", "generate_schema"
+]

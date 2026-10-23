@@ -1,0 +1,2966 @@
+{
+  "provenance": "Synthetic policy fixture derived from observed public-test call names and argument flags. YAML is replaced with an inert public snapshot, identifiers are synthetic, and completion statuses here are synthetic. This fixture is not a model/engine transcript or integration evidence.",
+  "cases": [],
+  "records": [
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-1",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-1",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-2",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.server"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-2",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.server"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-3",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.handler"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-3",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.handler"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-4",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.router"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-4",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.router"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-5",
+            "server": "workflow-config",
+            "tool": "get_config_skeleton",
+            "arguments": {
+              "module_types": [
+                "http.server",
+                "http.router",
+                "http.handler"
+              ]
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-5",
+            "server": "workflow-config",
+            "tool": "get_config_skeleton",
+            "arguments": {
+              "module_types": [
+                "http.server",
+                "http.router",
+                "http.handler"
+              ]
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-6",
+            "server": "workflow-config",
+            "tool": "get_config_examples",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-6",
+            "server": "workflow-config",
+            "tool": "get_config_examples",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-7",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-7",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-8",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-8",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-9",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true,
+              "skip_unknown_types": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-9",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true,
+              "skip_unknown_types": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-10",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-10",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-11",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-11",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-12",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-12",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-13",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-13",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-14",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-14",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-15",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-15",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-16",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-16",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-17",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-17",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-18",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-18",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-19",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-19",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-20",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-2",
+          "turnId": "turn-2",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-20",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-21",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true,
+              "skip_unknown_types": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-21",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true,
+              "skip_unknown_types": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-22",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-22",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-23",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-23",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-24",
+            "server": "workflow-config",
+            "tool": "validate_template_expressions",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-24",
+            "server": "workflow-config",
+            "tool": "validate_template_expressions",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-25",
+            "server": "workflow-config",
+            "tool": "detect_ports",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-25",
+            "server": "workflow-config",
+            "tool": "detect_ports",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-26",
+            "server": "workflow-config",
+            "tool": "detect_secrets",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-26",
+            "server": "workflow-config",
+            "tool": "detect_secrets",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-27",
+            "server": "workflow-config",
+            "tool": "detect_infra_needs",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-27",
+            "server": "workflow-config",
+            "tool": "detect_infra_needs",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-28",
+            "server": "workflow-config",
+            "tool": "modernize",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "apply": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-3",
+          "turnId": "turn-3",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-28",
+            "server": "workflow-config",
+            "tool": "modernize",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "apply": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-29",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-29",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-30",
+            "server": "workflow-config",
+            "tool": "list_step_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-30",
+            "server": "workflow-config",
+            "tool": "list_step_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-31",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-31",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-32",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-32",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-33",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-33",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-34",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.server"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-34",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.server"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-35",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.router"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-35",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.router"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-36",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.handler"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-36",
+            "server": "workflow-config",
+            "tool": "get_module_schema",
+            "arguments": {
+              "module_type": "http.handler"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-37",
+            "server": "workflow-config",
+            "tool": "get_config_skeleton",
+            "arguments": {
+              "module_types": [
+                "http.server",
+                "http.router",
+                "http.handler"
+              ]
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-37",
+            "server": "workflow-config",
+            "tool": "get_config_skeleton",
+            "arguments": {
+              "module_types": [
+                "http.server",
+                "http.router",
+                "http.handler"
+              ]
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-38",
+            "server": "workflow-config",
+            "tool": "get_config_examples",
+            "arguments": {
+              "name": "api-server-config"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-38",
+            "server": "workflow-config",
+            "tool": "get_config_examples",
+            "arguments": {
+              "name": "api-server-config"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-39",
+            "server": "workflow-config",
+            "tool": "get_config_examples",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-39",
+            "server": "workflow-config",
+            "tool": "get_config_examples",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-40",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-40",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-41",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-41",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-42",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-42",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-43",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-43",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-44",
+            "server": "workflow-config",
+            "tool": "api_extract",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-44",
+            "server": "workflow-config",
+            "tool": "api_extract",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-45",
+            "server": "workflow-config",
+            "tool": "contract_generate",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-45",
+            "server": "workflow-config",
+            "tool": "contract_generate",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-46",
+            "server": "workflow-config",
+            "tool": "validate_template_expressions",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-46",
+            "server": "workflow-config",
+            "tool": "validate_template_expressions",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-47",
+            "server": "workflow-config",
+            "tool": "detect_ports",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-4",
+          "turnId": "turn-4",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-47",
+            "server": "workflow-config",
+            "tool": "detect_ports",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-48",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false,
+              "strict": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-48",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false,
+              "strict": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-49",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-49",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-50",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-50",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-51",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-51",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-52",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-52",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-53",
+            "server": "workflow-config",
+            "tool": "list_step_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-53",
+            "server": "workflow-config",
+            "tool": "list_step_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-54",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-54",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-55",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false,
+              "strict": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-55",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "skip_unknown_types": false,
+              "strict": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-56",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-56",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-57",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-57",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-58",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-5",
+          "turnId": "turn-5",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-58",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-59",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true,
+              "skip_unknown_types": false
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-59",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true,
+              "skip_unknown_types": false
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-60",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-60",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-61",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-61",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n",
+              "strict": true
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-62",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-62",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-63",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-63",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-64",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-64",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-65",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-6",
+          "turnId": "turn-6",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-65",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-66",
+            "server": "workflow-config",
+            "tool": "list_step_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-66",
+            "server": "workflow-config",
+            "tool": "list_step_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-67",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-67",
+            "server": "workflow-config",
+            "tool": "list_module_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-68",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-68",
+            "server": "workflow-config",
+            "tool": "list_trigger_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-69",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-69",
+            "server": "workflow-config",
+            "tool": "list_workflow_types",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-70",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-70",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-71",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-71",
+            "server": "workflow-config",
+            "tool": "validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-72",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-72",
+            "server": "workflow-config",
+            "tool": "template_validate_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-73",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-73",
+            "server": "workflow-config",
+            "tool": "inspect_config",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-74",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-74",
+            "server": "workflow-config",
+            "tool": "compat_check",
+            "arguments": {
+              "yaml_content": "modules: []\n"
+            },
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-75",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "direction": "received",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thread-7",
+          "turnId": "turn-7",
+          "item": {
+            "type": "mcpToolCall",
+            "id": "call-75",
+            "server": "workflow-config",
+            "tool": "generate_schema",
+            "arguments": {},
+            "status": "completed"
+          }
+        }
+      }
+    }
+  ]
+}
