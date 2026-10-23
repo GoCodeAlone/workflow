@@ -3,6 +3,15 @@
 Read this contract before using any of the three skills. These workflows concern
 GoCodeAlone Workflow configuration, not general development orchestration.
 
+## Required supporting read
+
+Each main skill repeats the minimum scope and privacy boundary. It still requires
+this complete contract before any Workflow MCP call. If this file is unavailable,
+stop all Workflow MCP calls and report that prerequisite as unavailable. Skill
+registration, a link, or an explicit main-skill input does not prove this read
+succeeded. If a required live tool schema is unavailable, stop its dependent
+check rather than guessing arguments or broadening tool scope.
+
 ## Connection and discovery
 
 Use this package's `workflow-config` MCP server. Hosts can namespace tool names;
@@ -37,9 +46,11 @@ the binary. In the tested v0.86.2 release:
 Only these tools are in scope. Do not use registry searches, filesystem examples,
 secret detection/retrieval, execution tools, CI/deployment scaffolding, or other
 upstream tools for these workflows. Do not override `list_plugins.data_dir`.
-Modernization never authorizes writes; present suggested edits first. The full
-upstream MCP surface stays exposed under host permissions: these instructions
-are not a filesystem or execution sandbox. Tool annotations are hints, not proof
+Modernization never authorizes writes; present suggested edits first. The portable manifest
+exposes the full upstream MCP surface unless the host separately filters it.
+These instructions are not a filesystem, execution or call-time tool sandbox.
+The optional Codex policy example linked in the README filters tool names only;
+it does not enforce argument, input privacy or runtime-acceptance rules. Tool annotations are hints, not proof
 of safety. Honor actual host permissions and the user's scope.
 
 ## Input and privacy
