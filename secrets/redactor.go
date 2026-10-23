@@ -2,7 +2,10 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -71,6 +74,66 @@ func (r *Redactor) AddValue(label, value string) {
 	}
 	r.known[label] = value
 	r.mu.Unlock()
+}
+
+// ContainsValue detects known values without rewriting text. Unlike comparing
+// Redact's output, it also detects a value equal to its replacement marker.
+// JSON and URL escapes are checked for consumers returning encoded receipts.
+func (r *Redactor) ContainsValue(text string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.known) == 0 {
+		return false
+	}
+	return r.containsValue(text)
+}
+
+func (r *Redactor) containsValue(text string) bool {
+	for _, value := range r.known {
+		if value == "" {
+			continue
+		}
+		if strings.Contains(text, value) {
+			return true
+		}
+		encoded, _ := json.Marshal(value)
+		ascii := strconv.QuoteToASCII(value)
+		for _, escaped := range []string{string(encoded[1 : len(encoded)-1]), ascii[1 : len(ascii)-1], url.QueryEscape(value), url.PathEscape(value)} {
+			if strings.Contains(text, escaped) {
+				return true
+			}
+		}
+	}
+	// Decode JSON string literals even inside free-text error prefixes. Each
+	// decoded literal is shorter than its source, so nested escaping terminates.
+	if !strings.Contains(text, `\`) {
+		return false
+	}
+	for rest := text; ; {
+		start := strings.IndexByte(rest, '"')
+		if start < 0 {
+			break
+		}
+		rest = rest[start:]
+		decoder := json.NewDecoder(strings.NewReader(rest))
+		var decoded string
+		if decoder.Decode(&decoded) == nil {
+			if r.containsValue(decoded) {
+				return true
+			}
+			rest = rest[decoder.InputOffset():]
+		} else {
+			rest = rest[1:]
+		}
+	}
+	var unquoted string
+	if json.Unmarshal([]byte(`"`+text+`"`), &unquoted) == nil && unquoted != text {
+		return r.containsValue(unquoted)
+	}
+	return false
 }
 
 // LoadFromProvider performs a FULL-REPLACE of the known-value set from a

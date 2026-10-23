@@ -29,11 +29,31 @@ import (
 var ConfigLookup func(key string) (string, bool)
 
 // TemplateEngine resolves {{ .field }} expressions against a PipelineContext.
-type TemplateEngine struct{}
+type TemplateEngine struct {
+	configLookup func(string) (string, bool)
+	scopedConfig bool
+}
 
 // NewTemplateEngine creates a new TemplateEngine.
 func NewTemplateEngine() *TemplateEngine {
 	return &TemplateEngine{}
+}
+
+// NewTemplateEngineWithConfigLookup uses only lookup, including for missing keys.
+// A nil lookup is an empty private source, not a request for the global default.
+func NewTemplateEngineWithConfigLookup(lookup func(string) (string, bool)) *TemplateEngine {
+	return &TemplateEngine{configLookup: lookup, scopedConfig: true}
+}
+
+func configLookupFunc(lookup func(string) (string, bool)) func(string) string {
+	return func(key string) string {
+		if lookup != nil {
+			if value, ok := lookup(key); ok {
+				return value
+			}
+		}
+		return ""
+	}
 }
 
 // templateData builds the data map that Go templates see.
@@ -198,6 +218,9 @@ func PreprocessTemplate(tmplStr string) string {
 // helper functions (step, trigger) that access PipelineContext data directly.
 func (te *TemplateEngine) funcMapWithContext(pc *interfaces.PipelineContext) template.FuncMap {
 	fm := TemplateFuncMap()
+	if te.scopedConfig {
+		fm["config"] = configLookupFunc(te.configLookup)
+	}
 
 	// step accesses step outputs by name and optional nested keys.
 	// Usage: {{ step "parse-request" "path_params" "id" }}
@@ -312,7 +335,11 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *interfaces.PipelineContext
 	// Process ${ } blocks first so their output can flow into Go template blocks.
 	if hasExpr {
 		var err error
-		tmplStr, err = ResolveExprBlocks(tmplStr, pc, NewExprEngine())
+		ee := NewExprEngine()
+		if te.scopedConfig {
+			ee = NewExprEngineWithConfigLookup(te.configLookup)
+		}
+		tmplStr, err = ResolveExprBlocks(tmplStr, pc, ee)
 		if err != nil {
 			return "", err
 		}
@@ -361,16 +388,19 @@ func (te *TemplateEngine) Resolve(tmplStr string, pc *interfaces.PipelineContext
 		if pc != nil && pc.Logger != nil {
 			logger = pc.Logger
 		}
-		pipelineName := "<unknown>"
-		if pc != nil && pc.Metadata != nil {
-			if v, ok := pc.Metadata["pipeline"]; ok {
-				pipelineName = fmt.Sprint(v)
+		if te.scopedConfig {
+			// Expression results can become template field names; diagnostics must
+			// not include the action, execErr, or context-derived attributes.
+			logger.Warn("scoped template resolved missing key to zero value")
+		} else {
+			pipelineName := "<unknown>"
+			if pc != nil && pc.Metadata != nil {
+				if v, ok := pc.Metadata["pipeline"]; ok {
+					pipelineName = fmt.Sprint(v)
+				}
 			}
+			logger.Warn("template resolved missing key to zero value", "pipeline", pipelineName, "error", execErr)
 		}
-		logger.Warn("template resolved missing key to zero value",
-			"pipeline", pipelineName,
-			"error", execErr,
-		)
 
 		// Re-execute with zero mode to preserve backward-compatible output.
 		buf.Reset()
