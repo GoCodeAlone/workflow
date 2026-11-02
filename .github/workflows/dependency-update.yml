@@ -40,15 +40,10 @@ jobs:
         cache: false
 
     - name: Update main dependencies
-      run: |
-        go get -u ./...
-        go mod tidy
+      run: bash ./scripts/update-go-dependencies.sh
 
     - name: Update example dependencies
-      run: |
-        cd example
-        go get -u ./...
-        go mod tidy
+      run: bash ./scripts/update-go-dependencies.sh example
 
     - name: Run tests
       run: |
@@ -62,11 +57,12 @@ jobs:
         commit-message: 'chore: update Go dependencies'
         title: 'chore: update Go dependencies'
         body: |
-          This PR updates Go dependencies to their latest versions.
+          This PR updates direct Go dependencies and resolves their required transitive dependencies.
           
           Changes:
           - Updated dependencies in main go.mod
           - Updated dependencies in example/go.mod
+          - Preserved explicit module replacements
           - Verified tests still pass
           
           Please review the changes and ensure all functionality works as expected.
