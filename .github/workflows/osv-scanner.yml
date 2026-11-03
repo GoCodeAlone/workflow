@@ -48,6 +48,13 @@ jobs:
           --allow-no-lockfiles
           ./
 
+    - name: Check scheduled scan output
+      run: |
+        if [[ ! -s results.json ]]; then
+          echo "::error::OSV-Scanner did not produce a nonempty results.json; refusing to report an unverified scan."
+          exit 1
+        fi
+
     - name: Build SARIF report
       uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
       with:
@@ -135,6 +142,13 @@ jobs:
           -r
           --allow-no-lockfiles
           ./
+
+    - name: Check differential scan output
+      run: |
+        if [[ ! -s old-results.json || ! -s new-results.json ]]; then
+          echo "::error::OSV-Scanner requires nonempty old-results.json and new-results.json before differential reporting."
+          exit 1
+        fi
 
     - name: Build differential SARIF report
       uses: docker://ghcr.io/google/osv-scanner-action@sha256:48406c58197201fe55e56615ad9d414f85063da320e204d0b0ed460fb3908dba # v2.3.8
