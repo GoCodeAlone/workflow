@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -19,8 +20,8 @@ import (
 	"time"
 )
 
-// These tests exercise module selection with real Go commands and a local file
-// proxy. They do not compile the fixture consumers or contact a registry.
+// These tests exercise module selection and consumer compilation with real Go
+// commands and a local file proxy. They do not contact a registry.
 func TestUpdateGoDependenciesLocalProxy(t *testing.T) {
 	suiteCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -34,11 +35,13 @@ func TestUpdateGoDependenciesLocalProxy(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, current, required, wantDirect, wantIndirect string
+		blanketUpgrade                                    bool
 	}{
-		{"preserve_unrequested_indirect", "v1.0.0", "v0.1.0", "v1.1.0", "v0.1.0"},
-		{"allow_required_indirect_upgrade", "v1.0.0", "v0.1.1", "v1.1.0", "v0.1.1"},
-		{"preserve_newer_prerelease", "v1.2.0-rc.1", "v0.1.0", "v1.2.0-rc.1", "v0.1.0"},
-		{"no_eligible_targets", "", "v0.1.0", "", ""},
+		{"preserve_unrequested_indirect", "v1.0.0", "v0.1.0", "v1.1.0", "v0.1.0", false},
+		{"allow_required_indirect_upgrade", "v1.0.0", "v0.1.1", "v1.1.0", "v0.1.1", false},
+		{"preserve_newer_prerelease", "v1.2.0-rc.1", "v0.1.0", "v1.2.0-rc.1", "v0.1.0", false},
+		{"no_eligible_targets", "", "v0.1.0", "", "", false},
+		{"blanket_upgrade_breaks_indirect_api", "v1.0.0", "v0.1.0", "v1.1.0", "v0.2.0", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := suiteCtx.Err(); err != nil {
@@ -79,16 +82,17 @@ func TestUpdateGoDependenciesLocalProxy(t *testing.T) {
 			env := []string{
 				"PATH=" + filepath.Dir(goBinary) + string(os.PathListSeparator) + "/usr/bin:/bin",
 				"GOENV=off", "GOWORK=off", "GOTOOLCHAIN=local", "GOSUMDB=off", "GOVCS=*:off", "GOTELEMETRY=off", "GOAUTH=off", "GOFLAGS=-modcacherw",
+				"CGO_ENABLED=0", "GOMAXPROCS=2",
 				"GOPROXY=" + (&url.URL{Scheme: "file", Path: filepath.ToSlash(proxy)}).String(),
 			}
-			for _, key := range []string{"HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "TMPDIR"} {
+			for _, key := range []string{"HOME", "GOCACHE", "GOMODCACHE", "GOPATH", "GOTMPDIR", "TMPDIR"} {
 				dir := filepath.Join(root, key)
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
 				env = append(env, key+"="+dir)
 			}
-			run := func(dir, command string, args ...string) {
+			runCommand := func(dir, command string, args ...string) ([]byte, error) {
 				t.Helper()
 				ctx, cancel := context.WithTimeout(suiteCtx, 30*time.Second)
 				defer cancel()
@@ -103,13 +107,24 @@ func TestUpdateGoDependenciesLocalProxy(t *testing.T) {
 					}
 					return err
 				}
-				if output, err := cmd.CombinedOutput(); err != nil {
+				output, err := cmd.CombinedOutput()
+				if ctx.Err() != nil {
+					return output, ctx.Err()
+				}
+				return output, err
+			}
+			run := func(dir, command string, args ...string) {
+				t.Helper()
+				if output, err := runCommand(dir, command, args...); err != nil {
 					t.Fatalf("%s %v: %v\n%s", command, args, err, output)
 				}
 			}
 			// Populate the starting graph and sums without upgrading dependencies.
 			run(moduleDir, goBinary, "mod", "tidy")
-			if tc.current == "" {
+			if tc.blanketUpgrade {
+				run(moduleDir, goBinary, "get", "-u", "./...")
+				run(moduleDir, goBinary, "mod", "tidy")
+			} else if tc.current == "" {
 				run(root, "/bin/bash", script, "consumer")
 			} else {
 				run(moduleDir, "/bin/bash", script)
@@ -128,12 +143,25 @@ func TestUpdateGoDependenciesLocalProxy(t *testing.T) {
 					got[fields[0]] = fields[1]
 				}
 			}
+			if tc.blanketUpgrade {
+				if got["example.test/indirect"] != tc.wantIndirect {
+					t.Fatalf("blanket upgrade selected indirect %q, want %q", got["example.test/indirect"], tc.wantIndirect)
+				}
+				output, err := runCommand(moduleDir, goBinary, "build", "-mod=readonly", "./...")
+				var exitError *exec.ExitError
+				if !errors.As(err, &exitError) || exitError.ExitCode() != 1 || !strings.Contains(string(output), "undefined: indirect.Old") {
+					t.Fatalf("blanket upgrade must break the indirect API, got %v\n%s", err, output)
+				}
+				t.Logf("blanket upgrade compiler output:\n%s", output)
+				return
+			}
 			if !maps.Equal(got, want) {
 				t.Fatalf("selected modules = %v, want %v\ngo.mod:\n%s", got, want, data)
 			}
 			if !strings.Contains(string(data), "replace example.test/local => ./local") {
 				t.Fatalf("local replacement lost:\n%s", data)
 			}
+			run(moduleDir, goBinary, "build", "-mod=readonly", "./...")
 		})
 	}
 }
