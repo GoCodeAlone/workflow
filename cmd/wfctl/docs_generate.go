@@ -71,6 +71,13 @@ type renderedDocsPackage struct {
 }
 
 func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
+	return runDocsGenerateAPIContext(context.Background(), opts)
+}
+
+func runDocsGenerateAPIContext(ctx context.Context, opts docsGenerateAPIOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if strings.TrimSpace(opts.Source) == "" {
 		return fmt.Errorf("docs generate: --source is required for Go API docs")
 	}
@@ -103,16 +110,24 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 	if err != nil {
 		return fmt.Errorf("docs generate: resolve out: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(out, 0o750); err != nil {
 		return fmt.Errorf("docs generate: create output dir: %w", err)
 	}
 
-	ctx := context.Background()
 	rendered := make([]renderedDocsPackage, 0, len(packages))
 	var warnings []string
 	if docsContainsString(subjects, "workflow") {
 		for _, pkg := range packages {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			docPkg, err := renderWorkflowAPIPackage(ctx, source, opts.Module, opts.Version, pkg)
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err != nil {
 				warnings = append(warnings, err.Error())
 				continue
@@ -123,21 +138,33 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 	}
 	if docsContainsString(subjects, "plugins") {
 		pluginDocs, pluginWarnings, err := renderRegistryPluginAPIPackages(ctx, opts)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return err
 		}
 		rendered = append(rendered, pluginDocs...)
 		warnings = append(warnings, pluginWarnings...)
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(rendered) == 0 {
 		return fmt.Errorf("docs generate: no packages generated")
 	}
 
 	for i := range rendered {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pkg := &rendered[i]
 		dest := filepath.Join(out, filepath.FromSlash(pkg.Meta.Path))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 			return fmt.Errorf("docs generate: create %s: %w", filepath.Dir(dest), err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		// #nosec G306 -- generated documentation artifacts are intended to be readable by tooling.
 		if err := os.WriteFile(dest, []byte(pkg.Doc), 0o644); err != nil {
@@ -175,17 +202,26 @@ func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
 		return fmt.Errorf("docs generate: marshal metadata: %w", err)
 	}
 	metaPath := filepath.Join(out, "versions.json")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// #nosec G306 -- generated documentation metadata is intended to be readable by tooling.
 	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o644); err != nil {
 		return fmt.Errorf("docs generate: write versions.json: %w", err)
 	}
 	fmt.Printf("  create  %s\n", metaPath)
 	indexPath := filepath.Join(out, "index.json")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// #nosec G306 -- generated documentation metadata is intended to be readable by tooling.
 	if err := os.WriteFile(indexPath, append(metaBytes, '\n'), 0o644); err != nil {
 		return fmt.Errorf("docs generate: write index.json: %w", err)
 	}
 	fmt.Printf("  create  %s\n", indexPath)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fmt.Printf("\nGenerated %d Go API package doc(s) in %s\n", len(rendered), out)
 	return nil
 }
@@ -235,6 +271,9 @@ func goListAPIPackage(ctx context.Context, source, modulePath, pkgRel string) (g
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return goListPackage{}, ctx.Err()
+	}
 	if err != nil {
 		return goListPackage{}, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
@@ -252,6 +291,9 @@ func goListAPIPackages(ctx context.Context, source string) ([]goListPackage, err
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
@@ -389,7 +431,13 @@ func workflowSourceLink(version, pkgRel string) string {
 }
 
 func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOptions) ([]renderedDocsPackage, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	manifests, err := loadDocsRegistry(ctx, opts.Registry)
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("docs generate: load registry: %w", err)
 	}
@@ -404,6 +452,9 @@ func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOp
 	var warnings []string
 	allowLocalPluginSources := docsRegistryLocalSource(opts.Registry)
 	for i := range manifests {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		manifest := &manifests[i]
 		if strings.TrimSpace(manifest.Name) == "" {
 			warnings = append(warnings, "plugin registry entry missing name")
@@ -422,26 +473,41 @@ func renderRegistryPluginAPIPackages(ctx context.Context, opts docsGenerateAPIOp
 			continue
 		}
 		checkout, err := checkoutDocsPluginRepo(ctx, manifest, cacheDir, allowLocalPluginSources)
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
 			continue
 		}
 		modulePath, err := readGoModulePath(filepath.Join(checkout, "go.mod"))
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
 			continue
 		}
 		docPkgs, err := renderPluginAPIPackages(ctx, checkout, modulePath, manifest)
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s %s skipped: %v", manifest.Name, manifest.Version, err))
 			continue
 		}
 		rendered = append(rendered, docPkgs...)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	return rendered, warnings, nil
 }
 
 func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var data []byte
 	var err error
 	if strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
@@ -465,6 +531,9 @@ func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, erro
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var envelope struct {
 		Plugins []RegistryManifest `json:"plugins"`
 	}
@@ -479,6 +548,9 @@ func loadDocsRegistry(ctx context.Context, ref string) ([]RegistryManifest, erro
 }
 
 func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cacheDir string, allowLocalSource bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	slug, err := safeDocsPluginSlug(manifest.Name)
 	if err != nil {
 		return "", err
@@ -496,6 +568,10 @@ func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cac
 			return dest, nil
 		}
 	}
+	// Cancellation is not a stale-cache error: never delete or reclone on it.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := os.RemoveAll(dest); err != nil {
 		return "", err
 	}
@@ -503,7 +579,11 @@ func checkoutDocsPluginRepo(ctx context.Context, manifest *RegistryManifest, cac
 	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- fixed git command; args are not shell-expanded.
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if err != nil {
 		return "", fmt.Errorf("git clone tag %s: %w: %s", manifest.Version, err, strings.TrimSpace(stderr.String()))
 	}
 	return dest, nil
@@ -521,6 +601,9 @@ func renderPluginAPIPackages(ctx context.Context, checkout, modulePath string, m
 	}
 	rendered := make([]renderedDocsPackage, 0, len(listPkgs))
 	for i, listPkg := range listPkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		docPkg, fset, err := parseDocPackage(listPkg)
 		if err != nil {
 			return nil, err
@@ -546,6 +629,9 @@ func renderPluginAPIPackages(ctx context.Context, checkout, modulePath string, m
 			Meta: meta,
 			Doc:  renderPackageMarkdown(fset, docPkg, meta, pluginSourceLink(manifest.Repository, manifest.Version, pkgRel), nil),
 		})
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if len(rendered) == 0 {
 		return nil, fmt.Errorf("no non-command Go packages found")
@@ -702,6 +788,9 @@ func runDocsGit(ctx context.Context, dir string, args ...string) (string, error)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}

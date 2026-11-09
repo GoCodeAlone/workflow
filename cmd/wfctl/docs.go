@@ -16,12 +16,19 @@ import (
 )
 
 func runDocs(args []string) error {
+	return runDocsContext(context.Background(), args)
+}
+
+func runDocsContext(ctx context.Context, args []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(args) < 1 {
 		return docsUsage()
 	}
 	switch args[0] {
 	case "generate":
-		return runDocsGenerate(args[1:])
+		return runDocsGenerateContext(ctx, args[1:])
 	default:
 		return docsUsage()
 	}
@@ -44,6 +51,13 @@ Examples:
 }
 
 func runDocsGenerate(args []string) error {
+	return runDocsGenerateContext(context.Background(), args)
+}
+
+func runDocsGenerateContext(ctx context.Context, args []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("docs generate", flag.ContinueOnError)
 	output := fs.String("output", "./docs/generated/", "Output directory for generated documentation")
 	out := fs.String("out", "", "Output directory for generated Go API documentation (alias for --output in API mode)")
@@ -84,7 +98,7 @@ Options:
 		if outDir == "" {
 			outDir = *output
 		}
-		return runDocsGenerateAPI(docsGenerateAPIOptions{
+		return runDocsGenerateAPIContext(ctx, docsGenerateAPIOptions{
 			Source:          *source,
 			Out:             outDir,
 			Module:          *modulePath,
@@ -115,7 +129,7 @@ Options:
 	// and merge the configuration. This guarantees docs reflect exactly what
 	// the engine would see, including ApplicationConfig multi-file merging and
 	// its conflict detection (duplicate module/pipeline/trigger names).
-	cfg, err := config.NewFileSource(configFile).Load(context.Background())
+	cfg, err := config.NewFileSource(configFile).Load(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -163,6 +177,9 @@ Options:
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(*output, 0750); err != nil {
 		return fmt.Errorf("failed to create output directory %s: %w", *output, err)
 	}
@@ -175,7 +192,7 @@ Options:
 		outputDir: *output,
 	}
 
-	files, err := gen.generate()
+	files, err := gen.generateContext(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to generate documentation: %w", err)
 	}
@@ -269,10 +286,17 @@ type docsGenerator struct {
 }
 
 func (g *docsGenerator) generate() ([]string, error) {
+	return g.generateContext(context.Background())
+}
+
+func (g *docsGenerator) generateContext(ctx context.Context) ([]string, error) {
 	var files []string
 
 	// 1. README.md – overview
 	readmePath := filepath.Join(g.outputDir, "README.md")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := g.writeOverview(readmePath); err != nil {
 		return nil, fmt.Errorf("writing overview: %w", err)
 	}
@@ -281,6 +305,9 @@ func (g *docsGenerator) generate() ([]string, error) {
 	// 2. modules.md – module inventory
 	if len(g.cfg.Modules) > 0 {
 		modPath := filepath.Join(g.outputDir, "modules.md")
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := g.writeModules(modPath); err != nil {
 			return nil, fmt.Errorf("writing modules: %w", err)
 		}
@@ -290,6 +317,9 @@ func (g *docsGenerator) generate() ([]string, error) {
 	// 3. pipelines.md – pipeline details with mermaid diagrams
 	if len(g.cfg.Pipelines) > 0 {
 		pipPath := filepath.Join(g.outputDir, "pipelines.md")
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := g.writePipelines(pipPath); err != nil {
 			return nil, fmt.Errorf("writing pipelines: %w", err)
 		}
@@ -299,6 +329,9 @@ func (g *docsGenerator) generate() ([]string, error) {
 	// 4. workflows.md – workflow details (HTTP routes, messaging, etc.)
 	if len(g.cfg.Workflows) > 0 {
 		wfPath := filepath.Join(g.outputDir, "workflows.md")
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := g.writeWorkflows(wfPath); err != nil {
 			return nil, fmt.Errorf("writing workflows: %w", err)
 		}
@@ -308,6 +341,9 @@ func (g *docsGenerator) generate() ([]string, error) {
 	// 5. plugins.md – external plugin documentation
 	if len(g.plugins) > 0 {
 		plPath := filepath.Join(g.outputDir, "plugins.md")
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := g.writePlugins(plPath); err != nil {
 			return nil, fmt.Errorf("writing plugins: %w", err)
 		}
@@ -316,11 +352,17 @@ func (g *docsGenerator) generate() ([]string, error) {
 
 	// 6. architecture.md – system architecture diagram
 	archPath := filepath.Join(g.outputDir, "architecture.md")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := g.writeArchitecture(archPath); err != nil {
 		return nil, fmt.Errorf("writing architecture: %w", err)
 	}
 	files = append(files, archPath)
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return files, nil
 }
 
