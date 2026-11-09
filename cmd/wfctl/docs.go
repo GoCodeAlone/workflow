@@ -285,10 +285,6 @@ type docsGenerator struct {
 	outputDir string
 }
 
-func (g *docsGenerator) generate() ([]string, error) {
-	return g.generateContext(context.Background())
-}
-
 func (g *docsGenerator) generateContext(ctx context.Context) ([]string, error) {
 	var files []string
 

@@ -70,10 +70,6 @@ type renderedDocsPackage struct {
 	Warnings []string
 }
 
-func runDocsGenerateAPI(opts docsGenerateAPIOptions) error {
-	return runDocsGenerateAPIContext(context.Background(), opts)
-}
-
 func runDocsGenerateAPIContext(ctx context.Context, opts docsGenerateAPIOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
