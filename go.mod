@@ -8,6 +8,13 @@ go 1.27.2
 // cigen diagnostics and an unconstrained dependency-upgrade fixture.
 replace go.yaml.in/yaml/v4 => go.yaml.in/yaml/v4 v4.0.0-rc.3
 
+// apimachinery's managedfields converter requires SMD v6 schema types.
+// Newer kube-openapi versions expose incompatible SMD v7 types.
+// This temporary replacement also holds future kube-openapi fixes.
+// Remove after a coordinated Kubernetes upgrade; recheck both modules'
+// dependency upgrades and the managedfields schema round-trip test.
+replace k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
+
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
@@ -74,6 +81,7 @@ require (
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v0.37.1
+	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad
 	modernc.org/sqlite v1.53.0
 )
 
@@ -267,7 +275,6 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
