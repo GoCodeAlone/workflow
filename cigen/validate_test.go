@@ -1,6 +1,7 @@
 package cigen_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -68,4 +69,23 @@ jobs:
 		}
 	}
 	t.Fatalf("expected actionlint finding, got %#v", findings)
+}
+
+func TestValidateRenderedFilesReportsMalformedGitHubActionsYAML(t *testing.T) {
+	const path = ".github/workflows/deploy.yml"
+	files := map[string]string{
+		path: "name: deploy\non: push\njobs: [\n",
+	}
+	findings := cigen.ValidateRenderedFiles("github_actions", files)
+	location := regexp.MustCompile(regexp.QuoteMeta(path) + `:[1-9][0-9]*:[0-9]+:.*could not parse as YAML`)
+	for _, finding := range findings {
+		if finding.Code != "actionlint_syntax-check" {
+			continue
+		}
+		if finding.Path != path || !location.MatchString(finding.Message) {
+			t.Fatalf("expected located actionlint YAML diagnostic, got %#v", finding)
+		}
+		return
+	}
+	t.Fatalf("expected actionlint YAML syntax finding, got %#v", findings)
 }
