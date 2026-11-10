@@ -30,6 +30,7 @@ require (
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/klauspost/compress v1.20.2
 	github.com/launchdarkly/go-sdk-common/v4 v4.0.0
 	github.com/launchdarkly/go-server-sdk/v7 v7.15.2
 	github.com/lib/pq v1.12.3
@@ -181,7 +182,6 @@ require (
 	github.com/jcmturner/gokrb5/v8 v8.4.4 // indirect
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
-	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/launchdarkly/ccache v1.1.0 // indirect
 	github.com/launchdarkly/eventsource v1.10.0 // indirect
