@@ -20,7 +20,7 @@ require (
 	github.com/cucumber/godog v0.15.1
 	github.com/expr-lang/expr v1.17.8
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/github/copilot-sdk/go v0.3.0
+	github.com/github/copilot-sdk/go v1.0.29
 	github.com/go-openapi/jsonpointer v1.0.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
@@ -30,7 +30,7 @@ require (
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/klauspost/compress v1.20.2
+	github.com/klauspost/compress v1.20.3
 	github.com/launchdarkly/go-sdk-common/v4 v4.0.0
 	github.com/launchdarkly/go-server-sdk/v7 v7.15.2
 	github.com/lib/pq v1.12.3
@@ -117,6 +117,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudevents/sdk-go/v2 v2.16.2 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/cucumber/gherkin/go/v26 v26.2.0 // indirect
 	github.com/cucumber/messages/go/v21 v21.0.1 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
@@ -124,6 +125,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eapache/go-resiliency v1.7.0 // indirect
+	github.com/ebitengine/purego v0.11.2 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
@@ -151,7 +153,7 @@ require (
 	github.com/golobby/cast v1.3.3 // indirect
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
-	github.com/google/jsonschema-go v0.4.2 // indirect
+	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
