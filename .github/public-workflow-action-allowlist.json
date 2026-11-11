@@ -590,5 +590,61 @@
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "3b92311008c1e3065d7d0ca24fc10055eea8b50ab3710510ac9f648210959113",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+    "nodeSHA256": "d6511486d7f0d7044978b8c71828add2508e72a9897718b7a91fdf151ffb3c49",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae",
+    "nodeSHA256": "75285419b94ac7c3e82c6bcdff625ac1aab862ff09465c03b7f67b5f68a187f2",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+    "nodeSHA256": "b1570fa9a4d99988920c8c534c481885469c1dfaca2327d7c088e35dadb1a568",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae",
+    "nodeSHA256": "89a251c63db3bcac9145c65adeb9dddd48afdd5c8cb13a9ad5ae16a3cd3f526f",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "1405962dcbf154f33a16a10fef5272ba0a865f20dfe11358a522e310e29dab1c",
+    "contextSHA256": "1d47daeb93beb73266e0ae678db5e11df8f38a5e883d1ea50a4df5c55575d56d",
+    "state": "staged",
+    "rationale": "Temporarily defer the benchmark job; performance remains unassessed. Existing command and action authority is unchanged."
   }
 ]
