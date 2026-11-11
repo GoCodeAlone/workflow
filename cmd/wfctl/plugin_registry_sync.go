@@ -136,6 +136,7 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 	sort.Strings(pluginNames)
 
 	mismatches := 0
+	failures := 0
 
 	for _, pluginName := range pluginNames {
 		if pluginFilter != "" && pluginFilter != pluginName {
@@ -193,7 +194,7 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 
 		latestVersion := strings.TrimPrefix(latestTag, "v")
 
-		downloadsOK := downloadsMatchVersion(raw, manifestVersion)
+		downloadsOK := downloadsMatchVersion(raw, manifestVersion) && registrySyncDownloadsMatchRole(raw, ghRepo, pluginName)
 
 		targetVersion := manifestVersion
 		targetTag := "v" + manifestVersion
@@ -203,10 +204,11 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			currentReleaseExists = false
 		}
 		if versionGT(latestVersion, manifestVersion) || !currentReleaseExists {
-			latestDownloads, err := releaseDownloads(ghRepo, latestTag)
+			latestDownloads, err := registrySyncCatalogDownloads(ghRepo, latestTag, pluginName)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  ERROR  %s — list release downloads for %s: %v\n", pluginName, latestTag, err)
 				mismatches++
+				failures++
 				continue
 			}
 			switch {
@@ -224,7 +226,13 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 		}
 
 		metadataChanged := false
-		if pluginJSON, _ := registrySyncFetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
+		pluginJSON, err := registrySyncCatalogMetadata(ghRepo, targetTag, pluginName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ERROR  %s — read catalog metadata: %v\n", pluginName, err)
+			failures++
+			continue
+		}
+		if pluginJSON != nil {
 			metadataChanged = syncManifestMetadataFromPluginJSON(raw, pluginJSON)
 		}
 
@@ -235,15 +243,17 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 				fmt.Fprintf(os.Stderr, " MISMATCH  %s: manifest=%s latest=%s (%s)\n", pluginName, manifestVersion, latestVersion, ghRepo)
 			}
 			if !downloadsOK {
-				fmt.Fprintf(os.Stderr, " MISMATCH  %s: download URLs do not match manifest version %s\n", pluginName, manifestVersion)
+				fmt.Fprintf(os.Stderr, " MISMATCH  %s: downloads do not match catalog role or manifest version %s\n", pluginName, manifestVersion)
 			}
 			if metadataChanged {
-				fmt.Fprintf(os.Stderr, " MISMATCH  %s: registry metadata differs from %s plugin.json\n", pluginName, targetTag)
+				fmt.Fprintf(os.Stderr, " MISMATCH  %s: registry metadata differs from %s %s\n", pluginName, targetTag, registrySyncRole(ghRepo, pluginName).metadataFile)
 			}
 			mismatches++
 			if fix {
 				if err := applyFix(manifestPath, raw, ghRepo, targetTag, targetVersion); err != nil {
 					fmt.Fprintf(os.Stderr, "  ERROR  %s — apply fix: %v\n", pluginName, err)
+					failures++
+					continue
 				}
 			}
 		}
@@ -256,12 +266,16 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			if err := verifyRegistryPluginCapabilities(verifyName, manifestPath, ghRepo, targetTag); err != nil {
 				fmt.Fprintf(os.Stderr, "  ERROR  %s — verify capabilities: %v\n", pluginName, err)
 				mismatches++
+				failures++
 				continue
 			}
 			fmt.Printf("    OK  %s capabilities verified against %s (%s/%s)\n", pluginName, targetTag, runtime.GOOS, runtime.GOARCH)
 		}
 	}
 
+	if failures > 0 {
+		return fmt.Errorf("%d plugin manifest(s) could not be synced; see errors above", failures)
+	}
 	if mismatches > 0 && !fix {
 		return fmt.Errorf("%d plugin manifest(s) need updates; re-run with --fix", mismatches)
 	}
@@ -494,7 +508,7 @@ var (
 )
 
 func verifyRegistryPluginCapabilities(pluginName, manifestPath, ghRepo, tag string) error {
-	assets, err := registrySyncReleaseDownloads(ghRepo, tag)
+	assets, err := registrySyncCatalogDownloads(ghRepo, tag, registrySyncCatalog(manifestPath))
 	if err != nil {
 		return fmt.Errorf("list release downloads for %s %s: %w", ghRepo, tag, err)
 	}
@@ -677,9 +691,14 @@ func versionGT(newVer, oldVer string) bool {
 }
 
 func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, targetVersion string) error {
-	downloads, err := registrySyncReleaseDownloads(ghRepo, targetTag)
+	catalog := registrySyncCatalog(manifestPath)
+	downloads, err := registrySyncCatalogDownloads(ghRepo, targetTag, catalog)
 	if err != nil {
 		return fmt.Errorf("list release downloads: %w", err)
+	}
+	pluginJSON, err := registrySyncCatalogMetadata(ghRepo, targetTag, catalog)
+	if err != nil {
+		return fmt.Errorf("read catalog metadata: %w", err)
 	}
 	if len(downloads) == 0 {
 		raw["version"] = targetVersion
@@ -707,7 +726,7 @@ func applyFix(manifestPath string, raw map[string]any, ghRepo, targetTag, target
 
 	// workflow#703 — also sync capabilities + minEngineVersion + iacProvider
 	// from the tagged plugin.json (source-of-truth in the upstream repo).
-	if pluginJSON, _ := registrySyncFetchPluginJSON(ghRepo, targetTag); pluginJSON != nil {
+	if pluginJSON != nil {
 		syncManifestMetadataFromPluginJSON(raw, pluginJSON)
 	}
 
@@ -821,24 +840,29 @@ func appendUniqueStrings(base []string, values ...string) []string {
 // GitHub Contents API. Returns nil on any failure (silent fallback per
 // bash behavior — plan C2 fix preserves this).
 func fetchPluginJSON(ghRepo, tag string) (map[string]any, error) {
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/contents/plugin.json?ref=%s", ghRepo, tag), "--jq", ".content") // #nosec G204 -- ghRepo+tag from trusted manifest
+	metadata, _ := fetchPluginJSONAtPath(ghRepo, tag, "plugin.json")
+	return metadata, nil // silent fallback per bash semantics
+}
+
+func fetchPluginJSONAtPath(ghRepo, tag, filename string) (map[string]any, error) {
+	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/%s/contents/%s?ref=%s", ghRepo, filename, tag), "--jq", ".content") // #nosec G204 -- ghRepo+tag from trusted manifest; filename is a catalog constant
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, nil //nolint:nilerr // silent fallback per bash semantics
+		return nil, fmt.Errorf("fetch %s at %s: %w", filename, tag, err)
 	}
 	encoded := strings.TrimSpace(string(out))
 	if encoded == "" {
-		return nil, nil
+		return nil, fmt.Errorf("empty %s at %s", filename, tag)
 	}
 	// GitHub Contents API returns base64-encoded content with newlines.
 	encoded = strings.ReplaceAll(encoded, "\n", "")
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, nil //nolint:nilerr
+		return nil, fmt.Errorf("decode %s: %w", filename, err)
 	}
 	var pluginJSON map[string]any
 	if err := json.Unmarshal(decoded, &pluginJSON); err != nil {
-		return nil, nil //nolint:nilerr
+		return nil, fmt.Errorf("parse %s: %w", filename, err)
 	}
 	return pluginJSON, nil
 }

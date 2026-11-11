@@ -96,7 +96,7 @@ func syncRegistryRelease(registryDir, plugin, tag, reportPath string, fix, verif
 			tag = current
 		}
 	}
-	first, err := registrySyncReadRelease(repo, tag)
+	first, err := registrySyncReadRelease(repo, tag, plugin)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func syncRegistryRelease(registryDir, plugin, tag, reportPath string, fix, verif
 			return err
 		}
 	}
-	second, err := registrySyncReadRelease(repo, tag)
+	second, err := registrySyncReadRelease(repo, tag, plugin)
 	if err != nil {
 		return fmt.Errorf("release/source changed or became unreadable during sync: %w", err)
 	}
@@ -196,7 +196,7 @@ func registrySyncRepository(repository string) (string, error) {
 	return repo, nil
 }
 
-func registrySyncReadRelease(repo, tag string) (*registrySyncReleaseSnapshot, error) {
+func registrySyncReadRelease(repo, tag, catalog string) (*registrySyncReleaseSnapshot, error) {
 	apiRepo := "repos/" + escapedGitHubRepoPath(repo)
 	var ref struct {
 		Object registrySyncGitObject `json:"object"`
@@ -260,7 +260,7 @@ func registrySyncReadRelease(repo, tag string) (*registrySyncReleaseSnapshot, er
 		return nil, err
 	}
 	snapshot.Checksums = checksums
-	seenPlatforms := map[string]bool{}
+	var downloads []releaseAsset
 	for _, asset := range release.Assets {
 		goos, goarch, ok := releaseAssetPlatform(asset.Name)
 		if !ok {
@@ -270,12 +270,23 @@ func registrySyncReadRelease(repo, tag string) (*registrySyncReleaseSnapshot, er
 		if checksum == "" || (asset.Digest != "" && asset.Digest != "sha256:"+checksum) {
 			return nil, fmt.Errorf("missing or inconsistent checksum for asset %s", asset.Name)
 		}
-		platform := goos + "/" + goarch
+		downloads = append(downloads, releaseAsset{Name: asset.Name, OS: goos, Arch: goarch, URL: asset.BrowserDownloadURL, SHA256: checksum})
+	}
+	// Validate every archive's identity and checksum above and keep the whole
+	// release in the snapshot. Only platform uniqueness is scoped to the chosen
+	// catalog role; sibling mutations must still invalidate the second read.
+	role := registrySyncRole(repo, catalog)
+	snapshot.Downloads, err = role.selectDownloads(downloads)
+	if err != nil {
+		return nil, err
+	}
+	seenPlatforms := map[string]bool{}
+	for _, asset := range snapshot.Downloads {
+		platform := asset.OS + "/" + asset.Arch
 		if seenPlatforms[platform] {
 			return nil, fmt.Errorf("duplicate release platform %s", platform)
 		}
 		seenPlatforms[platform] = true
-		snapshot.Downloads = append(snapshot.Downloads, releaseAsset{Name: asset.Name, OS: goos, Arch: goarch, URL: asset.BrowserDownloadURL, SHA256: checksum})
 	}
 	if len(snapshot.Downloads) == 0 {
 		return nil, fmt.Errorf("release has no platform assets")
@@ -284,15 +295,24 @@ func registrySyncReadRelease(repo, tag string) (*registrySyncReleaseSnapshot, er
 		Encoding string `json:"encoding"`
 		Content  string `json:"content"`
 	}
-	if err := registrySyncGitHubJSON(apiRepo+"/contents/plugin.json?ref="+snapshot.SourceSHA, &content); err != nil {
+	if err := registrySyncGitHubJSON(apiRepo+"/contents/"+role.metadataFile+"?ref="+snapshot.SourceSHA, &content); err != nil {
 		return nil, err
 	}
 	if content.Encoding != "base64" {
-		return nil, fmt.Errorf("source plugin.json must have base64 encoding")
+		return nil, fmt.Errorf("source %s must have base64 encoding", role.metadataFile)
 	}
 	snapshot.PluginJSON, err = base64.StdEncoding.DecodeString(strings.ReplaceAll(content.Content, "\n", ""))
 	if err != nil {
-		return nil, fmt.Errorf("decode source plugin.json: %w", err)
+		return nil, fmt.Errorf("decode source %s: %w", role.metadataFile, err)
+	}
+	if role.metadataFile == "plugin.atlas.json" {
+		var metadata map[string]any
+		if err := registrySyncDecodeJSON(snapshot.PluginJSON, &metadata); err != nil {
+			return nil, fmt.Errorf("parse source %s: %w", role.metadataFile, err)
+		}
+		if metadata["name"] != role.artifact {
+			return nil, fmt.Errorf("%s name must be %s", role.metadataFile, role.artifact)
+		}
 	}
 	return snapshot, nil
 }

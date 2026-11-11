@@ -159,6 +159,22 @@ Go entrypoint. `registry-sync`, `registry-sync core`, and
 thin compatibility wrappers during migration, but the source of truth should
 be the `wfctl` implementation.
 
+For releases containing multiple products, selection follows the catalog
+directory and repository. The `github` and `workflow-plugin-migrations`
+catalogs select their full plugin archives for Darwin, Linux, and Windows
+(amd64 and arm64). `workflow-plugin-atlas-migrate` selects only the four
+Darwin/Linux Atlas plugin archives from the migrations repository and reads
+`plugin.atlas.json` for its driver-only capabilities. Standalone tools and
+sibling plugins are excluded, including when repairing same-version drift
+or choosing the binary for `--verify-capabilities`. Missing or duplicate
+required archives, or missing/incorrect Atlas metadata, fail without writing
+that manifest; `--fix` returns an error when a repair cannot be completed.
+
+Explicit target/report mode applies the same catalog selection while retaining
+whole-release identity/checksum and source-commit checks across both reads.
+Its source-version requirement is unchanged: a tagged source manifest with
+the `0.0.0` development sentinel still fails an explicit version target.
+
 **Defense in depth — type allowlist:** registry-sync rejects any
 `plugin.json.type` value outside `{external, builtin, core, iac}`. In
 particular, `type: "scaffold"` (used by `scaffold-workflow-plugin` +
