@@ -35,6 +35,9 @@ type catalogRoleFixture struct {
 
 func newCatalogRoleFixture(t *testing.T, catalog string) *catalogRoleFixture {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("catalog fixture requires a POSIX gh stub; never fall through to a real Windows gh.exe")
+	}
 	restoreRegistrySyncTestHooks(t)
 	f := &catalogRoleFixture{root: t.TempDir(), catalog: catalog, atlasVersion: "0.4.1", atlasName: "workflow-plugin-atlas-migrate"}
 	f.repo, f.family = "GoCodeAlone/workflow-plugin-migrations", catalog
@@ -249,6 +252,46 @@ func TestPluginRegistrySync_CatalogRoles_SameVersionDrift(t *testing.T) {
 	f.assertSelectedManifest(t)
 }
 
+// A valid local manifest is not proof that the current upstream release still
+// contains every required archive. Check-only and fix mode must both fail closed.
+func TestPluginRegistrySync_CatalogRoles_ValidateCurrentReleaseWithoutChanges(t *testing.T) {
+	for _, catalog := range []string{"github", "workflow-plugin-migrations", "workflow-plugin-atlas-migrate"} {
+		for _, scenario := range []string{"missing-platform", "duplicate-platform"} {
+			for _, fix := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/fix=%t", catalog, scenario, fix), func(t *testing.T) {
+					f := newCatalogRoleFixture(t, catalog)
+					selected := f.selected()
+					switch scenario {
+					case "missing-platform":
+						for i, asset := range f.assets {
+							if asset.Name == selected[0].Name {
+								f.assets = append(f.assets[:i], f.assets[i+1:]...)
+								break
+							}
+						}
+					case "duplicate-platform":
+						f.assets = append(f.assets, selected[0])
+					}
+					before, err := os.ReadFile(f.manifest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := syncDefault(f.root, fix, f.catalog, false); err == nil {
+						t.Error("current release with invalid inventory was accepted as up to date")
+					}
+					after, err := os.ReadFile(f.manifest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatal("invalid current release changed manifest bytes")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestPluginRegistrySync_CatalogRoles_RejectInvalidFamilyWithoutWrites(t *testing.T) {
 	for _, scenario := range []string{"missing-family", "missing-platform", "duplicate-platform", "missing-atlas-metadata"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -411,25 +454,42 @@ func TestPluginRegistrySync_CatalogRoles_RejectWrongMetadataIdentity(t *testing.
 
 func TestPluginRegistrySync_CatalogRoles_VerifyFailureIsNotSwallowedByFix(t *testing.T) {
 	f := newCatalogRoleFixture(t, "workflow-plugin-atlas-migrate")
-	// The existing manifest is valid and already at the latest version. Only
-	// capability verification discovers that the release lost a required role
-	// archive, so --fix must propagate that failure even without a planned edit.
-	f.assets = f.assets[:len(f.assets)-1]
-	registrySyncDownloadReleaseAsset = func(_, _, _, _ string) (string, error) {
-		t.Fatal("incomplete role must be rejected before downloading any binary")
-		return "", nil
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("Atlas has no release role for this platform")
 	}
-	before, _ := os.ReadFile(f.manifest)
+	// Keep the release inventory and local manifest valid so the failure
+	// specifically exercises capability verification on the no-change path.
+	registrySyncDownloadReleaseAsset = func(_, _, name, dir string) (string, error) {
+		path := filepath.Join(dir, assetBinaryName(name))
+		return path, os.WriteFile(path, []byte("synthetic executable; verification is stubbed"), 0o755)
+	}
+	verified := false
+	registrySyncVerifyManifest = func(_, _ string, _ manifestCompareOptions) error {
+		verified = true
+		return fmt.Errorf("synthetic capability mismatch")
+	}
+	before, err := os.ReadFile(f.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := syncDefault(f.root, true, f.catalog, true); err == nil {
-		t.Error("fix mode swallowed capability verification's incomplete-role error")
+		t.Error("fix mode swallowed capability verification failure")
 	}
-	if after, _ := os.ReadFile(f.manifest); !bytes.Equal(before, after) {
-		t.Fatal("capability verification failure changed manifest bytes")
+	if !verified {
+		t.Fatal("capability verifier was not exercised")
+	}
+	if after, err := os.ReadFile(f.manifest); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("capability verification failure changed manifest bytes: %v", err)
 	}
 }
 
 func TestPluginRegistrySync_CatalogRoles_ActualDefaultCLI(t *testing.T) {
 	f := newCatalogRoleFixture(t, "workflow-plugin-atlas-migrate")
+	f.writeManifest(t, "0.4.1", f.assets)
+	before, err := os.ReadFile(f.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	binary := registrySyncActualCLIBinary(t, runtime.GOOS, f.apiURL)
 	env := registrySyncHostEnvironment(os.Environ())
 	var proxy *registrySyncReleaseProxy
@@ -443,6 +503,21 @@ func TestPluginRegistrySync_CatalogRoles_ActualDefaultCLI(t *testing.T) {
 		t.Fatalf("actual default CLI failed: %v\n%s", err, out)
 	}
 	f.assertSelectedManifest(t)
+	repaired, err := os.ReadFile(f.manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(before, repaired) {
+		t.Fatal("actual default CLI did not repair mixed sibling/standalone downloads")
+	}
+	repeat := exec.CommandContext(t.Context(), binary, "plugin", "registry-sync", "--registry-dir", f.root, "--plugin", f.catalog, "--fix")
+	repeat.Env = env
+	if out, err := repeat.CombinedOutput(); err != nil {
+		t.Fatalf("actual default CLI repeat failed: %v\n%s", err, out)
+	}
+	if after, err := os.ReadFile(f.manifest); err != nil || !bytes.Equal(repaired, after) {
+		t.Fatalf("actual default CLI repeat changed repaired manifest bytes: %v", err)
+	}
 	if proxy != nil && (proxy.connects.Load() == 0 || proxy.requests.Load() == 0) {
 		t.Fatal("actual Linux CLI bypassed the credential-free default API fixture")
 	}

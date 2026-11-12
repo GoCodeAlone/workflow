@@ -225,6 +225,18 @@ func syncDefault(registryDir string, fix bool, pluginFilter string, verifyCaps b
 			}
 		}
 
+		// A complete local role manifest may outlive a missing or duplicated
+		// upstream archive. Validate the selected current release before the
+		// no-change path, even when capability execution was not requested.
+		if !bumpVersion && registrySyncRole(ghRepo, pluginName).artifact != "" {
+			if _, err := registrySyncCatalogDownloads(ghRepo, targetTag, pluginName); err != nil {
+				fmt.Fprintf(os.Stderr, "  ERROR  %s — list release downloads for %s: %v\n", pluginName, targetTag, err)
+				mismatches++
+				failures++
+				continue
+			}
+		}
+
 		metadataChanged := false
 		pluginJSON, err := registrySyncCatalogMetadata(ghRepo, targetTag, pluginName)
 		if err != nil {
