@@ -110,5 +110,11 @@
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "state": "active",
     "presence": "present"
+  },
+  {
+    "path": ".github/workflows/pre-release.yml",
+    "contextSHA256": "e2f8089428c6bd42d84864f9df33873a63b7e4ba4733769915f594f6027a69a4",
+    "state": "staged",
+    "presence": "present"
   }
 ]
