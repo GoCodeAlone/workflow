@@ -433,7 +433,8 @@ func NewSQLiteEventStore(dbPath string) (*SQLiteEventStore, error) {
 			return nil, fmt.Errorf("create data directory: %w", err)
 		}
 	}
-	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000"
+	// Use modernc's per-connection pragma syntax and retain FULL durability.
+	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
