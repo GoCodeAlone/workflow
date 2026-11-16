@@ -694,6 +694,91 @@ modules:
 - `{{config "key"}}` expressions are expanded in all `config` blocks across `modules`, `pipelines`, `workflows`, and `triggers`
 - Environment variable source reads `APP_DATABASE_URL` for key `database_url` when `prefix: "APP_"`
 
+### Private Step Credentials
+
+`config.provider.config.step_credentials` explicitly authorizes private credential
+delivery to an exact external step. This is an application-scoped grant, not a
+tenant wildcard or automatic discovery of sensitive fields.
+
+The following is a **configuration excerpt, not a complete runnable application**.
+It omits plugin loading and remaining capture configuration. Supply the named
+environment variables through the operator's environment; no token belongs in
+this YAML. The full native child-pipeline proof is in
+[`engine_step_credentials_test.go`](../engine_step_credentials_test.go), with
+results and limitations in the
+[validation ledger](validation/2026-10-05-scoped-step-credentials.md).
+
+```yaml
+modules:
+  - name: app-config
+    type: config.provider
+    config:
+      schema:
+        product_capture.compute_token:
+          env: PRODUCT_CAPTURE_COMPUTE_TOKEN
+          required: true
+          sensitive: true
+        server_url:
+          env: PRODUCT_CAPTURE_SERVER_URL
+          required: true
+      sources:
+        - type: defaults
+        - type: env
+      step_credentials:
+        - plugin: workflow-plugin-product-capture
+          step_type: step.product_capture
+          step_name: capture
+          field: auth_token_ref
+          ref: config:product_capture.compute_token
+          scope: application
+
+pipelines:
+  capture-child:
+    steps:
+      - name: capture
+        type: step.product_capture
+        config:
+          server_url: '{{ config "server_url" | default "" }}'
+          auth_token_ref: config:product_capture.compute_token
+          url_field: url
+```
+
+The grant matches the trusted manager-registered plugin identity, exact step type
+and name, and a root configuration field containing exactly the literal `ref`.
+The plugin/type names above are example consumer data, not provider-specific host
+branches. Unknown grant fields, duplicate fields/references or ambiguous step
+declarations, missing or templated references, mismatches, and unsupported scopes
+or sources fail closed.
+Only `scope: application` and literal `config:` references are supported; Vault,
+tenant scope and wildcards are not. Neither `sensitive: true` nor schema metadata
+authorizes delivery.
+
+A credentialed build requires exactly one `config.provider`. Use a separate
+`configprovider.New()` instance per application; reuse after a credentialed build
+is rejected. The transform loads and freezes one snapshot, used for expansion,
+module registration, credential resolution and same-app runtime URL evaluation
+in both Go templates and `${ config("server_url") }` expressions. `Init` does not
+reload environment values. Private lookups never fall back to the compatibility
+global registry; environment rotation requires rebuilding with a fresh instance.
+Absent or empty grants preserve the existing no-grant behavior.
+
+Delivery uses only a fresh per-call legacy `ExecuteStepRequest.Config.config`
+namespace, keyed by `product_capture.compute_token` in this example. Creation
+retains the literal reference. No new credential carrier is placed in shared
+metadata, pipeline input, outputs, environment or workload payloads. Granted
+steps allow only an absent contract descriptor, `UNSPECIFIED` or `LEGACY_STRUCT`;
+typed modes and unknown numeric modes reject before private lookup or RPC.
+Credential echoes in returned strings/keys or errors are rejected, not rewritten
+into otherwise legitimate consumer payloads, receipts or artifacts.
+
+Native plugins remain trusted: an authorized process can retain a received value.
+Existing legacy global-registry and inherited-environment access is not removed;
+this feature does not retrofit a process sandbox or protect against arbitrary
+encoding by a malicious plugin. To roll back, withdraw `step_credentials` and
+rebuild. The released v0.1.65 no-grant control stops with the original unresolved
+reference and zero Compute requests, rather than using an input/metadata/env
+fallback.
+
 ---
 
 <!-- section: platform -->

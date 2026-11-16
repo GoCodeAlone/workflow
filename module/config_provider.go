@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/interfaces"
 	"github.com/GoCodeAlone/workflow/pipeline"
 )
 
@@ -59,6 +60,56 @@ func NewConfigRegistry() *ConfigRegistry {
 		values:    make(map[string]string),
 		sensitive: make(map[string]bool),
 	}
+}
+
+// MirrorConfigRegistry publishes a completed snapshot for legacy readers only.
+func MirrorConfigRegistry(registry *ConfigRegistry) {
+	registry.mu.RLock()
+	values := make(map[string]string, len(registry.values))
+	sensitive := make(map[string]bool, len(registry.sensitive))
+	for k, v := range registry.values {
+		values[k] = v
+	}
+	for k, v := range registry.sensitive {
+		sensitive[k] = v
+	}
+	frozen := registry.frozen
+	registry.mu.RUnlock()
+	globalConfigRegistry.mu.Lock()
+	globalConfigRegistry.values, globalConfigRegistry.sensitive, globalConfigRegistry.frozen = values, sensitive, frozen
+	globalConfigRegistry.mu.Unlock()
+}
+
+// LoadConfigProvider reuses the provider's schema/source validation in both paths.
+func LoadConfigProvider(registry *ConfigRegistry, cfg map[string]any) error {
+	schemaRaw, ok := cfg["schema"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("config.provider requires a 'schema' section")
+	}
+	schema, err := ParseSchema(schemaRaw)
+	if err != nil {
+		return fmt.Errorf("invalid schema: %w", err)
+	}
+	sourcesRaw, ok := cfg["sources"]
+	if !ok {
+		return fmt.Errorf("config.provider requires a 'sources' section")
+	}
+	sourcesSlice, ok := sourcesRaw.([]any)
+	if !ok {
+		return fmt.Errorf("'sources' must be a list")
+	}
+	sources := make([]map[string]any, 0, len(sourcesSlice))
+	for _, s := range sourcesSlice {
+		source, ok := s.(map[string]any)
+		if !ok {
+			return fmt.Errorf("each source must be a map")
+		}
+		sources = append(sources, source)
+	}
+	if err := LoadConfigSources(registry, sources, schema); err != nil {
+		return fmt.Errorf("loading config sources: %w", err)
+	}
+	return ValidateRequired(registry, schema)
 }
 
 // Set stores a value in the registry. Returns an error if the registry is frozen.
@@ -265,9 +316,20 @@ func expandConfigRefsSlice(registry *ConfigRegistry, items []any) {
 // build time via the ConfigTransformHook. The module exists to hold the config
 // registry reference for service discovery.
 type ConfigProviderModule struct {
-	name     string
-	config   map[string]any
-	registry *ConfigRegistry
+	name       string
+	config     map[string]any
+	registry   *ConfigRegistry
+	binder     interfaces.StepCredentialBinder
+	privateErr error
+}
+
+// NewConfigProviderModuleWithCredentials takes the exact transform snapshot.
+func NewConfigProviderModuleWithCredentials(name string, registry *ConfigRegistry, grants []interfaces.StepCredentialGrant) *ConfigProviderModule {
+	binder, err := NewStepCredentialBinder(registry, grants)
+	if len(grants) == 0 && err == nil {
+		err = fmt.Errorf("private config provider requires grants")
+	}
+	return &ConfigProviderModule{name: name, registry: registry, binder: binder, privateErr: err}
 }
 
 // NewConfigProviderModule creates a new ConfigProviderModule.
@@ -287,6 +349,20 @@ func (m *ConfigProviderModule) Dependencies() []string { return nil }
 
 // Init registers the config registry as a service in the application.
 func (m *ConfigProviderModule) Init(app modular.Application) error {
+	if m.privateErr != nil {
+		return m.privateErr
+	}
+	if m.binder != nil {
+		if _, exists := app.GetServiceEntry(StepCredentialsService); exists {
+			return fmt.Errorf("step credentials service already registered")
+		}
+		if _, exists := app.GetServiceEntry("config.registry"); exists {
+			return fmt.Errorf("private config registry already registered")
+		}
+		if err := app.RegisterService(StepCredentialsService, m.binder); err != nil {
+			return err
+		}
+	}
 	return app.RegisterService("config.registry", m.registry)
 }
 

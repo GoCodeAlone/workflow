@@ -2,10 +2,71 @@ package secrets
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
 )
+
+func TestRedactorContainsValueNestedEscapes(t *testing.T) {
+	r := NewRedactor()
+	r.AddValue("credential", "dummy-private-a")
+	encoded := `{"echo":"\u0064ummy-private-a"}`
+	for range 10 {
+		raw, _ := json.Marshal(encoded)
+		encoded = string(raw)
+	}
+	if !r.ContainsValue(encoded) {
+		t.Fatal("nested JSON escaping bypassed detector")
+	}
+	if r.ContainsValue(`{"ordinary":"\\u0064ummy-public-a"}`) {
+		t.Fatal("ordinary escaped payload rejected")
+	}
+}
+
+func TestRedactorContainsValue(t *testing.T) {
+	var nilRedactor *Redactor
+	for _, r := range []*Redactor{nilRedactor, {}, NewRedactor()} {
+		detector, ok := any(r).(interface{ ContainsValue(string) bool })
+		if !ok {
+			t.Fatal("known-value presence detector missing")
+		}
+		if detector.ContainsValue("ordinary") {
+			t.Fatal("empty detector matched")
+		}
+		r.AddValue("credential", "[REDACTED:credential]")
+		if r != nil && !detector.ContainsValue("[REDACTED:credential]") {
+			t.Fatal("replacement-marker-equal value missed")
+		}
+	}
+	r := NewRedactor()
+	r.AddValue("credential", "dummy-\"private\na")
+	detector, ok := any(r).(interface{ ContainsValue(string) bool })
+	if !ok {
+		t.Fatal("known-value presence detector missing")
+	}
+	for _, s := range []string{"echo dummy-\"private\na", `{"echo":"dummy-\"private\na"}`, `dummy-%22private%0Aa`} {
+		if !detector.ContainsValue(s) {
+			t.Fatal("escaped credential missed")
+		}
+	}
+	if detector.ContainsValue("ordinary [REDACTED:other]") {
+		t.Fatal("ordinary marker matched")
+	}
+	r.AddValue("unicode", "dummy-private-a")
+	if !detector.ContainsValue(`{"echo":"\u0064ummy-private-a"}`) {
+		t.Fatal("unicode JSON escape missed")
+	}
+	if !detector.ContainsValue(`provider error {"echo":"\u0064ummy-private-a"}`) {
+		t.Fatal("escaped JSON embedded in free text missed")
+	}
+	if err := r.LoadFromProvider(context.Background(), &stubProvider{vals: map[string]string{"new": "new-value"}}); err != nil {
+		t.Fatal(err)
+	}
+	if detector.ContainsValue("dummy-private-a") || !detector.ContainsValue("new-value") {
+		t.Fatal("detector diverged from known-value store")
+	}
+}
 
 // stubProvider is a minimal in-memory secrets.Provider used to exercise
 // Redactor.LoadFromProvider. It satisfies the full Provider interface
@@ -96,6 +157,7 @@ func TestRedactor_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = r.Redact("v")
+			_ = r.ContainsValue("v")
 		}()
 	}
 	wg.Wait() // -race: no data race

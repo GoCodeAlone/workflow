@@ -18,11 +18,19 @@ import (
 //	${ steps["parse"]["id"] }          – hyphenated step names
 //	${ x == "active" && y > 5 }        – boolean / comparison
 //	${ "Hello " + body.name }          – string concat
-type ExprEngine struct{}
+type ExprEngine struct {
+	configLookup func(string) (string, bool)
+	scopedConfig bool
+}
 
 // NewExprEngine creates a new ExprEngine.
 func NewExprEngine() *ExprEngine {
 	return &ExprEngine{}
+}
+
+// NewExprEngineWithConfigLookup uses a private, non-shadowable config helper.
+func NewExprEngineWithConfigLookup(lookup func(string) (string, bool)) *ExprEngine {
+	return &ExprEngine{configLookup: lookup, scopedConfig: true}
 }
 
 // exprEnv builds the evaluation environment from a PipelineContext,
@@ -45,6 +53,9 @@ func (e *ExprEngine) exprEnv(pc *interfaces.PipelineContext) map[string]any {
 
 	// Current merged state at top level (overrides same-named functions).
 	maps.Copy(env, pc.Current)
+	if e.scopedConfig {
+		env["config"] = configLookupFunc(e.configLookup)
+	}
 
 	// Named namespaces always win — they override same-named data fields so that
 	// steps["x"], trigger, body, meta are always namespace references.

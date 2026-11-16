@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -12,7 +13,11 @@ import (
 	"github.com/GoCodeAlone/workflow/config"
 	"github.com/GoCodeAlone/workflow/deploy"
 	"github.com/GoCodeAlone/workflow/iac/providerclient"
+	"github.com/GoCodeAlone/workflow/interfaces"
+	"github.com/GoCodeAlone/workflow/module"
+	"github.com/GoCodeAlone/workflow/pipeline"
 	"github.com/GoCodeAlone/workflow/plugin"
+	"github.com/GoCodeAlone/workflow/plugin/external/internal/structpbutil"
 	pb "github.com/GoCodeAlone/workflow/plugin/external/proto"
 	"github.com/GoCodeAlone/workflow/schema"
 	"google.golang.org/grpc"
@@ -352,6 +357,10 @@ func contractModeUsesTyped(mode pb.ContractMode) bool {
 	return mode == pb.ContractMode_CONTRACT_MODE_STRICT_PROTO || mode == pb.ContractMode_CONTRACT_MODE_PROTO_WITH_LEGACY_STRUCT
 }
 
+func stepCredentialContractAllowed(contract *pb.ContractDescriptor) bool {
+	return contract == nil || contract.Mode == pb.ContractMode_CONTRACT_MODE_UNSPECIFIED || contract.Mode == pb.ContractMode_CONTRACT_MODE_LEGACY_STRUCT
+}
+
 // --- NativePlugin interface ---
 
 func (a *ExternalPluginAdapter) Name() string                            { return a.manifest.Name }
@@ -514,8 +523,33 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 	factories := make(map[string]plugin.StepFactory, len(resp.Types))
 	for _, typeName := range resp.Types {
 		tn := typeName // capture
-		factories[tn] = func(name string, cfg map[string]any, _ modular.Application) (any, error) {
+		factories[tn] = func(name string, cfg map[string]any, app modular.Application) (any, error) {
 			contract := a.contracts.step(tn)
+			var bound *interfaces.BoundStepCredentials
+			if app != nil {
+				var binder interfaces.StepCredentialBinder
+				if err := app.GetService(module.StepCredentialsService, &binder); err == nil {
+					copiedConfig := structpbutil.NormalizeMap(cfg)
+					var bindErr error
+					bound, bindErr = binder.BindStep(interfaces.StepCredentialTarget{Plugin: a.name, StepType: tn, StepName: name}, copiedConfig)
+					if bindErr != nil {
+						return nil, errors.New("remote step credential binding failed")
+					}
+					if bound != nil {
+						cfg = copiedConfig
+					}
+				} else if !errors.Is(err, modular.ErrServiceNotFound) {
+					return nil, errors.New("remote step credential service unavailable")
+				}
+			}
+			if bound != nil {
+				if !stepCredentialContractAllowed(contract) {
+					return nil, errors.New("remote step credentials require a legacy contract")
+				}
+				if bound.ConfigLookup == nil || bound.ValidateConfig == nil || bound.Resolve == nil {
+					return nil, errors.New("remote step credential binding incomplete")
+				}
+			}
 			config, typedConfig, configErr := createTypedConfigRequest(contract, cfg, a.contractTypes)
 			if configErr != nil {
 				return nil, fmt.Errorf("create remote step %s: %w", tn, configErr)
@@ -529,10 +563,18 @@ func (a *ExternalPluginAdapter) StepFactories() map[string]plugin.StepFactory {
 			if createErr != nil {
 				return nil, fmt.Errorf("create remote step %s: %w", tn, createErr)
 			}
+			if createResp == nil {
+				return nil, errors.New("create remote step: empty response")
+			}
 			if createResp.Error != "" {
 				return nil, fmt.Errorf("create remote step %s: %s", tn, createResp.Error)
 			}
-			return NewRemoteStepWithContractTypes(name, createResp.HandleId, a.client.client, cfg, contract, a.contractTypes), nil
+			step := NewRemoteStepWithContractTypes(name, createResp.HandleId, a.client.client, cfg, contract, a.contractTypes)
+			if bound != nil {
+				step.credentials = bound
+				step.tmpl = pipeline.NewTemplateEngineWithConfigLookup(bound.ConfigLookup)
+			}
+			return step, nil
 		}
 	}
 	return factories
