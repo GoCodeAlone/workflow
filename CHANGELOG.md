@@ -31,6 +31,12 @@ Configs that still reference the legacy types now fail to load with an actionabl
   the stable service. The legacy `BlueGreenDriver` names remain available for
   existing providers and `step.deploy_blue_green` configs.
 
+- Typed managed agent token issuance on `M2MAuthModule`, requiring a dedicated
+  managed-only issuer, explicit stable ES256 key, approved grant bindings and a
+  lifetime capped at 15 minutes. Generic token/revoke/introspection handlers are
+  denied only for explicitly managed-only instances; legacy behavior is retained.
+  See [Managed agent tokens](docs/MANAGED_AGENT_TOKENS.md).
+
 ### Fixed
 
 - Plugin-owned top-level wfctl commands now resolve project-local installs from
