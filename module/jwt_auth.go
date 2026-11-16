@@ -35,6 +35,8 @@ type JWTAuthModule struct {
 	secret            string
 	tokenExpiry       time.Duration
 	issuer            string
+	audience          string
+	validateAudience  bool
 	seedFile          string
 	responseFormat    string           // "standard" (default) or "v1" (access_token/refresh_token)
 	users             map[string]*User // keyed by email (used when no external userStore)
@@ -64,6 +66,14 @@ func NewJWTAuthModule(name, secret string, tokenExpiry time.Duration, issuer str
 		users:       make(map[string]*User),
 		nextID:      1,
 	}
+}
+
+// SetAudience opts into issuer and audience validation for every JWT entry point.
+// Configure this before Init. Explicitly configured audiences must be nonempty.
+// Omit this call to preserve legacy validation.
+func (j *JWTAuthModule) SetAudience(audience string) {
+	j.audience = audience
+	j.validateAudience = true
 }
 
 // SetSeedFile sets the path to a JSON file of seed users to load on start.
@@ -105,6 +115,9 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 	if len(j.secret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 bytes for security")
 	}
+	if err := j.validateAudienceConfig(); err != nil {
+		return err
+	}
 	j.app = app
 	j.logger = app.Logger()
 
@@ -127,9 +140,24 @@ func (j *JWTAuthModule) Init(app modular.Application) error {
 	return nil
 }
 
-// Authenticate implements AuthProvider
-func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]any, error) {
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
+func (j *JWTAuthModule) validateAudienceConfig() error {
+	if j.validateAudience && strings.TrimSpace(j.audience) == "" {
+		return fmt.Errorf("JWT audience must be a nonempty string when configured")
+	}
+	return nil
+}
+
+// parseToken applies the same algorithm and optional environment boundary to
+// authentication, profile requests, and refresh requests.
+func (j *JWTAuthModule) parseToken(tokenStr string) (*jwt.Token, error) {
+	if err := j.validateAudienceConfig(); err != nil {
+		return nil, err
+	}
+	var options []jwt.ParserOption
+	if j.validateAudience {
+		options = append(options, jwt.WithIssuer(j.issuer), jwt.WithAudience(j.audience))
+	}
+	return jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -137,7 +165,12 @@ func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]any, err
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(j.secret), nil
-	})
+	}, options...)
+}
+
+// Authenticate implements AuthProvider
+func (j *JWTAuthModule) Authenticate(tokenStr string) (bool, map[string]any, error) {
+	token, err := j.parseToken(tokenStr)
 	if err != nil {
 		return false, nil, nil //nolint:nilerr // Invalid token is a failed auth, not an error
 	}
@@ -426,15 +459,7 @@ func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
 		return nil, fmt.Errorf("bearer token required")
 	}
 
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(j.secret), nil
-	})
+	token, err := j.parseToken(tokenStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token")
 	}
@@ -458,6 +483,9 @@ func (j *JWTAuthModule) extractUserFromRequest(r *http.Request) (*User, error) {
 }
 
 func (j *JWTAuthModule) generateToken(user *User) (string, error) {
+	if err := j.validateAudienceConfig(); err != nil {
+		return "", err
+	}
 	claims := jwt.MapClaims{
 		"sub":   user.ID,
 		"email": user.Email,
@@ -476,6 +504,10 @@ func (j *JWTAuthModule) generateToken(user *User) (string, error) {
 	}
 	if programIds, ok := user.Metadata["programIds"].([]any); ok && len(programIds) > 0 {
 		claims["programIds"] = programIds
+	}
+
+	if j.audience != "" {
+		claims["aud"] = j.audience
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -497,6 +529,9 @@ func (j *JWTAuthModule) buildUserResponse(user *User) map[string]any {
 
 // generateRefreshToken creates a refresh JWT with longer expiry (7 days) and a "refresh" type claim.
 func (j *JWTAuthModule) generateRefreshToken(user *User) (string, error) {
+	if err := j.validateAudienceConfig(); err != nil {
+		return "", err
+	}
 	claims := jwt.MapClaims{
 		"sub":   user.ID,
 		"email": user.Email,
@@ -505,6 +540,10 @@ func (j *JWTAuthModule) generateRefreshToken(user *User) (string, error) {
 		"iat":   time.Now().Unix(),
 		"exp":   time.Now().Add(7 * 24 * time.Hour).Unix(),
 	}
+	if j.audience != "" {
+		claims["aud"] = j.audience
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(j.secret))
 }
@@ -526,15 +565,7 @@ func (j *JWTAuthModule) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := jwt.Parse(req.RefreshToken, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(j.secret), nil
-	})
+	token, err := j.parseToken(req.RefreshToken)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid refresh token"})

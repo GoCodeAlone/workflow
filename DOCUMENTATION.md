@@ -63,6 +63,18 @@ All modules are instantiated from YAML config via the plugin factory registry. O
 
 > `auth.modular` was removed in favor of `auth.jwt`.
 
+`auth.jwt` accepts an optional `audience` string. A configured value adds the
+`aud` claim to access and refresh tokens and requires both that audience and
+the configured `issuer` when authenticating, reading profiles, or refreshing
+tokens. Configure distinct issuer/audience pairs for environments that must
+not accept each other's tokens. Legacy tokens without those claims are rejected
+when this option is enabled; users must sign in again. Omitting `audience`
+preserves legacy validation. An explicitly configured empty or non-string
+audience fails initialization and validation instead of falling back to legacy
+behavior. Every environment in a mutual trust boundary must
+enforce the policy before relying on it, especially when signing keys are shared.
+
+
 ### API & CQRS
 | Type | Description | Plugin |
 |------|-------------|--------|
