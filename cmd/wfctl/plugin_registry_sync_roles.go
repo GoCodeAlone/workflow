@@ -100,6 +100,20 @@ func registrySyncDownloadsMatchRole(raw map[string]any, repo, catalog string) bo
 	return err == nil && len(selected) == len(downloads)
 }
 
+func (role registrySyncCatalogRole) validateMetadata(metadata map[string]any) error {
+	if role.metadataFile != "plugin.atlas.json" {
+		return nil
+	}
+	if metadata["name"] != role.artifact {
+		return fmt.Errorf("%s name must be %s", role.metadataFile, role.artifact)
+	}
+	capabilities, ok := metadata["capabilities"].(map[string]any)
+	if !ok || len(capabilities) == 0 {
+		return fmt.Errorf("%s capabilities must be a non-empty object", role.metadataFile)
+	}
+	return nil
+}
+
 func registrySyncCatalogMetadata(repo, tag, catalog string) (map[string]any, error) {
 	role := registrySyncRole(repo, catalog)
 	if role.metadataFile == "plugin.json" {
@@ -109,8 +123,8 @@ func registrySyncCatalogMetadata(repo, tag, catalog string) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	if metadata["name"] != role.artifact {
-		return nil, fmt.Errorf("%s name must be %s", role.metadataFile, role.artifact)
+	if err := role.validateMetadata(metadata); err != nil {
+		return nil, err
 	}
 	return metadata, nil
 }

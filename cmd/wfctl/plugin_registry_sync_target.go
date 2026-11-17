@@ -310,8 +310,8 @@ func registrySyncReadRelease(repo, tag, catalog string) (*registrySyncReleaseSna
 		if err := registrySyncDecodeJSON(snapshot.PluginJSON, &metadata); err != nil {
 			return nil, fmt.Errorf("parse source %s: %w", role.metadataFile, err)
 		}
-		if metadata["name"] != role.artifact {
-			return nil, fmt.Errorf("%s name must be %s", role.metadataFile, role.artifact)
+		if err := role.validateMetadata(metadata); err != nil {
+			return nil, err
 		}
 	}
 	return snapshot, nil

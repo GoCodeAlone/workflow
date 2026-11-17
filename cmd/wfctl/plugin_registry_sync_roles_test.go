@@ -24,6 +24,7 @@ type catalogRoleFixture struct {
 	assets                                []releaseAsset
 	atlasVersion                          string
 	atlasName                             string
+	atlasMetadata                         []byte
 	missingAtlas                          bool
 	mutateSibling                         bool
 	apiURL                                string
@@ -137,6 +138,9 @@ func newCatalogRoleFixture(t *testing.T, catalog string) *catalogRoleFixture {
 
 func (f *catalogRoleFixture) metadata(atlas bool) []byte {
 	if atlas {
+		if f.atlasMetadata != nil {
+			return f.atlasMetadata
+		}
 		return []byte(fmt.Sprintf(`{"name":%q,"version":%q,"type":"external","minEngineVersion":"0.80.24","capabilities":{"moduleTypes":["database.migrations","database.migration_driver"],"migrationDrivers":["atlas"],"stepTypes":[],"cliCommands":[],"triggerTypes":[],"buildHooks":[],"configProvider":false}}`, f.atlasName, f.atlasVersion))
 	}
 	if f.catalog == "github" {
@@ -447,6 +451,97 @@ func TestPluginRegistrySync_CatalogRoles_RejectWrongMetadataIdentity(t *testing.
 			}
 			if after, _ := os.ReadFile(f.manifest); !bytes.Equal(before, after) {
 				t.Fatal("wrong metadata identity changed manifest bytes")
+			}
+		})
+	}
+}
+
+func TestPluginRegistrySync_CatalogRoles_RejectInvalidAtlasCapabilities(t *testing.T) {
+	cases := []struct {
+		name  string
+		value any
+	}{
+		{"missing", nil},
+		{"null", nil},
+		{"list", []any{}},
+		{"string", "invalid"},
+		{"boolean", false},
+		{"number", 0},
+		{"empty-object", map[string]any{}},
+	}
+	for _, mode := range []string{"default-current", "default-update", "target-current", "target-update"} {
+		t.Run(mode, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					f := newCatalogRoleFixture(t, "workflow-plugin-atlas-migrate")
+					if strings.HasSuffix(mode, "-update") {
+						f.writeManifest(t, "0.4.0", f.selected())
+					}
+					// Establish the existing stale sibling contract before corrupting
+					// only the otherwise valid Atlas source metadata.
+					raw, err := readJSONFile(f.manifest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var sibling, metadata map[string]any
+					if err := json.Unmarshal(f.metadata(false), &sibling); err != nil {
+						t.Fatal(err)
+					}
+					raw["capabilities"] = sibling["capabilities"]
+					before, err := json.MarshalIndent(raw, "", "  ")
+					if err != nil {
+						t.Fatal(err)
+					}
+					before = append(before, '\n')
+					mustWrite(t, f.manifest, string(before))
+					if err := json.Unmarshal(f.metadata(true), &metadata); err != nil {
+						t.Fatal(err)
+					}
+					if tc.name == "missing" {
+						delete(metadata, "capabilities")
+					} else {
+						metadata["capabilities"] = tc.value
+					}
+					f.atlasMetadata, err = json.Marshal(metadata)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Setenv("CATALOG_TEST_ATLAS", base64.StdEncoding.EncodeToString(f.atlasMetadata))
+					var diagnostic string
+					if strings.HasPrefix(mode, "default-") {
+						stderr, createErr := os.CreateTemp(t.TempDir(), "sync-stderr")
+						if createErr != nil {
+							t.Fatal(createErr)
+						}
+						func() {
+							previous := os.Stderr
+							os.Stderr = stderr
+							defer func() { os.Stderr = previous }()
+							err = syncDefault(f.root, true, f.catalog, false)
+						}()
+						if closeErr := stderr.Close(); closeErr != nil {
+							t.Fatal(closeErr)
+						}
+						output, readErr := os.ReadFile(stderr.Name())
+						if readErr != nil {
+							t.Fatal(readErr)
+						}
+						diagnostic = string(output)
+					} else {
+						err = syncRegistryTarget(f.root, f.catalog, "v0.4.1", true, false)
+						diagnostic = fmt.Sprint(err)
+					}
+					if err == nil || !strings.Contains(diagnostic, "capabilities must be a non-empty object") {
+						t.Errorf("want capability-object rejection, got error %v, diagnostic %q", err, diagnostic)
+					}
+					after, err := os.ReadFile(f.manifest)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(before, after) {
+						t.Fatal("invalid Atlas capabilities changed manifest bytes")
+					}
+				})
 			}
 		})
 	}

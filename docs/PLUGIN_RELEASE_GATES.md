@@ -166,9 +166,12 @@ catalogs select their full plugin archives for Darwin, Linux, and Windows
 Darwin/Linux Atlas plugin archives from the migrations repository and reads
 `plugin.atlas.json` for its driver-only capabilities. Standalone tools and
 sibling plugins are excluded, including when repairing same-version drift
-or choosing the binary for `--verify-capabilities`. Missing or duplicate
-required archives, or missing/incorrect Atlas metadata, fail without writing
-that manifest; `--fix` returns an error when a repair cannot be completed.
+or choosing the binary for `--verify-capabilities`. Atlas source metadata must
+have the expected name and a nonempty `capabilities` object; this structural
+check does not validate the semantics of arbitrary capability members. Missing
+or duplicate required archives, missing/unparseable Atlas metadata, or an invalid
+Atlas name/capability object fail without writing that manifest; `--fix` returns
+an error when a repair cannot be completed.
 
 Explicit target/report mode applies the same catalog selection while retaining
 whole-release identity/checksum and source-commit checks across both reads.
