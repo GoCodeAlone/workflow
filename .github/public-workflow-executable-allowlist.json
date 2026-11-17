@@ -70,5 +70,13 @@
     "sha256": "9b857524e8b736a104e1aa65a3fa5edeaf76a3787ba8942871992675440f550b",
     "state": "active",
     "rationale": "Staged v0.86 CI authority. Exercises fail-closed public workflow policy mutations in CI."
+  },
+  {
+    "path": "scripts/benchmark-pair.py",
+    "workflowPath": ".github/workflows/benchmark.yml",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "sha256": "3ad7c256460ff771bef6769e17a4c9f9fa048db348210acb736a75c652ad1b39",
+    "state": "staged",
+    "rationale": "Exact paired collection/provenance helper; inert review inventory, not runtime authorization."
   }
 ]
