@@ -1114,6 +1114,12 @@ func parseGitHubReleaseDownloadURL(rawURL string) (owner, repo, tag, filename st
 // (github.com/.../releases/download/.../file) redirects to a signed S3 URL and
 // does not propagate the Authorization header correctly.
 func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byte, error) {
+	return downloadGitHubReleaseAssetWithTimeout(owner, repo, tag, filename, token, downloadTimeout)
+}
+
+// downloadGitHubReleaseAssetWithTimeout gives each asset its own deadline while
+// retaining the bounded, separate release-metadata request.
+func downloadGitHubReleaseAssetWithTimeout(owner, repo, tag, filename, token string, assetTimeout time.Duration) ([]byte, error) {
 	// Step 1: resolve the asset ID from the release metadata.
 	releaseURL := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", //nolint:gosec // G107
 		gitHubAPIBaseURL,
@@ -1174,7 +1180,7 @@ func downloadGitHubReleaseAsset(owner, repo, tag, filename, token string) ([]byt
 		neturl.PathEscape(repo),
 		assetID,
 	)
-	assetCtx, assetCancel := context.WithTimeout(context.Background(), downloadTimeout)
+	assetCtx, assetCancel := context.WithTimeout(context.Background(), assetTimeout)
 	defer assetCancel()
 	req2, err := http.NewRequestWithContext(assetCtx, http.MethodGet, assetURL, nil)
 	if err != nil {
