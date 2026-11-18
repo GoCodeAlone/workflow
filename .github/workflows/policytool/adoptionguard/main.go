@@ -483,7 +483,7 @@ func validateExecutableTransition(baseRoot, candidateRoot string, active, staged
 		return fmt.Errorf("read candidate executable trust input: %w", err)
 	}
 	if bytes.Equal(baseData, candidateData) {
-		return errors.New("candidate executable trust input must adopt the staged wrapper digest")
+		return errors.New("candidate executable trust input must adopt a staged wrapper or harness digest")
 	}
 	var baseEntries, candidateEntries []executableEntry
 	if err := decodeJSON(baseData, &baseEntries); err != nil {
@@ -497,12 +497,25 @@ func validateExecutableTransition(baseRoot, candidateRoot string, active, staged
 	}
 	activeWrapper, activeOK := authorityDigest(active, policyWrapperPath)
 	stagedWrapper, stagedOK := authorityDigest(staged, policyWrapperPath)
-	if !activeOK || !stagedOK || activeWrapper == stagedWrapper {
-		return errors.New("authority bundles must define distinct active and staged wrapper digests")
+	if !activeOK || !stagedOK {
+		return errors.New("authority bundles must define active and staged wrapper digests")
 	}
 	activeHarness, activeHarnessOK := authorityDigest(active, policyHarnessPath)
 	stagedHarness, stagedHarnessOK := authorityDigest(staged, policyHarnessPath)
 	harnessChanged := activeHarnessOK && stagedHarnessOK && activeHarness != stagedHarness
+	if activeWrapper == stagedWrapper {
+		if !harnessChanged {
+			return errors.New("unchanged wrapper requires a changed staged harness")
+		}
+		// Without a wrapper transition, admit only the already-staged harness.
+		// Other authority changes must use the normal trusted scan or retain
+		// the existing wrapper-changing adoption path.
+		for index, file := range active.Files {
+			if file.Path != policyHarnessPath && file.SHA256 != staged.Files[index].SHA256 {
+				return fmt.Errorf("harness-only adoption cannot change authority file %s", file.Path)
+			}
+		}
+	}
 	baseByKey := make(map[string]executableEntry, len(baseEntries))
 	for _, entry := range baseEntries {
 		if err := validateExecutableEntry(entry); err != nil {

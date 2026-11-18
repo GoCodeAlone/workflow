@@ -404,6 +404,170 @@ func TestRunAuthorizesWrapperAndOptionalHarnessDigests(t *testing.T) {
 	}
 }
 
+func newHarnessOnlyAdoptionFixture(t *testing.T) adoptionFixture {
+	t.Helper()
+	fixture := newHarnessAdoptionFixture(t, true)
+	manifest := readJSON[testAuthorityManifest](t, fixture.base, authorityManifestPath)
+	for index, file := range manifest.Bundles[0].Files {
+		if file.Path == testPolicyHarnessPath {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(fixture.base, file.Path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(filepath.Join(fixture.base, file.Path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFileMode(t, fixture.candidate, file.Path, data, info.Mode().Perm())
+		manifest.Bundles[1].Files[index].SHA256 = file.SHA256
+	}
+	writeJSON(t, fixture.base, authorityManifestPath, manifest)
+	writeJSON(t, fixture.candidate, authorityManifestPath, manifest)
+	entries := readJSON[[]testExecutableEntry](t, fixture.candidate, executableManifestPath)
+	for index := range entries {
+		if entries[index].Path == policyWrapperPath {
+			entries[index].SHA256 = fixture.activeWrapper
+		}
+	}
+	writeJSON(t, fixture.candidate, executableManifestPath, entries)
+	fixture.stagedWrapper = fixture.activeWrapper
+	return fixture
+}
+
+// Change the candidate and its pre-staged identity together so negative cases
+// exercise the admission boundary, rather than only an unstaged-byte mismatch.
+func restageHarnessOnlyFixtureFile(t *testing.T, fixture adoptionFixture, relative string, data []byte) {
+	t.Helper()
+	info, err := os.Stat(filepath.Join(fixture.candidate, relative))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFileMode(t, fixture.candidate, relative, data, info.Mode().Perm())
+	manifest := readJSON[testAuthorityManifest](t, fixture.base, authorityManifestPath)
+	found := false
+	for index := range manifest.Bundles[1].Files {
+		if manifest.Bundles[1].Files[index].Path == relative {
+			manifest.Bundles[1].Files[index].SHA256 = digest(data)
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fixture authority does not contain %s", relative)
+	}
+	writeJSON(t, fixture.base, authorityManifestPath, manifest)
+	writeJSON(t, fixture.candidate, authorityManifestPath, manifest)
+}
+
+func TestRunAuthorizesExactHarnessOnlyAdoption(t *testing.T) {
+	fixture := newHarnessOnlyAdoptionFixture(t)
+	code, stdout, stderr := invokeGuard(fixture)
+	if code != 0 || stdout != expectedAuthorizationMarker+"\n" || stderr != "" {
+		t.Fatalf("exact harness-only adoption: exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestRunRejectsHarnessOnlyDriftWithoutAuthorizationMarker(t *testing.T) {
+	for _, mutation := range []string{
+		"noop", "noop-format", "stage-and-adopt", "analyzer", "analyzer-tests", "guard", "guard-tests", "launcher",
+		"unstaged-harness", "partial-active-harness", "partial-staged-harness",
+		"wrong-base-harness", "wrong-harness", "wrong-base-wrapper", "wrapper-pin",
+		"missing-harness-rows", "missing-wrapper-rows", "duplicate", "base-duplicate",
+		"metadata", "order", "cardinality", "unrelated-digest", "extra-file",
+		"workflow", "authority-manifest", "harness-mode", "symlink",
+	} {
+		t.Run(mutation, func(t *testing.T) {
+			fixture := newHarnessOnlyAdoptionFixture(t)
+			entries := readJSON[[]testExecutableEntry](t, fixture.candidate, executableManifestPath)
+			baseEntries := readJSON[[]testExecutableEntry](t, fixture.base, executableManifestPath)
+			switch mutation {
+			case "noop", "noop-format":
+				data, err := os.ReadFile(filepath.Join(fixture.base, testPolicyHarnessPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				restageHarnessOnlyFixtureFile(t, fixture, testPolicyHarnessPath, data)
+				entries = append([]testExecutableEntry(nil), baseEntries...)
+			case "stage-and-adopt":
+				manifest := readJSON[testAuthorityManifest](t, fixture.base, authorityManifestPath)
+				manifest.Bundles = manifest.Bundles[:1]
+				writeJSON(t, fixture.base, authorityManifestPath, manifest)
+			case "analyzer", "analyzer-tests", "guard", "guard-tests", "launcher":
+				relative := map[string]string{
+					"analyzer":       ".github/workflows/policytool/main.go",
+					"analyzer-tests": ".github/workflows/policytool/main_test.go",
+					"guard":          ".github/workflows/policytool/adoptionguard/main.go",
+					"guard-tests":    ".github/workflows/policytool/adoptionguard/main_test.go",
+					"launcher":       testPolicyLauncherPath,
+				}[mutation]
+				restageHarnessOnlyFixtureFile(t, fixture, relative, []byte("other staged authority change\n"))
+			case "unstaged-harness":
+				writeFileMode(t, fixture.candidate, testPolicyHarnessPath, []byte("unstaged harness\n"), 0o755)
+			case "partial-active-harness":
+				entries[4].SHA256 = baseEntries[4].SHA256
+			case "partial-staged-harness":
+				entries[5].SHA256 = baseEntries[5].SHA256
+			case "wrong-base-harness":
+				baseEntries[4].SHA256 = strings.Repeat("d", 64)
+			case "wrong-harness":
+				entries[4].SHA256 = strings.Repeat("d", 64)
+			case "wrong-base-wrapper":
+				baseEntries[0].SHA256 = strings.Repeat("d", 64)
+			case "wrapper-pin":
+				entries[0].SHA256 = strings.Repeat("d", 64)
+			case "missing-harness-rows":
+				entries, baseEntries = entries[:4], baseEntries[:4]
+			case "missing-wrapper-rows":
+				entries = []testExecutableEntry{entries[2], entries[4], entries[5]}
+				baseEntries = []testExecutableEntry{baseEntries[2], baseEntries[4], baseEntries[5]}
+			case "duplicate":
+				entries[5] = entries[4]
+			case "base-duplicate":
+				baseEntries[5] = baseEntries[4]
+			case "metadata":
+				entries[4].Rationale = "changed rationale"
+			case "order":
+				entries[4], entries[5] = entries[5], entries[4]
+			case "cardinality":
+				entries = entries[:5]
+			case "unrelated-digest":
+				entries[2].SHA256 = strings.Repeat("d", 64)
+			case "extra-file":
+				writeFile(t, fixture.candidate, "unrelated.txt", []byte("unrelated\n"))
+			case "workflow":
+				writeFile(t, fixture.candidate, policyWorkflowPath, []byte("name: changed\n"))
+			case "authority-manifest":
+				manifest := readJSON[testAuthorityManifest](t, fixture.candidate, authorityManifestPath)
+				manifest.Version++
+				writeJSON(t, fixture.candidate, authorityManifestPath, manifest)
+			case "harness-mode":
+				if err := os.Chmod(filepath.Join(fixture.candidate, testPolicyHarnessPath), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				target := filepath.Join(fixture.candidate, testPolicyHarnessPath)
+				if err := os.Remove(target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Join(fixture.base, testPolicyHarnessPath), target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeJSON(t, fixture.base, executableManifestPath, baseEntries)
+			writeJSON(t, fixture.candidate, executableManifestPath, entries)
+			if mutation == "noop-format" {
+				data, err := os.ReadFile(filepath.Join(fixture.candidate, executableManifestPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeFile(t, fixture.candidate, executableManifestPath, append(data, ' '))
+			}
+			requireRejectedWithoutMarker(t, fixture)
+		})
+	}
+}
+
 func TestRunRejectsHarnessPinDriftWithoutAuthorizationMarker(t *testing.T) {
 	for _, mutation := range []string{
 		"partial-active-harness", "partial-staged-harness", "wrong-harness", "wrong-base-harness", "missing-harness-rows",
@@ -4639,3 +4803,53 @@ func TestPublicWorkflowPolicyBridgeMutationsAreRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicWorkflowPolicyHarnessOnlyActualChain(t *testing.T) {
+	fixture := newActualBridgeFixture(t)
+	active := fixture.root(t, 3, 3)
+	base := bridgeTempRoot(t)
+	bridgeCopyTree(t, active, base)
+	stagedHarness := append([]byte("#!/usr/bin/env bash\nprintf 'harness\\n' >> \"${BRIDGE_CANDIDATE_EXECUTION_MARKER:?}\"\n"), mustBridgeRead(t, active, testPolicyHarnessPath)...)
+	manifest := readJSON[testAuthorityManifest](t, base, authorityManifestPath)
+	staged := manifest.Bundles[0]
+	staged.State = "staged"
+	staged.Files = append([]testAuthorityFile(nil), staged.Files...)
+	found := false
+	for index := range staged.Files {
+		if staged.Files[index].Path == testPolicyHarnessPath {
+			staged.Files[index].SHA256 = digest(stagedHarness)
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("real fixture must inventory the policy harness")
+	}
+	manifest.Bundles = append(manifest.Bundles, staged)
+	writeJSON(t, base, authorityManifestPath, manifest)
+	adopt := bridgeTempRoot(t)
+	bridgeCopyTree(t, base, adopt)
+	writeFileMode(t, adopt, testPolicyHarnessPath, stagedHarness, 0o755)
+	entries := readJSON[[]testExecutableEntry](t, adopt, executableManifestPath)
+	updated := make(map[string]int)
+	for index := range entries {
+		if entries[index].Path == testPolicyHarnessPath {
+			entries[index].SHA256 = digest(stagedHarness)
+			updated[entries[index].State]++
+		}
+	}
+	if updated["active"] == 0 || updated["staged"] == 0 {
+		t.Fatalf("real fixture must include active and unused staged harness rows: %v", updated)
+	}
+	writeJSON(t, adopt, executableManifestPath, entries)
+	for _, event := range []string{"pull_request_target", "push"} {
+		t.Run(event, func(t *testing.T) {
+			result := executeActualBridge(t, base, adopt, event)
+			if result.err != nil || !result.trustedScanFailed || !result.candidateScanSucceeded ||
+				result.authorization != expectedAuthorizationMarker+"\n" ||
+				result.candidateMarkers != "candidate-toolchain\ncandidate-policy\n" {
+				t.Fatalf("harness-only fallback must authorize the candidate scan without executing the harness: %+v", result)
+			}
+		})
+	}
+}
+
