@@ -634,6 +634,17 @@ wfctl plugin search
 
 Download and install a plugin from the registry.
 
+For GitHub release downloads without an explicit manifest checksum, `wfctl`
+fetches `checksums.txt` through the authenticated Releases API when a token is
+available. Token precedence is `RELEASES_TOKEN`, then `GH_TOKEN`, then
+`GITHUB_TOKEN`, matching archive downloads. Authentication or checksum lookup
+failures stop installation rather than falling back to an unauthenticated
+request. The checksum asset has a 30-second download deadline, separate from
+release metadata retrieval; archive download deadlines are unchanged. Public
+unauthenticated and non-GitHub checksum requests retain their existing behavior.
+Archive checksum verification remains required unless explicitly skipped.
+
+
 ```
 wfctl plugin install [options] <name>[@<version>]
 ```
