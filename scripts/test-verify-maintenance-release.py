@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -42,7 +43,7 @@ class ReleaseAdmissionTests(unittest.TestCase):
         self.base = self.rev("HEAD")
         self.run_git("tag", "v0.74.7")
         self.run_git("checkout", "-q", "-b", "source")
-        (self.repo / "module/jwt_auth.go").write_text("baseline\nissuer and audience boundary\n")
+        (self.repo / "module/jwt_auth.go").write_text('baseline\nconst issuer = "issuer and audience boundary"\n')
         self.commit("reviewed backport")
         self.source = self.rev("HEAD")
         self.tree = self.rev("HEAD^{tree}")
@@ -161,8 +162,8 @@ class ReleaseAdmissionTests(unittest.TestCase):
                     self.verify()
 
     def test_other_tag_has_no_exception(self):
-        self.run_git("tag", "v0.74.9", self.release)
-        self.env.update(TAG_NAME="v0.74.9", GITHUB_REF="refs/tags/v0.74.9")
+        self.run_git("tag", "v0.74.10", self.release)
+        self.env.update(TAG_NAME="v0.74.10", GITHUB_REF="refs/tags/v0.74.10")
         with self.assertRaisesRegex(self.guard.Denied, "No exception"):
             self.verify()
 
@@ -275,6 +276,215 @@ class ReleaseAdmissionTests(unittest.TestCase):
         self.run_git("replace", main, fake)
         self.run_git("merge-base", "--is-ancestor", self.release, main)
         self.assertEqual(self.verify(), "reviewed-v0.74.8")
+
+    def checksum_fixture(self):
+        # Keep the legacy JWT fixture and its separate v0.74.8 record intact.
+        self.jwt_release = self.release
+        self.run_git("checkout", "-q", "-b", "checksum-source", self.jwt_release)
+        paths = ("cmd/wfctl/plugin_checksum.go", "cmd/wfctl/plugin_install.go",
+                 ".github/workflows/maintenance-jwt.yml", ".github/workflows/maintenance-wfctl.yml")
+        for name in paths:
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("fixed synthetic content for " + name + "\n")
+        self.commit("checksum source with preserved JWT")
+        self.source = self.rev("HEAD")
+        self.tree = self.rev("HEAD^{tree}")
+        blobs = tuple((name, self.rev(self.source + ":" + name)) for name in paths)
+        self.run_git("checkout", "-q", "maintenance/v0.74")
+        self.run_git("merge", "--squash", "checksum-source")
+        self.commit("checksum maintenance squash")
+        self.release = self.rev("HEAD")
+        self.run_git("tag", "v0.74.9")
+        self.run_git("checkout", "-q", "main")
+        (self.repo / "checksum-upstream.txt").write_text("modeled upstream checksum change\n")
+        self.commit("upstream checksum merge")
+        checksum_upstream = self.rev("HEAD")
+        self.policy = SimpleNamespace(base_commit=self.base, auth_patch_id=self.patch,
+                                      jwt_maintenance_commit=self.jwt_release,
+                                      checksum_upstream_commit=checksum_upstream,
+                                      checksum_blobs=blobs)
+        self.record = dict(self.record, schema=2, tag="v0.74.9", release_commit=self.release,
+                           source_commit=self.source, release_tree=self.tree, source_pr=1108,
+                           source_ci_run=43, checksum_ci_run=44)
+        self.checksum_record(self.record)
+        self.run_git("push", "-q", "origin", "main", "maintenance/v0.74",
+                     "checksum-source:refs/pull/1108/head", "refs/tags/v0.74.9")
+        repository = {"full_name": self.guard.REPOSITORY}
+        self.responses["pulls/1108"] = {
+            "number": 1108, "merged": True, "merge_commit_sha": self.release,
+            "base": {"ref": "maintenance/v0.74", "repo": repository},
+            "head": {"sha": self.source, "repo": repository}}
+        self.responses["pulls/960"] = {
+            "number": 960, "merged": True, "merge_commit_sha": checksum_upstream,
+            "base": {"ref": "main", "repo": repository}, "head": {"repo": repository}}
+        for number, workflow in ((43, "maintenance-jwt.yml"), (44, "maintenance-wfctl.yml")):
+            self.responses[f"actions/runs/{number}"] = {
+                "id": number, "repository": repository, "path": ".github/workflows/" + workflow,
+                "head_sha": self.source, "event": "pull_request", "status": "completed",
+                "conclusion": "success", "pull_requests": [{"number": 1108}]}
+        self.env.update(TAG_NAME="v0.74.9", GITHUB_REF="refs/tags/v0.74.9", GITHUB_SHA=self.release)
+        self.run_git("checkout", "-q", "--detach", self.release)
+
+    def checksum_record(self, record, raw=None):
+        self.run_git("checkout", "-q", "main")
+        path = self.repo / ".github/release-admissions/v0.74.9.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(raw if raw is not None else json.dumps(record))
+        self.commit("proposed checksum admission")
+
+    def update_checksum_record(self, record, raw=None):
+        self.checksum_record(record, raw)
+        self.run_git("push", "-q", "origin", "main")
+        self.run_git("checkout", "-q", "--detach", self.release)
+
+    def test_checksum_release_requires_both_exact_head_checks_and_preserves_jwt(self):
+        self.checksum_fixture()
+        self.assertNotEqual(self.source, self.release)
+        try:
+            result = self.verify()
+        except self.guard.Denied as error:
+            self.fail("Exact checksum/JWT tuple rejected: " + str(error))
+        self.assertEqual(result, "reviewed-v0.74.9")
+
+    def test_checksum_ci_rejects_stale_wrong_workflow_failed_or_foreign_runs(self):
+        self.checksum_fixture()
+        original = copy.deepcopy(self.responses)
+        for run_id in (43, 44):
+            for field, value in (("head_sha", self.jwt_release), ("path", ".github/workflows/other.yml"),
+                                 ("status", "in_progress"), ("conclusion", "failure"),
+                                 ("event", "push"), ("id", run_id + 1),
+                                 ("pull_requests", [{"number": 1041}]),
+                                 ("repository", {"full_name": "attacker/workflow"})):
+                with self.subTest(run=run_id, field=field):
+                    self.responses = copy.deepcopy(original)
+                    self.responses[f"actions/runs/{run_id}"][field] = value
+                    with self.assertRaisesRegex(self.guard.Denied, "Exact maintenance source CI"):
+                        self.verify()
+
+    def test_checksum_source_and_upstreams_must_be_merged_same_repository(self):
+        self.checksum_fixture()
+        original = copy.deepcopy(self.responses)
+        for key in ("pulls/1108", "pulls/1042", "pulls/960"):
+            for field in ("merged", "base", "head", "merge_commit_sha"):
+                with self.subTest(pr=key, field=field):
+                    self.responses = copy.deepcopy(original)
+                    value = {"merged": False, "base": {"ref": "wrong"},
+                             "head": {"repo": {"full_name": "attacker/workflow"}},
+                             "merge_commit_sha": self.base}[field]
+                    self.responses[key][field] = value
+                    with self.assertRaises(self.guard.Denied):
+                        self.verify()
+
+    def test_checksum_record_rejects_wrong_tuple_schema_and_incomplete_proposal(self):
+        self.checksum_fixture()
+        for field, value in (("tag", "v0.74.8"), ("release_commit", self.source),
+                             ("source_commit", self.jwt_release), ("release_tree", self.base),
+                             ("base_commit", self.upstream), ("source_pr", 1041),
+                             ("checksum_ci_run", True), ("source_ci_run", 0),
+                             ("schema", 1), ("release_commit", None), ("extra", "unexpected")):
+            with self.subTest(field=field, value=value):
+                self.update_checksum_record(dict(self.record, **{field: value}))
+                with self.assertRaises(self.guard.Denied):
+                    self.verify()
+
+    def test_checksum_record_rejects_duplicate_oversized_and_symlink(self):
+        self.checksum_fixture()
+        for raw in ('{"schema":2,"schema":2}', ' ' * 4097):
+            with self.subTest(kind="duplicate" if len(raw) < 4096 else "oversized"):
+                self.update_checksum_record(self.record, raw)
+                with self.assertRaises(self.guard.Denied):
+                    self.verify()
+        self.run_git("checkout", "-q", "main")
+        path = self.repo / ".github/release-admissions/v0.74.9.json"
+        path.unlink()
+        path.symlink_to("../../record.json")
+        self.commit("symlink checksum admission")
+        self.run_git("push", "-q", "origin", "main")
+        self.run_git("checkout", "-q", "--detach", self.release)
+        with self.assertRaisesRegex(self.guard.Denied, "no regular admission"):
+            self.verify()
+
+    def test_checksum_source_ref_cannot_move(self):
+        self.checksum_fixture()
+        self.run_git("push", "-q", "--force", "origin", self.release + ":refs/pull/1108/head")
+        with self.assertRaisesRegex(self.guard.Denied, "source moved"):
+            self.verify()
+
+    def test_checksum_requires_fixed_production_and_workflow_blobs(self):
+        self.checksum_fixture()
+        original = self.policy.checksum_blobs
+        for path, blob in original:
+            with self.subTest(path=path):
+                self.policy.checksum_blobs = tuple((p, "0" * 40 if p == path else b) for p, b in original)
+                with self.assertRaisesRegex(self.guard.Denied, "Checksum production or workflow identity"):
+                    self.verify()
+
+    def promote_checksum_change(self, message):
+        # Model a fully re-reviewed tuple so only immutable policy checks reject it.
+        self.commit(message)
+        changed = self.rev("HEAD")
+        changed_tree = self.rev("HEAD^{tree}")
+        self.run_git("update-ref", "refs/heads/maintenance/v0.74", changed)
+        self.run_git("push", "-q", "origin", "maintenance/v0.74", changed + ":refs/pull/1108/head", "--force")
+        self.source = self.release = changed
+        self.run_git("tag", "-f", "v0.74.9", changed)
+        self.env["GITHUB_SHA"] = changed
+        self.responses["pulls/1108"].update(merge_commit_sha=changed, head={
+            "sha": changed, "repo": {"full_name": self.guard.REPOSITORY}})
+        for run_id in (43, 44):
+            self.responses[f"actions/runs/{run_id}"]["head_sha"] = changed
+        self.record.update(release_commit=changed, source_commit=changed, release_tree=changed_tree)
+        self.update_checksum_record(self.record)
+
+    def test_checksum_release_requires_preserved_jwt_patch(self):
+        self.checksum_fixture()
+        (self.repo / "module/jwt_auth.go").write_text("baseline\n")
+        self.promote_checksum_change("remove JWT from release")
+        with self.assertRaisesRegex(self.guard.Denied, "Backported JWT patch mismatch"):
+            self.verify()
+
+    def test_checksum_rejects_changed_jwt_literal_even_when_stable_patch_id_matches(self):
+        self.checksum_fixture()
+        path = self.repo / "module/jwt_auth.go"
+        path.write_text(path.read_text().replace('"issuer and audience', '"issuer  and audience'))
+        self.promote_checksum_change("change JWT issuer literal whitespace")
+        self.assertEqual(self.guard.patch_id(self.base, self.source), self.patch)
+        with self.assertRaisesRegex(self.guard.Denied, "Backported JWT source identity mismatch"):
+            self.verify()
+
+    def test_checksum_rejects_missing_and_nonregular_production_or_workflow_entries(self):
+        self.checksum_fixture()
+        original_source = self.source
+        for name, _ in self.policy.checksum_blobs:
+            for change in ("removed", "symlink", "executable"):
+                with self.subTest(path=name, change=change):
+                    self.run_git("checkout", "-q", "--detach", self.release)
+                    # Restore contents while advancing history: the production
+                    # fetch correctly refuses a rewritten previously fetched ref.
+                    self.run_git("checkout", "-q", original_source, "--",
+                                 *(p for p, _ in self.policy.checksum_blobs))
+                    path = self.repo / name
+                    if change == "executable":
+                        path.chmod(0o755)
+                    else:
+                        path.unlink()
+                        if change == "symlink":
+                            path.symlink_to("unexpected-target")
+                    self.promote_checksum_change("change exact checksum entry " + change)
+                    with self.assertRaisesRegex(self.guard.Denied, "Checksum production or workflow identity"):
+                        self.verify()
+
+    def test_checksum_upstream_must_be_on_main(self):
+        self.checksum_fixture()
+        self.run_git("checkout", "-q", "main")
+        # A record can name a real checksum commit that has been removed from main.
+        self.run_git("reset", "--hard", self.upstream)
+        self.checksum_record(self.record)
+        self.run_git("push", "-q", "--force", "origin", "main")
+        self.run_git("checkout", "-q", "--detach", self.release)
+        with self.assertRaisesRegex(self.guard.Denied, "Checksum fix is not on protected main"):
+            self.verify()
 
 
 if __name__ == "__main__":

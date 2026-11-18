@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep main ancestry, with one main-approved, exact v0.74.8 admission."""
+"""Keep main ancestry and exact, main-approved JWT/checksum maintenance admissions."""
 
 import json
 import os
@@ -25,6 +25,14 @@ AUTH_PATHS = (
 class Policy:
     base_commit: str = "f03ce511ea6fbc5daab4f9b828bc3c2cb762fa43"
     auth_patch_id: str = "50ca17cb77067ddc36b5583bb54fc62a4f7cc5db"
+    jwt_maintenance_commit: str = "24503c4f7cc268302814a88b7d0c2f13d6d2184d"
+    checksum_upstream_commit: str = "5e3648d14b0a6de59ed4765893a13b712c66b641"
+    checksum_blobs: tuple = (
+        ("cmd/wfctl/plugin_checksum.go", "fac5e9c830f5cf64fef0341dbb28ee14f56fe551"),
+        ("cmd/wfctl/plugin_install.go", "9740e355fa6411e15e2477ed824b762a2a86ea0a"),
+        (".github/workflows/maintenance-jwt.yml", "b3fa061173a9185e72201f93d022408390f498c3"),
+        (".github/workflows/maintenance-wfctl.yml", "dc82397c30bdbdb491c78e4300341b535de9a7ec"),
+    )
 
 
 class Denied(Exception):
@@ -78,8 +86,9 @@ def patch_id(base, commit):
     return value[0] if len(value) == 2 else ""
 
 
-def admission_record():
-    path = ".github/release-admissions/v0.74.8.json"
+def admission_record(tag="v0.74.8"):
+    require(tag in ("v0.74.8", "v0.74.9"), "No exception for this maintenance tag")
+    path = f".github/release-admissions/{tag}.json"
     entry = git("ls-tree", "-z", "refs/remotes/origin/main", "--", path)[1]
     require(re.fullmatch(rb"100644 blob [0-9a-f]{40}\t" + re.escape(path.encode()) + rb"\x00", entry),
             "Protected main has no regular admission record")
@@ -99,12 +108,17 @@ def admission_record():
         raise Denied("Admission record JSON invalid") from error
     keys = {"schema", "tag", "release_commit", "source_commit", "release_tree",
             "base_commit", "source_pr", "source_ci_run", "upstream_pr", "upstream_commit"}
+    if tag == "v0.74.9":
+        keys.add("checksum_ci_run")
     require(type(record) is dict and set(record) == keys, "Admission record schema invalid")
-    require(type(record["schema"]) is int and record["schema"] == 1,
+    require(type(record["schema"]) is int and record["schema"] == (2 if tag == "v0.74.9" else 1),
             "Admission record version invalid")
     for field in ("release_commit", "source_commit", "release_tree", "base_commit", "upstream_commit"):
         require(oid(record[field]), "Admission record commit or tree invalid")
-    for field in ("source_pr", "source_ci_run", "upstream_pr"):
+    identifiers = ("source_pr", "source_ci_run", "upstream_pr")
+    if tag == "v0.74.9":
+        identifiers += ("checksum_ci_run",)
+    for field in identifiers:
         require(type(record[field]) is int and record[field] > 0, "Admission record identifier invalid")
     return record
 
@@ -120,6 +134,72 @@ def merged_pr(api, number, branch):
     return pr
 
 
+def verify_checksum_release(tag, commit, api, policy):
+    """Additional exact exception; the v0.74.8 JWT contract remains separate."""
+    record = admission_record(tag)
+    require(record["tag"] == tag and record["release_commit"] == commit
+            and record["base_commit"] == policy.base_commit and record["source_pr"] == 1108
+            and record["upstream_pr"] == 1042, "Admission does not match this exact release")
+    require(git_text("rev-parse", "refs/tags/v0.74.7^{commit}") == policy.base_commit,
+            "Maintenance base tag mismatch")
+    source = merged_pr(api, 1108, "maintenance/v0.74")
+    require(source.get("merge_commit_sha") == commit
+            and source.get("head", {}).get("sha") == record["source_commit"],
+            "Maintenance merge or reviewed source mismatch")
+    upstream = merged_pr(api, 1042, "main")
+    require(upstream.get("merge_commit_sha") == record["upstream_commit"], "Upstream merge mismatch")
+    require(ancestor(record["upstream_commit"], "refs/remotes/origin/main"),
+            "JWT fix is not on protected main")
+    require(patch_id(record["upstream_commit"] + "^", record["upstream_commit"])
+            == policy.auth_patch_id, "Upstream JWT patch mismatch")
+    checksum = merged_pr(api, 960, "main")
+    require(checksum.get("merge_commit_sha") == policy.checksum_upstream_commit,
+            "Upstream checksum merge mismatch")
+    require(ancestor(policy.checksum_upstream_commit, "refs/remotes/origin/main"),
+            "Checksum fix is not on protected main")
+
+    git("fetch", "--no-tags", "origin",
+        "refs/heads/maintenance/v0.74:refs/remotes/origin/maintenance/v0.74",
+        "refs/pull/1108/head:refs/release-source/1108")
+    require(git_text("rev-parse", "refs/release-source/1108") == record["source_commit"],
+            "Reviewed maintenance source moved")
+    require(ancestor(commit, "refs/remotes/origin/maintenance/v0.74")
+            and ancestor(policy.base_commit, policy.jwt_maintenance_commit)
+            and ancestor(policy.jwt_maintenance_commit, commit)
+            and ancestor(policy.jwt_maintenance_commit, record["source_commit"]),
+            "Maintenance lineage mismatch")
+    require(git_text("rev-parse", f"{commit}^{{tree}}") == record["release_tree"]
+            and git_text("rev-parse", f"{record['source_commit']}^{{tree}}") == record["release_tree"],
+            "Release tree differs from reviewed source")
+    require(patch_id(policy.base_commit, policy.jwt_maintenance_commit) == policy.auth_patch_id
+            and patch_id(policy.base_commit, record["source_commit"]) == policy.auth_patch_id,
+            "Backported JWT patch mismatch")
+    # Stable patch IDs normalize whitespace, including inside string literals.
+    pinned_auth = git("ls-tree", "-rz", policy.jwt_maintenance_commit, "--", *AUTH_PATHS)[1]
+    source_auth = git("ls-tree", "-rz", record["source_commit"], "--", *AUTH_PATHS)[1]
+    require(pinned_auth.count(b"\0") == len(AUTH_PATHS) and source_auth == pinned_auth,
+            "Backported JWT source identity mismatch")
+    expected = b"".join(
+        f"100644 blob {blob}\t{path}\0".encode("ascii")
+        for path, blob in sorted(policy.checksum_blobs))
+    entries = git("ls-tree", "-rz", record["source_commit"], "--",
+                  *(path for path, _ in policy.checksum_blobs))[1]
+    require(entries == expected, "Checksum production or workflow identity mismatch")
+    for run_id, workflow in ((record["source_ci_run"], "maintenance-jwt.yml"),
+                             (record["checksum_ci_run"], "maintenance-wfctl.yml")):
+        run = api(f"actions/runs/{run_id}")
+        require(type(run) is dict and type(run.get("id")) is int and run["id"] == run_id
+                and run.get("repository", {}).get("full_name") == REPOSITORY
+                and run.get("path") == ".github/workflows/" + workflow
+                and run.get("head_sha") == record["source_commit"]
+                and run.get("event") == "pull_request"
+                and run.get("status") == "completed" and run.get("conclusion") == "success"
+                and any(type(pr) is dict and type(pr.get("number")) is int
+                        and pr["number"] == 1108 for pr in run.get("pull_requests", [])),
+                "Exact maintenance source CI is not successful")
+    return "reviewed-v0.74.9"
+
+
 def verify_release(env, api=github_api, policy=Policy()):
     tag, commit = env.get("TAG_NAME", ""), env.get("GITHUB_SHA", "")
     require(env.get("GITHUB_REPOSITORY") == REPOSITORY
@@ -133,6 +213,8 @@ def verify_release(env, api=github_api, policy=Policy()):
     if ancestor(commit, "refs/remotes/origin/main"):
         return "protected-main"
 
+    if tag == "v0.74.9":
+        return verify_checksum_release(tag, commit, api, policy)
     require(tag == "v0.74.8", "No exception for this maintenance tag")
     record = admission_record()
     require(record["tag"] == tag and record["release_commit"] == commit
