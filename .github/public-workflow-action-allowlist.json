@@ -590,5 +590,45 @@
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "32155e7b8fe9c4c77ac9f5d895cfbb4ef75b9c47a35f82ae83f07ddb377dc0c1",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "186e6c82f2adc16f8c915a4adbd3c436427d5954d07664748fd445bf98b7ef25",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "3b92311008c1e3065d7d0ca24fc10055eea8b50ab3710510ac9f648210959113",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+    "nodeSHA256": "30add2fcd5a271d0cd7d3129bbdefe0a5087f946accc8b795c88216b94d4302c",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "5b77efd23b17baa5060e10a24524f7d329260b52fb3a0adda52c1f1cdc6e356e",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
   }
 ]
