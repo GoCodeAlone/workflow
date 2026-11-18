@@ -345,6 +345,12 @@ cd ui && npm run lint
 
 **Test coverage targets:** root package 80%+, module 80%+, dynamic 80%+, AI packages 85%+.
 
+Benchmark discovery requires quiet package initialization. Keep Sonic and its
+loader compatible with the Go version in `go.mod`; Sonic 1.15.4 and loader 0.5.2
+support Go 1.27. `TestPackageInitializationIsQuiet` catches startup diagnostics
+on amd64 and arm64. The benchmark validator still rejects diagnostics and
+requires a baseline with matching package, architecture, and CPU context.
+
 ## Technology
 
 | Component | Technology |
