@@ -5,11 +5,11 @@
       "files": [
         {
           "path": ".github/workflows/policytool/adoptionguard/main.go",
-          "sha256": "7854ccaa9593bc5d64eb93db78ec1bdd6b36d61b545bada95df34ce542f2002a"
+          "sha256": "83acbcf3db6f5981e533841fecc03444deff540c60c6da2f7abbe1b6ba1e016f"
         },
         {
           "path": ".github/workflows/policytool/adoptionguard/main_test.go",
-          "sha256": "b146ba9688e6aa2d4d72879263875e1a189768894552efeb3087179e5c0651cd"
+          "sha256": "407f7a50c0fe089430fe46dba85a12ed35d97f0c47bde7e023353347441f94de"
         },
         {
           "path": ".github/workflows/policytool/adoptionguard/run.sh",
