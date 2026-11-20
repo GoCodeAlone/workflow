@@ -24,6 +24,12 @@
     "presence": "present"
   },
   {
+    "path": ".github/workflows/osv-scanner.yml",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "presence": "present"
+  },
+  {
     "path": ".github/workflows/conformance-smoke.yml",
     "state": "active",
     "presence": "absent"

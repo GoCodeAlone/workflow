@@ -168,6 +168,54 @@
     "rationale": "Exact reviewed event-specific base checkout for differential OSV scanning."
   },
   {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "echo",
+    "statementSHA256": "313450d5338f44e4a529e031e99a0e3b42d07904f31d914ecc06c40f0ef85bf4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base diagnostic for pull-request OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "echo",
+    "statementSHA256": "a59997b22ead85f5bdb580c1f47b6203c2f97d16970f9a0e5be2018e188c8ea4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base diagnostic for merge-group OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "exit",
+    "statementSHA256": "313450d5338f44e4a529e031e99a0e3b42d07904f31d914ecc06c40f0ef85bf4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base rejection for pull-request OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "exit",
+    "statementSHA256": "a59997b22ead85f5bdb580c1f47b6203c2f97d16970f9a0e5be2018e188c8ea4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base rejection for merge-group OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "git",
+    "statementSHA256": "daebbb2c5b1b6a8fbe4ffcb6b12e0d356811af9119fae54c6733170dc7b40e74",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed candidate-commit restore for differential OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "git",
+    "statementSHA256": "db4b94eee2fcbb4f7e0c067ed70145753d7f6b8c479622cde0875d1026694029",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed event-specific base checkout for differential OSV scanning."
+  },
+  {
     "path": ".github/workflows/cross-plugin-build-test.yml",
     "command": "$assignment",
     "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
