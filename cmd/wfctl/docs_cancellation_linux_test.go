@@ -20,7 +20,7 @@ func docsCancellationCommand(t *testing.T, name, prefix string) string {
 	t.Helper()
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "started")
-	script := "#!/bin/sh\n" + prefix + "\necho $$ > '" + marker + "'\nexec /bin/sleep 30\n"
+	script := "#!/bin/sh\n" + prefix + "\necho $$ > '" + marker + "'\nexec /bin/sleep 10\n"
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,14 @@ func cancelDocsAfterChildStarts(t *testing.T, marker string, run func(context.Co
 			t.Errorf("got %v, want context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		// Never signal a PID read from a file: the child may already have been
+		// reaped and its PID reused. Allow this finite fixture to exit naturally
+		// and join the invocation without treating a late return as a pass.
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("cancelled command did not return or finish within its natural lifetime")
+		}
 		t.Fatal("cancelled command did not return")
 	}
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
