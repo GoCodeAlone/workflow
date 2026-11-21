@@ -276,6 +276,8 @@ func main() {
 	// commands (e.g. wfctl mcp, wfctl run) can be interrupted cleanly.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
+	// Bind docs to the same signal context without changing the shared registry API.
+	registry.Register("docs", func(args []string) error { return runDocsContext(ctx, args) })
 	dispatchErr := cliHandler.DispatchContext(ctx, os.Args[1:])
 	// Release signal resources before waiting for the update notice or exiting.
 	stop()
