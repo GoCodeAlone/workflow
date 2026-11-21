@@ -168,6 +168,54 @@
     "rationale": "Exact reviewed event-specific base checkout for differential OSV scanning."
   },
   {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "echo",
+    "statementSHA256": "313450d5338f44e4a529e031e99a0e3b42d07904f31d914ecc06c40f0ef85bf4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base diagnostic for pull-request OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "echo",
+    "statementSHA256": "a59997b22ead85f5bdb580c1f47b6203c2f97d16970f9a0e5be2018e188c8ea4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base diagnostic for merge-group OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "exit",
+    "statementSHA256": "313450d5338f44e4a529e031e99a0e3b42d07904f31d914ecc06c40f0ef85bf4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base rejection for pull-request OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "exit",
+    "statementSHA256": "a59997b22ead85f5bdb580c1f47b6203c2f97d16970f9a0e5be2018e188c8ea4",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed invalid-base rejection for merge-group OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "git",
+    "statementSHA256": "daebbb2c5b1b6a8fbe4ffcb6b12e0d356811af9119fae54c6733170dc7b40e74",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed candidate-commit restore for differential OSV scanning."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "command": "git",
+    "statementSHA256": "db4b94eee2fcbb4f7e0c067ed70145753d7f6b8c479622cde0875d1026694029",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Exact reviewed event-specific base checkout for differential OSV scanning."
+  },
+  {
     "path": ".github/workflows/cross-plugin-build-test.yml",
     "command": "$assignment",
     "statementSHA256": "06d0aeef84e477d9ea7e5b95df411e86356002f38b0b03928d5968029a4d0d93",
@@ -2382,5 +2430,261 @@
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "state": "active",
     "rationale": "Reviewed Go Tests aggregate requires the native test job result to equal success."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cd",
+    "statementSHA256": "0f67c24545e84e410ce02210f823235cd2767854350572e27a96f5c75c7ce38d",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "benchmark-pair.py",
+    "statementSHA256": "0f67c24545e84e410ce02210f823235cd2767854350572e27a96f5c75c7ce38d",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cd",
+    "statementSHA256": "b7707d9b8528970feb51ee0e1c3282fe1f0e2881c94d746e0758640a100e2104",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "npm",
+    "statementSHA256": "bd2d9577fc73eea15c4efa2e4ee7992ac2e9313ce4dc4e4f679f3ab32cfa6850",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "npm",
+    "statementSHA256": "9eba814c15baf58e6ab2da93bb31c4d9d92ef588497cb6524bbf04568f77cab5",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cd",
+    "statementSHA256": "12a7cd89a26455aba495c19f67e9183e5286cf7d5bae22f85857f8198c142628",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "npm",
+    "statementSHA256": "4bc75a851333b379be5a40c02e063682efe5de2a552ae0cfc60d4d17a5a94775",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "npm",
+    "statementSHA256": "877846c097086f740afd498dad4b3d3b643bc65852cb2b53253567945ee41cd2",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "go",
+    "statementSHA256": "3c1b589932f67a655ff6bfb1741a31b1c9ab4668b3e6b408e4fcf96472c20edb",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cd",
+    "statementSHA256": "e4d0a47b13490bd14b57e7d5d40806d10d767a67439cb716b21cddd01f38d373",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "benchmark-pair.py",
+    "statementSHA256": "e4d0a47b13490bd14b57e7d5d40806d10d767a67439cb716b21cddd01f38d373",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "6911dc69ba1aa10a01cd1b0563efbb02d008c9e0ffd5c72471177bf8db8f0eec",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cat",
+    "statementSHA256": "6911dc69ba1aa10a01cd1b0563efbb02d008c9e0ffd5c72471177bf8db8f0eec",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "e5b7e17a95219aa32ca80405727547a9c29b9780744e115583f6c1a68a224750",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "ffd4c2588e960687e8be3db328048a0dcb944a9c1426e6afaafafef832109740",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "50b89f8af205b68cf50a606470fdea48d51311de3bf807c03fe8aca0b92ef7c1",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "$assignment",
+    "statementSHA256": "50b89f8af205b68cf50a606470fdea48d51311de3bf807c03fe8aca0b92ef7c1",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "dabc56d53c8b4b869174d2673fb6759252ac3f41af4529dd558943edda60a0b7",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "76af494e770c8a05a29ea83b525a9bed94a4a6fcbaf3ac11de547454b47fed47",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "aa9a819f2f2977ec77ec813b0fa8b8ab2b753db0eb369df762eb7bb9010892a8",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "benchstat",
+    "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "92e1f5a57f18999c6b9359e1c7a2d9d39cd8d4c0958759cdfaa32aa2ad8bd09f",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "[",
+    "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "3dc8c35ff510a0b4eaa921e42db66fa7f2152f40b1f4133300759c176b247f62",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "awk",
+    "statementSHA256": "8c1c7655a9bddd70fe48d0aef7fd3bcb7cd34152622e7355e07f7e042a5d9197",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "cat",
+    "statementSHA256": "1e652ae90c868802d9179cd7f9be150ddf4f0b0ae495c1d2f94c2a4051b309d0",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "echo",
+    "statementSHA256": "e813fccfa4b716c285ed352138592c24ed1cd9926d054f06a33245c98bf77db1",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "command": "exit",
+    "statementSHA256": "1a21be8bb1dc4721d30cc1850ead617faa55ae9aebf416da4369668bdeaf0824",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark shell statement; inert review inventory."
   }
 ]
