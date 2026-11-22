@@ -3,8 +3,6 @@ name: Benchmark
 on:
   pull_request:
     branches: [main, develop]
-  push:
-    branches: [main, develop]
 
 permissions:
   contents: read
@@ -23,14 +21,29 @@ jobs:
   benchmark:
     name: Performance Benchmarks
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: read
-      pull-requests: write
       packages: read
 
     steps:
-    - name: Check out code
+    # Both measurements run in this existing job. This gives matching hardware,
+    # not a security boundary against malicious repository code.
+    - name: Check out exact base
       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        ref: ${{ github.event.pull_request.base.sha }}
+        path: base
+        persist-credentials: false
+        fetch-depth: 1
+
+    - name: Check out exact synthetic merge
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        ref: ${{ github.sha }}
+        path: candidate
+        persist-credentials: false
+        fetch-depth: 2
 
     - name: Set up Go
       uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
@@ -43,36 +56,60 @@ jobs:
       with:
         node-version: '24'
         registry-url: 'https://npm.pkg.github.com'
-        cache: 'npm'
-        cache-dependency-path: ui/package-lock.json
 
-    - name: Build UI assets
+    - name: Bind immutable pair before UI builds
+      timeout-minutes: 2
+      env:
+        PAIR_EVENT: ${{ github.event_name }}
+        PAIR_REF: ${{ github.ref }}
+        PAIR_REPOSITORY: ${{ github.repository }}
+        PAIR_RUN_ID: ${{ github.run_id }}
+        PAIR_RUN_ATTEMPT: ${{ github.run_attempt }}
+        PAIR_BASE: ${{ github.event.pull_request.base.sha }}
+        PAIR_HEAD: ${{ github.event.pull_request.head.sha }}
+        PAIR_MERGE: ${{ github.sha }}
+      run: cd candidate && ./scripts/benchmark-pair.py prepare
+
+    - name: Build base UI assets
+      timeout-minutes: 15
       env:
         NODE_AUTH_TOKEN: ${{ github.token }}
-      run: cd ui && npm ci && npm run build
+      run: |
+        cd base/ui
+        npm ci --cache "$RUNNER_TEMP/benchmark-pair-${{ github.run_id }}-${{ github.run_attempt }}/base/npm" > ../../benchmark-pair/base/ui-install.stdout 2> ../../benchmark-pair/base/ui-install.stderr
+        npm run build > ../../benchmark-pair/base/ui-build.stdout 2> ../../benchmark-pair/base/ui-build.stderr
+
+    - name: Build candidate UI assets
+      timeout-minutes: 15
+      env:
+        NODE_AUTH_TOKEN: ${{ github.token }}
+      run: |
+        cd candidate/ui
+        npm ci --cache "$RUNNER_TEMP/benchmark-pair-${{ github.run_id }}-${{ github.run_attempt }}/candidate/npm" > ../../benchmark-pair/candidate/ui-install.stdout 2> ../../benchmark-pair/candidate/ui-install.stderr
+        npm run build > ../../benchmark-pair/candidate/ui-build.stdout 2> ../../benchmark-pair/candidate/ui-build.stderr
 
     - name: Install benchstat
+      timeout-minutes: 10
       run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260709024250-82a0b07e230d
 
-    - name: Run benchmarks
-      run: |
-        go test -list='^Benchmark' ./... > benchmark-list.txt
-        go test -bench=. -benchmem -count=6 -run=^$ -timeout=30m ./... | tee benchmark-results.txt
-
-    - name: Restore baseline
-      if: github.event_name == 'pull_request'
-      id: restore-baseline
-      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-      with:
-        path: baseline-bench.txt
-        key: go-benchmark-${{ github.event.pull_request.base.ref }}-never
-        restore-keys: |
-          go-benchmark-${{ github.event.pull_request.base.ref }}-
+    - name: Measure immutable base and synthetic merge
+      timeout-minutes: 125
+      env:
+        PAIR_EVENT: ${{ github.event_name }}
+        PAIR_REF: ${{ github.ref }}
+        PAIR_REPOSITORY: ${{ github.repository }}
+        PAIR_RUN_ID: ${{ github.run_id }}
+        PAIR_RUN_ATTEMPT: ${{ github.run_attempt }}
+        PAIR_BASE: ${{ github.event.pull_request.base.sha }}
+        PAIR_HEAD: ${{ github.event.pull_request.head.sha }}
+        PAIR_MERGE: ${{ github.sha }}
+      run: cd candidate && ./scripts/benchmark-pair.py measure
 
     - name: Validate and compare benchmarks
       id: compare
+      timeout-minutes: 5
       env:
-        BASELINE_AVAILABLE: ${{ github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != '' }}
+        BASELINE_AVAILABLE: 'true'
       run: |
         validator=$(cat <<'AWK'
         # This program validates data only. It never starts a subprocess or evaluates code.
@@ -364,77 +401,8 @@ jobs:
         fi
         awk -v mode=report -v baseline=true -v output="$GITHUB_OUTPUT" "$validator" "${inputs[@]}" benchstat-output.txt
 
-    - name: Comment PR with results
-      if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key != ''
-      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-      with:
-        script: |
-          const fs = require('fs');
-          const benchstat = fs.readFileSync('benchstat-output.txt', 'utf8');
-          const regression = '${{ steps.compare.outputs.regression }}' === 'true';
-
-          const body = [
-            '## ⏱ Benchmark Results',
-            '',
-            regression
-              ? '⚠️ **Potential performance regression detected** — one or more benchmarks regressed ≥ 20%.'
-              : '✅ **No significant performance regressions detected.**',
-            '',
-            '<details>',
-            '<summary>benchstat comparison (baseline → PR)</summary>',
-            '',
-            '```',
-            benchstat,
-            '```',
-            '',
-            '</details>',
-            '',
-            '> Benchmarks run with `go test -bench=. -benchmem -count=6`.',
-            '> Regressions ≥ 20% are flagged. Results compared via [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat).',
-          ].join('\n');
-
-          // Upsert: update existing comment or create a new one.
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-
-          const marker = '## ⏱ Benchmark Results';
-          const existing = comments.find(c => c.body.includes(marker));
-
-          if (existing) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: existing.id,
-              body,
-            });
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body,
-            });
-          }
-
-    - name: No baseline available
-      if: github.event_name == 'pull_request' && steps.restore-baseline.outputs.cache-matched-key == ''
-      run: |
-        echo "::notice::No benchmark baseline found for branch '${{ github.event.pull_request.base.ref }}'. Baseline will be created on next push to that branch."
-
-    # On push to main/develop, save the results as the new baseline.
-    - name: Prepare baseline for cache
-      if: github.event_name == 'push'
-      run: cp benchmark-results.txt baseline-bench.txt
-
-    - name: Save baseline
-      if: github.event_name == 'push'
-      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-      with:
-        path: baseline-bench.txt
-        key: go-benchmark-${{ github.ref_name }}-${{ github.sha }}
+    - name: Summarize paired results
+      run: cat benchstat-output.txt >> "$GITHUB_STEP_SUMMARY"
 
     - name: Upload benchmark results
       if: always()
@@ -442,6 +410,7 @@ jobs:
       with:
         name: benchmark-results
         path: |
+          benchmark-pair/
           benchmark-results.txt
           benchmark-list.txt
           baseline-bench.txt
@@ -454,5 +423,5 @@ jobs:
     - name: Fail on regression
       if: github.event_name == 'pull_request' && steps.compare.outputs.regression == 'true'
       run: |
-        echo "::error::Performance regression detected. Review the benchmark results in the PR comment."
+        echo "::error::Performance regression detected. Review the paired benchmark artifact and job summary."
         exit 1

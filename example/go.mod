@@ -16,7 +16,7 @@ require (
 	github.com/GoCodeAlone/go-plugin v1.7.0 // indirect
 	github.com/GoCodeAlone/modular/modules/auth v1.19.0 // indirect
 	github.com/GoCodeAlone/modular/modules/cache v1.19.0 // indirect
-	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.0 // indirect
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.1 // indirect
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0 // indirect
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0 // indirect
 	github.com/GoCodeAlone/yaegi v0.17.2 // indirect
@@ -64,7 +64,7 @@ require (
 	github.com/flowchartsman/retry v1.2.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect

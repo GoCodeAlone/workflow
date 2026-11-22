@@ -10,7 +10,7 @@ require (
 	github.com/GoCodeAlone/modular v1.13.6
 	github.com/GoCodeAlone/modular/modules/auth v1.19.0
 	github.com/GoCodeAlone/modular/modules/cache v1.19.0
-	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.0
+	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.1
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0
 	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0
 	github.com/GoCodeAlone/workflow-plugin-control-plane v0.1.0
@@ -129,7 +129,7 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/flowchartsman/retry v1.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonreference v1.0.0 // indirect
