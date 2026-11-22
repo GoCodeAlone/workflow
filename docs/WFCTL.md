@@ -2756,6 +2756,11 @@ wfctl docs generate [options] <config.yaml>
 wfctl docs generate --source <repo> --out <dir> --module <module> --version <tag> --packages <list>
 ```
 
+SIGINT/SIGTERM cancels documentation generation and its active Go or Git command.
+Cancellation is fatal, not a package warning, and does not trigger cache deletion
+or recloning after an interrupted refresh. Generation stops before subsequent
+output writes; files already written are not rolled back.
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-output` | `./docs/generated/` | Output directory for generated documentation |
