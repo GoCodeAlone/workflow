@@ -122,5 +122,11 @@
     "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
     "state": "staged",
     "presence": "present"
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "presence": "present"
   }
 ]
