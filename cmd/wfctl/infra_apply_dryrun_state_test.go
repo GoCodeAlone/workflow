@@ -59,9 +59,10 @@ func TestInfraApplyDryRun_EmptyStatePlansCreates(t *testing.T) {
 			t.Run(format+"/"+state, func(t *testing.T) {
 				dir := t.TempDir()
 				backend := "filesystem"
-				if state == "absent-directory" {
+				switch state {
+				case "absent-directory":
 					dir = filepath.Join(dir, "absent")
-				} else if state == "memory" {
+				case "memory":
 					backend = "memory"
 				}
 				stateModule := fmt.Sprintf("  - name: local-state\n    type: iac.state\n    config:\n      backend: %s\n      directory: %q\n", backend, dir)
