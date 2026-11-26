@@ -184,6 +184,102 @@
     "rationale": "Pinned github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e for reviewed osv-scanner.yml automation."
   },
   {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "743e307f51e2faba47116c2f10dac747458b107f5406d231e3865fe4390222cc",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed osv-scanner.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "dad544a2e0fae5e9a8e66a01940b158bcf751258a5ecf5abb85302370ac504da",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed osv-scanner.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "438703f26ae9b73c016d54d44b405caefc583418ece782ffe54549d238c2f875",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed osv-scanner.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "58972a1a86b41df09448343169924aaa76f2bd6d583dcd3babf00e85408c7616",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed osv-scanner.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "a3598bf9fde18785c466198a74ab7e98adfec7863868a9da6317851de9d93d10",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed osv-scanner.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "cf6be88681674f30423543b8fd808b4f06a167b73ef11fa032120688588177b5",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed osv-scanner.yml automation."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "docker://ghcr.io/google/osv-scanner-action@sha256:3fa25659351c9a5527b30d73b6f3c2ee0bcac106d6220948211d87379d08f243",
+    "nodeSHA256": "3e645e57f1c019acab18084f0a963a6d7723164d0e42903a3a369559a4976b0c",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Stage only the official OSV-Scanner v2.7.1 digest with this exact reviewed step and complete workflow context; workflow adoption and runtime qualification remain separate."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "docker://ghcr.io/google/osv-scanner-action@sha256:3fa25659351c9a5527b30d73b6f3c2ee0bcac106d6220948211d87379d08f243",
+    "nodeSHA256": "5cb61dd24ebcd4affb67ef1619ba890f73988b3e910086b6610d66599ea1dc11",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Stage only the official OSV-Scanner v2.7.1 digest with this exact reviewed step and complete workflow context; workflow adoption and runtime qualification remain separate."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "docker://ghcr.io/google/osv-scanner-action@sha256:3fa25659351c9a5527b30d73b6f3c2ee0bcac106d6220948211d87379d08f243",
+    "nodeSHA256": "a69b13fc746ba1a93334c2f6e464a8eb46a052278ad3457f3fbbb5498efbc8dd",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Stage only the official OSV-Scanner v2.7.1 digest with this exact reviewed step and complete workflow context; workflow adoption and runtime qualification remain separate."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "docker://ghcr.io/google/osv-scanner-action@sha256:3fa25659351c9a5527b30d73b6f3c2ee0bcac106d6220948211d87379d08f243",
+    "nodeSHA256": "f7bf37a3c1cf4916bd1a0dac9ee733e154e22f6e75636205c0a290d0a1db0561",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Stage only the official OSV-Scanner v2.7.1 digest with this exact reviewed step and complete workflow context; workflow adoption and runtime qualification remain separate."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "docker://ghcr.io/google/osv-scanner-action@sha256:3fa25659351c9a5527b30d73b6f3c2ee0bcac106d6220948211d87379d08f243",
+    "nodeSHA256": "f9bdd334f8e01d634d210b6e3cab39be0df897d56a0646dcf3a2459dbf392393",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Stage only the official OSV-Scanner v2.7.1 digest with this exact reviewed step and complete workflow context; workflow adoption and runtime qualification remain separate."
+  },
+  {
+    "path": ".github/workflows/osv-scanner.yml",
+    "uses": "github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e",
+    "nodeSHA256": "6b534bc18d2e481033a86fab64beb4fcf552fa76534d436d402ee44fd8d05252",
+    "contextSHA256": "2772c4dadb9c6746c44dc131ae661366ce771e9296e43f2ddb3f94fcdbe710af",
+    "state": "staged",
+    "rationale": "Pinned github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e for reviewed osv-scanner.yml automation."
+  },
+  {
     "path": ".github/workflows/cross-plugin-build-test.yml",
     "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "nodeSHA256": "e0b5e84df1e7033b6b3010f753c094203cbcd50be4df4b1b28aee9f3c99fb76d",
@@ -590,5 +686,133 @@
     "contextSHA256": "a6e499f0785275675c67d7d8705484e2a1fed72e333c40e01301f161581ce6f5",
     "state": "active",
     "rationale": "Staged v0.86 CI authority. Pinned golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee for reviewed ci.yml automation."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "32155e7b8fe9c4c77ac9f5d895cfbb4ef75b9c47a35f82ae83f07ddb377dc0c1",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "186e6c82f2adc16f8c915a4adbd3c436427d5954d07664748fd445bf98b7ef25",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "3b92311008c1e3065d7d0ca24fc10055eea8b50ab3710510ac9f648210959113",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+    "nodeSHA256": "30add2fcd5a271d0cd7d3129bbdefe0a5087f946accc8b795c88216b94d4302c",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/benchmark.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "5b77efd23b17baa5060e10a24524f7d329260b52fb3a0adda52c1f1cdc6e356e",
+    "contextSHA256": "eb90138f513dff0b0bf91d9ea7a581f7fdf5bd0f2d7fdbfbd4e7b506fe0b0c86",
+    "state": "staged",
+    "rationale": "Exact paired benchmark action; inert review inventory."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "3349aa71987f307abdb6a6e8d8de5e2bfb551aafaf23c183d6bf045e2d91c7b4",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "53ad3f241f5c8d1d03bf90f108b1cc142bb2f4639861d07e4ecc910983808995",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+    "nodeSHA256": "d6b03ef1597a69e1978ead4e5925aed16626c4c8f668cc18cdb4697dc71b85f3",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    "nodeSHA256": "aa9316c4435762c174705f048c55330ce8714ae4b9e14cd2bd58fb95af641c79",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    "nodeSHA256": "dd0c1fa6bc5a336956e083dfd5e0957c008b85168dfa74feb66a1edfa891cb42",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c",
+    "nodeSHA256": "907058eaccd04608db579b28b9be6db8b54a10119b95f148982b609b89ee12e3",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/setup-go for the reviewed Go 1.27.4 release toolchain."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+    "nodeSHA256": "0ec922d1fec5835b930f0ad642fc4f4db8396ce77cf54c7e85beb24bc4f1aa04",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+    "nodeSHA256": "d6511486d7f0d7044978b8c71828add2508e72a9897718b7a91fdf151ffb3c49",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "9fde90f1c6c8b6b7d2624941c7e11371cf48406a0bd965c2caf2bfa279de35f2",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "nodeSHA256": "f2313c6c3686eb64bc93135f734a625f7de0f413626bfaea35b574f78dac317f",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a for reviewed release.yml automation."
+  },
+  {
+    "path": ".github/workflows/release.yml",
+    "uses": "ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d",
+    "nodeSHA256": "901d681634d0e4e7b011708926aa6e0fea756b20e1138ca280c3689a16d6ebde",
+    "contextSHA256": "940c30de897ea0e6c6825a096aa2bd644b7f0747f2ebc25d5f1b938df0880ca1",
+    "state": "staged",
+    "rationale": "Pinned ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d for reviewed release.yml automation."
   }
 ]
