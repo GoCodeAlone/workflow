@@ -651,10 +651,10 @@ func isContainerType(t string) bool {
 }
 
 // loadCurrentState loads ResourceStates from the configured iac.state backend.
-// Returns an error when the state store cannot be resolved or read; callers
-// that treat "no prior state" as a valid first-run condition should swallow the
-// error explicitly with a comment. Uses resolveStateStore so that remote
-// backends (Spaces, S3, etc.) are supported. envName is forwarded to
+// An empty store (including an absent filesystem state directory) returns no
+// resources and no error. Callers must propagate resolution and read failures
+// rather than treating them as proof of empty state. Uses resolveStateStore so
+// that remote backends (Spaces, S3, etc.) are supported. envName is forwarded to
 // resolveStateStore so per-env backend config (e.g. region, prefix) is applied
 // when reading state.
 func loadCurrentState(cfgFile, envName string) ([]interfaces.ResourceState, error) {
