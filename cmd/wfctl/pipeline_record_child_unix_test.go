@@ -279,15 +279,7 @@ func TestPipelineRecordChildClosedCaptureKeepsCustody(t *testing.T) {
 			go func() { reaped <- child.Wait() }()
 			childReaped := false
 			t.Cleanup(func() {
-				for _, name := range []string{"actor.json", "child.json"} {
-					data, err := os.ReadFile(filepath.Join(root, name))
-					var identity pipelineProcessIdentity
-					if err == nil && json.Unmarshal(data, &identity) == nil {
-						if token, err := pipelineProcessStartToken(identity.PID); err == nil && token == identity.Start {
-							_ = unix.Kill(identity.PID, unix.SIGKILL)
-						}
-					}
-				}
+				cleanupPipelineCustodyFixtureFiles(t, root, "actor.json", "child.json")
 				if !childReaped {
 					_ = child.Process.Kill()
 					<-reaped
@@ -371,15 +363,7 @@ func TestPipelineRecordChildOrphanCustody(t *testing.T) {
 					_ = parent.Process.Kill()
 					_ = parent.Wait()
 				}
-				for _, name := range []string{"child.json", "actor.json"} {
-					data, err := os.ReadFile(filepath.Join(root, name))
-					var identity pipelineProcessIdentity
-					if err == nil && json.Unmarshal(data, &identity) == nil {
-						if token, err := pipelineProcessStartToken(identity.PID); err == nil && token == identity.Start {
-							_ = unix.Kill(identity.PID, unix.SIGKILL)
-						}
-					}
-				}
+				cleanupPipelineCustodyFixtureFiles(t, root, "child.json", "actor.json")
 			})
 			waitPipelineCustodyFile(t, filepath.Join(root, "ready"))
 			var child pipelineProcessIdentity
