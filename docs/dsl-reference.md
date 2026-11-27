@@ -455,6 +455,8 @@ The original `{{ }}` syntax is still fully supported:
 - `step.request_parse` uses `parse_body: true` as the canonical body parsing flag. `format: json` and `format: form` are accepted aliases that enable body parsing.
 - `step.conditional` supports switch-style `field`/`routes`/`default` and boolean `if`/`then`/`else` routing. `${ status == "active" }` is the preferred boolean expression syntax.
 - `step.json_response` and its `step.response` alias encode template results that resolve to JSON arrays or objects as raw JSON values rather than strings.
+- In a `body` object, literal string fields without `{{` or `${` markers remain strings, including text such as `'{"kind":"gift"}'` or `'[1,2]'`. This also applies inside nested objects and arrays. Fields containing either marker retain their existing template/expression handling and JSON conversion; whole-body JSON strings also retain their existing structured parsing behavior.
+- Use `body_from` for a complete typed response or a sole-key `{_from: "steps.fetch.row.field"}` field reference to preserve the referenced value's type. A referenced string remains a string, even when its contents look like JSON; referenced objects and arrays remain structured.
 
 ### Example
 ```yaml
