@@ -162,8 +162,8 @@ class ReleaseAdmissionTests(unittest.TestCase):
                     self.verify()
 
     def test_other_tag_has_no_exception(self):
-        self.run_git("tag", "v0.74.10", self.release)
-        self.env.update(TAG_NAME="v0.74.10", GITHUB_REF="refs/tags/v0.74.10")
+        self.run_git("tag", "v0.74.11", self.release)
+        self.env.update(TAG_NAME="v0.74.11", GITHUB_REF="refs/tags/v0.74.11")
         with self.assertRaisesRegex(self.guard.Denied, "No exception"):
             self.verify()
 
@@ -485,6 +485,166 @@ class ReleaseAdmissionTests(unittest.TestCase):
         self.run_git("checkout", "-q", "--detach", self.release)
         with self.assertRaisesRegex(self.guard.Denied, "Checksum fix is not on protected main"):
             self.verify()
+
+
+    def followup_checksum_fixture(self):
+        # The original checksum source/merge, tag model and v0.74.9 admission
+        # remain separate. A follow-up gets its own source, merge, CI and record.
+        self.checksum_fixture()
+        self.checksum_anchor = self.release
+        self.checksum_old_source = self.source
+        self.policy.checksum_maintenance_commit = self.checksum_anchor
+        self.followup_pr = 1200
+        self.run_git("checkout", "-q", "-b", "checksum-followup-source", self.checksum_anchor)
+        (self.repo / "reviewed-guard-followup.txt").write_text("modeled reviewed verifier update\n")
+        self.commit("reviewed follow-up source")
+        self.source = self.rev("HEAD")
+        self.tree = self.rev("HEAD^{tree}")
+        self.run_git("checkout", "-q", "maintenance/v0.74")
+        self.run_git("merge", "--squash", "checksum-followup-source")
+        self.commit("follow-up maintenance squash")
+        self.release = self.rev("HEAD")
+        self.run_git("tag", "v0.74.10")
+        self.record = dict(self.record, tag="v0.74.10", source_pr=self.followup_pr,
+                           source_commit=self.source, release_commit=self.release,
+                           release_tree=self.tree, source_ci_run=45, checksum_ci_run=46)
+        self.followup_checksum_record(self.record)
+        self.run_git("push", "-q", "origin", "main", "maintenance/v0.74",
+                     "checksum-followup-source:refs/pull/1200/head", "refs/tags/v0.74.10")
+        repository = {"full_name": self.guard.REPOSITORY}
+        self.responses["pulls/1200"] = {
+            "number": 1200, "merged": True, "merge_commit_sha": self.release,
+            "base": {"ref": "maintenance/v0.74", "repo": repository},
+            "head": {"sha": self.source, "ref": "checksum-followup-source", "repo": repository}}
+        for number, workflow in ((45, "maintenance-jwt.yml"), (46, "maintenance-wfctl.yml")):
+            self.responses[f"actions/runs/{number}"] = {
+                "id": number, "repository": repository, "path": ".github/workflows/" + workflow,
+                "head_sha": self.source, "event": "pull_request", "status": "completed",
+                "conclusion": "success", "pull_requests": [{"number": self.followup_pr}]}
+        self.env.update(TAG_NAME="v0.74.10", GITHUB_REF="refs/tags/v0.74.10", GITHUB_SHA=self.release)
+        self.run_git("checkout", "-q", "--detach", self.release)
+
+    def followup_checksum_record(self, record):
+        self.run_git("checkout", "-q", "main")
+        path = self.repo / ".github/release-admissions/v0.74.10.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record))
+        self.commit("proposed follow-up admission")
+
+    def update_followup_checksum_record(self, record):
+        self.followup_checksum_record(record)
+        self.run_git("push", "-q", "origin", "main")
+        self.run_git("checkout", "-q", "--detach", self.release)
+
+    def test_followup_checksum_release_requires_fresh_reviewed_tuple(self):
+        self.followup_checksum_fixture()
+        self.assertNotEqual(self.source, self.release)
+        self.assertNotEqual(self.release, self.checksum_anchor)
+        self.assertEqual(self.rev(self.source + "^{tree}"), self.rev(self.release + "^{tree}"))
+        self.assertTrue(self.guard.ancestor(self.checksum_anchor, self.source))
+        self.assertTrue(self.guard.ancestor(self.checksum_anchor, self.release))
+        try:
+            result = self.verify()
+        except self.guard.Denied as error:
+            self.fail("Exact follow-up checksum tuple rejected: " + str(error))
+        self.assertEqual(result, "reviewed-v0.74.10")
+
+    def test_followup_missing_wrong_or_old_pr_ci_is_denied(self):
+        self.followup_checksum_fixture()
+        original = copy.deepcopy(self.responses)
+        for run_id in (45, 46):
+            for field, value in (("pull_requests", []),
+                                 ("pull_requests", [{"number": 1108}]),
+                                 ("head_sha", self.checksum_old_source),
+                                 ("head_sha", self.checksum_anchor),
+                                 ("event", "push"), ("event", "workflow_dispatch"),
+                                 ("conclusion", "failure"), ("status", "in_progress"),
+                                 ("path", ".github/workflows/other.yml"), ("id", run_id + 100),
+                                 ("repository", {"full_name": "foreign/workflow"})):
+                with self.subTest(run=run_id, field=field, value=value):
+                    self.responses = copy.deepcopy(original)
+                    self.responses[f"actions/runs/{run_id}"][field] = value
+                    with self.assertRaisesRegex(self.guard.Denied, "Exact maintenance source CI"):
+                        self.verify()
+
+    def test_followup_absent_null_or_malformed_association_is_denied(self):
+        self.followup_checksum_fixture()
+        original = copy.deepcopy(self.responses)
+        cases = (("absent", None), ("null", None), ("object", {}),
+                 ("string", "not-an-array"), ("boolean", True), ("number", 1200),
+                 ("null entry", [None]), ("string entry", ["1200"]),
+                 ("missing number", [{}]), ("boolean number", [{"number": True}]),
+                 ("string number", [{"number": "1200"}]),
+                 ("floating number", [{"number": 1200.0}]))
+        for run_id in (45, 46):
+            for name, value in cases:
+                with self.subTest(run=run_id, association=name):
+                    self.responses = copy.deepcopy(original)
+                    run = self.responses[f"actions/runs/{run_id}"]
+                    if name == "absent":
+                        run.pop("pull_requests")
+                    else:
+                        run["pull_requests"] = value
+                    with self.assertRaisesRegex(self.guard.Denied, "Exact maintenance source CI"):
+                        self.verify()
+
+    def test_followup_requires_new_source_pr_and_exact_merged_head(self):
+        self.followup_checksum_fixture()
+        original = copy.deepcopy(self.responses)
+        for field, value in (("merged", False), ("number", 1201),
+                             ("merge_commit_sha", self.checksum_anchor),
+                             ("base", {"ref": "other", "repo": {"full_name": self.guard.REPOSITORY}}),
+                             ("head", {"sha": self.source, "repo": {"full_name": "foreign/workflow"}})):
+            with self.subTest(field=field):
+                self.responses = copy.deepcopy(original)
+                self.responses["pulls/1200"][field] = value
+                with self.assertRaises(self.guard.Denied):
+                    self.verify()
+        self.responses = original
+        self.update_followup_checksum_record(dict(self.record, source_pr=1108))
+        with self.assertRaises(self.guard.Denied):
+            self.verify()
+
+    def test_followup_requires_strict_checksum_anchor_descendants(self):
+        self.followup_checksum_fixture()
+        for anchor in (self.source, self.release, self.upstream):
+            with self.subTest(anchor=anchor):
+                self.policy.checksum_maintenance_commit = anchor
+                with self.assertRaisesRegex(self.guard.Denied, "Follow-up checksum lineage"):
+                    self.verify()
+
+    def test_followup_record_refuses_old_runs_bad_schema_tree_and_tag(self):
+        self.followup_checksum_fixture()
+        for field, value in (("source_ci_run", 43), ("checksum_ci_run", 44),
+                             ("schema", 1), ("tag", "v0.74.9"),
+                             ("release_commit", self.checksum_anchor),
+                             ("source_commit", self.checksum_old_source),
+                             ("release_tree", self.base), ("checksum_ci_run", True)):
+            with self.subTest(field=field):
+                self.update_followup_checksum_record(dict(self.record, **{field: value}))
+                with self.assertRaises(self.guard.Denied):
+                    self.verify()
+
+    def test_followup_source_ref_cannot_move_after_admission(self):
+        self.followup_checksum_fixture()
+        self.run_git("push", "-q", "--force", "origin", self.release + ":refs/pull/1200/head")
+        with self.assertRaisesRegex(self.guard.Denied, "source moved"):
+            self.verify()
+
+    def test_followup_without_main_record_is_denied(self):
+        self.run_git("tag", "v0.74.10", self.release)
+        self.env.update(TAG_NAME="v0.74.10", GITHUB_REF="refs/tags/v0.74.10")
+        with self.assertRaisesRegex(self.guard.Denied, "no regular admission"):
+            self.verify()
+
+    def test_original_checksum_empty_ci_associations_remain_denied(self):
+        self.checksum_fixture()
+        for run_id in (43, 44):
+            with self.subTest(run=run_id):
+                self.responses[f"actions/runs/{run_id}"]["pull_requests"] = []
+                with self.assertRaisesRegex(self.guard.Denied, "Exact maintenance source CI"):
+                    self.verify()
+                self.responses[f"actions/runs/{run_id}"]["pull_requests"] = [{"number": 1108}]
 
 
 if __name__ == "__main__":
