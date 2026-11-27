@@ -47,7 +47,9 @@ Replaces workflow-registry/scripts/sync-core-manifests.sh.
 
 	plugins, err := inspectCoreRegistryPlugins(*workflowRepo)
 	if err != nil {
-		return err
+		// Keep compiler stderr and inspection context when the CLI removes
+		// pipeline wrappers; unwrapping to exec.ExitError loses that detail.
+		return contextualCLIError{err: err}
 	}
 	return syncCorePluginManifests(*registryDir, plugins, *fix, os.Stderr)
 }
