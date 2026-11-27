@@ -134,6 +134,8 @@ type M2MAuthModule struct {
 	// ES256 fields
 	privateKey *ecdsa.PrivateKey
 	publicKey  *ecdsa.PublicKey
+	// Managed issuance requires a stable key loaded explicitly, not generation.
+	ecdsaKeyConfigured bool
 
 	// Trusted public keys for JWT-bearer grant (keyed by key ID or issuer)
 	trustedKeys map[string]*trustedKeyEntry
@@ -148,6 +150,7 @@ type M2MAuthModule struct {
 
 	// Configurable OAuth2 endpoint path suffixes.
 	endpointPaths M2MEndpointPaths
+	managedOnly   bool
 
 	// Introspection access-control policy (see SetIntrospectPolicy).
 	introspectAllowOthers      bool   // if true, authenticated callers may inspect any token
@@ -185,9 +188,12 @@ func (m *M2MAuthModule) GenerateECDSAKey() error {
 	if err != nil {
 		return fmt.Errorf("generate ECDSA key: %w", err)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.privateKey = key
 	m.publicKey = &key.PublicKey
 	m.algorithm = SigningAlgES256
+	m.ecdsaKeyConfigured = false
 	return nil
 }
 
@@ -205,9 +211,12 @@ func (m *M2MAuthModule) SetECDSAKey(pemKey string) error {
 	if key.Curve != elliptic.P256() {
 		return fmt.Errorf("unsupported ECDSA curve: got %s, want P-256", key.Curve.Params().Name)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.privateKey = key
 	m.publicKey = &key.PublicKey
 	m.algorithm = SigningAlgES256
+	m.ecdsaKeyConfigured = true
 	return nil
 }
 
@@ -442,6 +451,9 @@ func (m *M2MAuthModule) Handle(w http.ResponseWriter, r *http.Request) {
 // handleToken implements RFC 6749 § 4.4 (client_credentials) and
 // RFC 7523 § 2.1 (jwt-bearer assertion) token endpoints.
 func (m *M2MAuthModule) handleToken(w http.ResponseWriter, r *http.Request) {
+	if m.refuseManagedEndpoint(w) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
@@ -562,7 +574,14 @@ func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	jwk, err := ecPublicKeyToJWK(m.publicKey, m.name+"-key")
+	m.mu.RLock()
+	managedOnly := m.managedOnly
+	m.mu.RUnlock()
+	keyID := m.name + "-key"
+	if managedOnly {
+		keyID = jwkThumbprint(m.publicKey)
+	}
+	jwk, err := ecPublicKeyToJWK(m.publicKey, keyID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = json.NewEncoder(w).Encode(oauthError("server_error", "failed to generate JWK for ES256 public key"))
@@ -582,6 +601,9 @@ func (m *M2MAuthModule) handleJWKS(w http.ResponseWriter, _ *http.Request) {
 // Per RFC 7009 §2.2, if the token is valid and recognised, 200 OK is returned;
 // if it is unrecognised or already invalid, 200 OK is still returned.
 func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	if m.refuseManagedEndpoint(w) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
@@ -652,6 +674,9 @@ func (m *M2MAuthModule) handleRevoke(w http.ResponseWriter, r *http.Request) {
 // token's sub must match the caller's identity). Set the introspect policy via
 // SetIntrospectPolicy to allow cross-token inspection with optional scope/claim guards.
 func (m *M2MAuthModule) handleIntrospect(w http.ResponseWriter, r *http.Request) {
+	if m.refuseManagedEndpoint(w) {
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(oauthError("invalid_request", "failed to parse form"))
