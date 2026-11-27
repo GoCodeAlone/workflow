@@ -1,0 +1,255 @@
+name: Maintenance read-only token qualification
+
+on:
+  pull_request:
+    branches: [maintenance/v0.74]
+    paths: [.github/workflows/maintenance-token-qualification.yml]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  qualify:
+    if: >-
+      github.repository == 'GoCodeAlone/workflow' &&
+      github.repository_id == '960233419' &&
+      github.event.pull_request.base.repo.id == 960233419 &&
+      github.event.pull_request.head.repo.id == 960233419 &&
+      github.event.pull_request.base.repo.full_name == 'GoCodeAlone/workflow' &&
+      github.event.pull_request.head.repo.full_name == 'GoCodeAlone/workflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout exact reviewed consumer
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: GoCodeAlone/workflow
+          ref: 8272c558261bd5dc446e9de0bafb37ae0b60c7eb
+          path: source
+          fetch-depth: 2
+          persist-credentials: false
+          sparse-checkout: scripts/verify-maintenance-release.py
+          sparse-checkout-cone-mode: false
+      - name: Checkout exact reviewed merge ancestry
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          repository: GoCodeAlone/workflow
+          ref: 988defaf1a7c5328cc242d85c3053187d21be26f
+          path: merge
+          fetch-depth: 2
+          persist-credentials: false
+          sparse-checkout: scripts/verify-maintenance-release.py
+          sparse-checkout-cone-mode: false
+      - name: Exercise pinned verifier with native read-only job token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import copy
+          import hashlib
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+          import tempfile
+
+          H = "8272c558261bd5dc446e9de0bafb37ae0b60c7eb"
+          K = "988defaf1a7c5328cc242d85c3053187d21be26f"
+          ANCHOR = "04f159ae26ce0bf267acba8bc1a117eb2eb56911"
+          TREE = "52278cd559baa9dcb35e98237491263b28c28dbd"
+          FILE_SHA256 = "6a001fabc6d1f48ad3b2bac845b36e02b9839b99ca978138b604b75d2047fc44"
+          FILE_BLOB = "c0e680c0a92b924bf26ea4ceab058ea1f960c279"
+          # Deliberately lacks schema/tag/base/tree/upstream: not an admission record.
+          PROBE = json.loads(r'{"audit_witness":{"capture":{"captured_at":"2026-11-27T08:13:19Z","complete":true,"completed_pages":1,"prepared_pages":4},"kind":"org-audit-direct-v1","runs":{"checksum":{"check_suite_id":124347338408,"completed":{"action":"workflows.completed_workflow_run","conclusion":"success","document_sha256":"25e00422516f80cc5f7ea6711ea889692ce26b835c6a53f4d8dd7a6ace2b1046","event":"pull_request","head_sha":"8272c558261bd5dc446e9de0bafb37ae0b60c7eb","repo_id":960233419,"run_attempt":1,"trigger_id":5523272286,"workflow_id":421197648,"workflow_run_id":45962812174},"definition":{"databaseId":45962812174,"event":"pull_request","file":{"path":".github/workflows/maintenance-wfctl.yml","repositoryFileUrl":"https://github.com/GoCodeAlone/workflow/blob/8272c558261bd5dc446e9de0bafb37ae0b60c7eb/.github/workflows/maintenance-wfctl.yml","repositoryName":"GoCodeAlone/workflow"},"runAttempt":1},"job_id":140384378955,"prepared":{"action":"workflows.prepared_workflow_job","document_sha256":"c5dba2c253eb29efafc437174bd615802e9a1c9967dc1a46801854c683f80bf8","job_workflow_ref":"GoCodeAlone/workflow/.github/workflows/maintenance-wfctl.yml@refs/pull/1127/merge","job_workflow_sha":null,"repo_id":960233419,"run_attempt":null,"workflow_run_id":45962812174}},"jwt":{"check_suite_id":124347338248,"completed":{"action":"workflows.completed_workflow_run","conclusion":"success","document_sha256":"90469bf97bd0cdd1b29835687508d62d1019f16fc914284d716fdc48961ec757","event":"pull_request","head_sha":"8272c558261bd5dc446e9de0bafb37ae0b60c7eb","repo_id":960233419,"run_attempt":1,"trigger_id":5523272286,"workflow_id":379002120,"workflow_run_id":45962812113},"definition":{"databaseId":45962812113,"event":"pull_request","file":{"path":".github/workflows/maintenance-jwt.yml","repositoryFileUrl":"https://github.com/GoCodeAlone/workflow/blob/8272c558261bd5dc446e9de0bafb37ae0b60c7eb/.github/workflows/maintenance-jwt.yml","repositoryName":"GoCodeAlone/workflow"},"runAttempt":1},"job_id":140384378026,"prepared":{"action":"workflows.prepared_workflow_job","document_sha256":"0d64a1a9fa5466b8a57f77e4d338a98c496e8fa816af9de4f7c59cb48aaf2bc6","job_workflow_ref":"GoCodeAlone/workflow/.github/workflows/maintenance-jwt.yml@refs/pull/1127/merge","job_workflow_sha":null,"repo_id":960233419,"run_attempt":null,"workflow_run_id":45962812113}}},"source_pr_id":5523272286},"checksum_ci_run":45962812174,"release_commit":"988defaf1a7c5328cc242d85c3053187d21be26f","source_ci_run":45962812113,"source_commit":"8272c558261bd5dc446e9de0bafb37ae0b60c7eb","source_pr":1127}')
+          SOURCE = {
+              "id": 5523272286,
+              "base": {"repo": {"id": 960233419, "full_name": "GoCodeAlone/workflow"}},
+              "head": {"ref": "fix/v074-audit-witness-provenance-20261127",
+                       "repo": {"id": 960233419, "full_name": "GoCodeAlone/workflow"}},
+          }
+          PATHS = (
+              "actions/runs/45962812113",
+              "actions/runs/45962812113/attempts/1",
+              "actions/runs/45962812113/attempts/1/jobs?per_page=2",
+              "actions/runs/45962812174",
+              "actions/runs/45962812174/attempts/1",
+              "actions/runs/45962812174/attempts/1/jobs?per_page=2",
+          )
+
+          class Failure(Exception):
+              pass
+
+          def require(ok, message):
+              if not ok:
+                  raise Failure(message)
+
+          def check_event(env, event):
+              require(type(event) is dict, "PR event unavailable")
+              pr = event.get("pull_request")
+              require(type(pr) is dict, "PR event unavailable")
+              require(env.get("GITHUB_EVENT_NAME") == "pull_request"
+                      and env.get("GITHUB_REPOSITORY") == "GoCodeAlone/workflow"
+                      and env.get("GITHUB_REPOSITORY_ID") == "960233419"
+                      and event.get("action") in ("opened", "synchronize", "reopened")
+                      and type(event.get("number")) is int and event["number"] > 0
+                      and env.get("GITHUB_REF") == f"refs/pull/{event['number']}/merge"
+                      and re.fullmatch(r"[0-9a-f]{40}", env.get("GITHUB_SHA", "")),
+                      "Not the intended ordinary first-party PR context")
+              for side in ("base", "head"):
+                  value = pr.get(side)
+                  require(type(value) is dict and type(value.get("repo")) is dict,
+                          "PR repository unavailable")
+                  repo = value["repo"]
+                  require(type(repo.get("id")) is int and repo["id"] == 960233419
+                          and repo.get("full_name") == "GoCodeAlone/workflow",
+                          "PR repository mismatch")
+              require(pr["base"].get("ref") == "maintenance/v0.74"
+                      and pr["base"].get("sha") == K, "Reviewed qualification base moved")
+
+          def check_consumer(source):
+              path = source / "scripts/verify-maintenance-release.py"
+              require(path.is_file() and not path.is_symlink(), "Pinned consumer unavailable")
+              raw = path.read_bytes()
+              require(hashlib.sha256(raw).hexdigest() == FILE_SHA256
+                      and hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest() == FILE_BLOB,
+                      "Pinned consumer bytes changed")
+              return path
+
+          def git(source, *args):
+              r = subprocess.run(["git", "-C", str(source), *args], capture_output=True,
+                                 timeout=30, env=dict(os.environ, GIT_NO_REPLACE_OBJECTS="1"))
+              require(r.returncode == 0, "Bounded local source verification failed")
+              return r.stdout.decode("utf-8").strip()
+
+          def check_sources(source, merge):
+              for repo, expected in ((source, H), (merge, K)):
+                  require(git(repo, "rev-parse", "HEAD") == expected, "Pinned checkout moved")
+                  headers = git(repo, "cat-file", "-p", expected).partition("\n\n")[0].splitlines()
+                  require([x for x in headers if x.startswith("parent ")] == ["parent " + ANCHOR]
+                          and headers[0] == "tree " + TREE, "Pinned source lineage changed")
+              # Copy the authentic commit object from the second LOCAL Git database.
+              # Both commits share the same existing tree and parent; no remote fetch,
+              # object synthesis, credential or PR-controlled ref is used here.
+              raw = subprocess.run(["git", "-C", str(merge), "cat-file", "commit", K],
+                                   capture_output=True, timeout=20,
+                                   env=dict(os.environ, GIT_NO_REPLACE_OBJECTS="1"))
+              require(raw.returncode == 0, "Pinned merge commit unavailable")
+              copied = subprocess.run(["git", "-C", str(source), "hash-object", "-t", "commit", "-w", "--stdin"],
+                                      input=raw.stdout, capture_output=True, timeout=20,
+                                      env=dict(os.environ, GIT_NO_REPLACE_OBJECTS="1"))
+              require(copied.returncode == 0 and copied.stdout.strip() == K.encode(),
+                      "Pinned merge commit bytes changed")
+              require(git(source, "rev-parse", K + "^{tree}") == TREE,
+                      "Pinned merge tree unavailable")
+              check_consumer(source)
+
+          def restricted_api(m):
+              cache = {}
+              def api(path):
+                  if path not in PATHS or path in cache:
+                      raise m.Denied("Read outside the six original endpoints")
+                  value = m.github_api(path)
+                  cache[path] = copy.deepcopy(value)
+                  return value
+              return api, cache
+
+          def probe(m, api):
+              m.verify_audit_witness(copy.deepcopy(PROBE), copy.deepcopy(SOURCE), api, m.Policy())
+
+          def negative_controls(m, cache):
+              cases = ("trigger", "definition", "capture", "attempt", "job_count",
+                       "job_failure", "prepared_attempt", "dependency")
+              for case in cases:
+                  record, replies = copy.deepcopy(PROBE), copy.deepcopy(cache)
+                  if case == "trigger":
+                      record["audit_witness"]["runs"]["jwt"]["completed"]["trigger_id"] = 1127
+                  elif case == "definition":
+                      record["audit_witness"]["runs"]["jwt"]["definition"]["file"]["repositoryFileUrl"] = (
+                          "https://github.com/GoCodeAlone/workflow/blob/maintenance/v0.74/"
+                          ".github/workflows/maintenance-jwt.yml")
+                  elif case == "capture":
+                      record["audit_witness"]["capture"]["complete"] = False
+                  elif case == "attempt":
+                      replies[PATHS[0]]["run_attempt"] = 2
+                  elif case == "job_count":
+                      replies[PATHS[2]]["total_count"] = 2
+                  elif case == "job_failure":
+                      replies[PATHS[2]]["jobs"][0]["conclusion"] = "failure"
+                  elif case == "prepared_attempt":
+                      record["audit_witness"]["runs"]["jwt"]["prepared"]["run_attempt"] = 1
+                  def replay(path):
+                      if case == "dependency" or path not in PATHS or path not in replies:
+                          raise m.Denied("Allowed read unavailable")
+                      return copy.deepcopy(replies[path])
+                  try:
+                      m.verify_audit_witness(record, copy.deepcopy(SOURCE), replay, m.Policy())
+                  except m.Denied:
+                      continue
+                  raise Failure("A refusal control unexpectedly passed")
+              # Restored authentic snapshots must still pass; no additional live calls.
+              probe(m, lambda path: copy.deepcopy(cache[path]))
+              return len(cases)
+
+          def cli_refusal(source, env):
+              r = subprocess.run([sys.executable, str(source / "scripts/verify-maintenance-release.py")],
+                                 cwd=source, env=env, capture_output=True, timeout=20)
+              require(r.returncode == 1 and r.stderr == b""
+                      and r.stdout == b"Release provenance denied: Release event context invalid\n",
+                      "Unmodified CLI did not refuse the authentic PR context")
+
+          def main():
+              event_path = Path(os.environ["GITHUB_EVENT_PATH"])
+              require(event_path.stat().st_size <= 1048576, "PR event too large")
+              check_event(os.environ, json.loads(event_path.read_text()))
+              require(bool(os.environ.get("GH_TOKEN")), "Native job token missing")
+              workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+              source, merge = workspace / "source", workspace / "merge"
+              check_sources(source, merge)
+              consumer = check_consumer(source)
+              sys.dont_write_bytecode = True
+              with tempfile.TemporaryDirectory(prefix="maintenance-token-", dir=os.environ["RUNNER_TEMP"]) as owned:
+                  # Native GH_TOKEN is the ONLY authentication input. Never log it.
+                  for key in ("GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_DEBUG"):
+                      os.environ.pop(key, None)
+                  os.environ.update(GH_CONFIG_DIR=owned, GH_HOST="github.com", GH_PROMPT_DISABLED="1",
+                                    GH_NO_UPDATE_NOTIFIER="1", GH_NO_EXTENSION_UPDATE_NOTIFIER="1")
+                  for tool in (("git", "--version"), ("gh", "--version")):
+                      r = subprocess.run(tool, capture_output=True, timeout=10)
+                      require(r.returncode == 0, "Trusted runner tools unavailable")
+                      # Log only the version number, never arbitrary command output.
+                      version = re.match(rb"(?:git|gh) version ([0-9]+(?:\.[0-9]+){1,3})(?:\s|$)", r.stdout)
+                      require(version is not None, "Runner tool version unavailable")
+                      print(tool[0] + " version " + version[1].decode("ascii"))
+                  print("Python " + sys.version.split()[0])
+                  spec = importlib.util.spec_from_file_location("maintenance_verifier", consumer)
+                  m = importlib.util.module_from_spec(spec)
+                  sys.modules[spec.name] = m
+                  spec.loader.exec_module(m)
+                  os.chdir(source)
+                  cli_refusal(source, dict(os.environ))
+                  api, cache = restricted_api(m)
+                  probe(m, api)
+                  require(set(cache) == set(PATHS), "Six-read qualification incomplete")
+                  count = negative_controls(m, cache)
+              print("Consumer SHA256 " + FILE_SHA256)
+              print("Reviewed source " + H + "; merge " + K)
+              print("Original attempt1 runs: 45962812113 / 45962812174")
+              print(f"PASS: six live reads; {count} in-memory refusals; authentic PR CLI refusal")
+              print("Not full release admission. Effective token scope needs platform job-setup evidence.")
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except Failure as error:
+                  print("Token qualification refused: " + str(error))
+                  raise SystemExit(1)
+              except Exception:
+                  # No remote response, provider stderr, event data or token in failures.
+                  print("Token qualification refused; no release admission performed.")
+                  raise SystemExit(1)
+          PY
