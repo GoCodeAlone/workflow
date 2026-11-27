@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 
 
 REPOSITORY = "GoCodeAlone/workflow"
@@ -29,6 +30,7 @@ class Policy:
     jwt_maintenance_commit: str = "24503c4f7cc268302814a88b7d0c2f13d6d2184d"
     checksum_upstream_commit: str = "5e3648d14b0a6de59ed4765893a13b712c66b641"
     checksum_maintenance_commit: str = "fe7d1a8754e6b9ff64cfc6c4aeb48bd21c6fa7d1"
+    audit_maintenance_commit: str = "04f159ae26ce0bf267acba8bc1a117eb2eb56911"
     checksum_blobs: tuple = (
         ("cmd/wfctl/plugin_checksum.go", "fac5e9c830f5cf64fef0341dbb28ee14f56fe551"),
         ("cmd/wfctl/plugin_install.go", "9740e355fa6411e15e2477ed824b762a2a86ea0a"),
@@ -112,8 +114,13 @@ def admission_record(tag="v0.74.8"):
             "base_commit", "source_pr", "source_ci_run", "upstream_pr", "upstream_commit"}
     if tag in CHECKSUM_TAGS:
         keys.add("checksum_ci_run")
+    audit = (tag == "v0.74.10" and type(record) is dict
+             and type(record.get("schema")) is int and record["schema"] == 3)
+    if audit:
+        keys.add("audit_witness")
     require(type(record) is dict and set(record) == keys, "Admission record schema invalid")
-    require(type(record["schema"]) is int and record["schema"] == (2 if tag in CHECKSUM_TAGS else 1),
+    require(type(record["schema"]) is int
+            and record["schema"] == (3 if audit else 2 if tag in CHECKSUM_TAGS else 1),
             "Admission record version invalid")
     for field in ("release_commit", "source_commit", "release_tree", "base_commit", "upstream_commit"):
         require(oid(record[field]), "Admission record commit or tree invalid")
@@ -134,6 +141,140 @@ def merged_pr(api, number, branch):
             and pr.get("head", {}).get("repo", {}).get("full_name") == REPOSITORY,
             "Pull request repository or branch mismatch")
     return pr
+
+
+def audit_fields(value, keys):
+    require(type(value) is dict and set(value) == set(keys.split()),
+            "Audit witness shape invalid")
+
+
+def audit_number(value):
+    return type(value) is int and value > 0
+
+
+def audit_repository(value):
+    require(type(value) is dict and value.get("full_name") == REPOSITORY
+            and type(value.get("id")) is int and value["id"] == 960233419,
+            "Audit repository identity mismatch")
+
+
+def audit_run(run, run_id, workflow_id, path, suite_id, head, head_ref):
+    require(type(run) is dict, "Audit run unavailable")
+    for field in ("id", "workflow_id", "check_suite_id", "run_attempt"):
+        require(audit_number(run.get(field)), "Audit run identifier invalid")
+    audit_repository(run.get("repository"))
+    audit_repository(run.get("head_repository"))
+    require(run["id"] == run_id and run["workflow_id"] == workflow_id
+            and run["check_suite_id"] == suite_id and run["run_attempt"] == 1
+            and run.get("path") == path and run.get("head_sha") == head
+            and run.get("head_branch") == head_ref and run.get("event") == "pull_request"
+            and run.get("status") == "completed" and run.get("conclusion") == "success",
+            "Audit exact original attempt is not successful")
+
+
+def verify_audit_witness(record, source, api, policy):
+    """Consume only a main-reviewed DIRECT capture; never query organization audit.
+
+    The record attests independently captured provider facts, not candidate logs.
+    document_sha256 hashes the ASCII domain github-audit-document-id-v1,
+    one NUL byte, then the UTF-8 private provider document ID. It is an opaque identity commitment checked
+    by main review, not a projection digest or origin proof recomputed here.
+    Prepared attempt/SHA stay null. Original attempt 1, one root job and live
+    no-rerun checks make its attempt join unique. Captured GraphQL definition
+    identity is not claimed to have been revalidated with this job's token.
+    """
+    anchor = policy.audit_maintenance_commit
+    require(oid(anchor) and record["release_commit"] != anchor
+            and record["source_commit"] != anchor
+            and ancestor(anchor, record["release_commit"])
+            and ancestor(anchor, record["source_commit"]), "Audit source must be newly qualified")
+    witness = record["audit_witness"]
+    audit_fields(witness, "kind source_pr_id capture runs")
+    require(witness["kind"] == "org-audit-direct-v1"
+            and audit_number(witness["source_pr_id"])
+            and type(source.get("id")) is int and source["id"] == witness["source_pr_id"],
+            "Audit PR database identity mismatch")
+    audit_repository(source.get("base", {}).get("repo"))
+    audit_repository(source.get("head", {}).get("repo"))
+    head_ref = source["head"].get("ref")
+    require(type(head_ref) is str and bool(head_ref), "Audit source ref missing")
+    capture = witness["capture"]
+    audit_fields(capture, "complete captured_at completed_pages prepared_pages")
+    require(capture["complete"] is True and audit_number(capture["completed_pages"])
+            and audit_number(capture["prepared_pages"]), "Audit capture incomplete")
+    try:
+        require(type(capture["captured_at"]) is str
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", capture["captured_at"]),
+                "Audit capture time invalid")
+        datetime.strptime(capture["captured_at"], "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as error:
+        raise Denied("Audit capture time invalid") from error
+    audit_fields(witness["runs"], "jwt checksum")
+    documents, suites, jobs_seen = set(), set(), set()
+    roles = (("jwt", record["source_ci_run"], 379002120, "maintenance-jwt.yml",
+              "JWT maintenance regressions"),
+             ("checksum", record["checksum_ci_run"], 421197648, "maintenance-wfctl.yml",
+              "wfctl checksum regressions (not full runtime acceptance)"))
+    for role, run_id, workflow_id, workflow, job_name in roles:
+        proof = witness["runs"][role]
+        audit_fields(proof, "check_suite_id job_id completed prepared definition")
+        require(audit_number(proof["check_suite_id"]) and audit_number(proof["job_id"])
+                and proof["check_suite_id"] not in suites and proof["job_id"] not in jobs_seen,
+                "Audit job or suite identity invalid")
+        suites.add(proof["check_suite_id"])
+        jobs_seen.add(proof["job_id"])
+        completed, prepared = proof["completed"], proof["prepared"]
+        audit_fields(completed, "action document_sha256 repo_id workflow_run_id workflow_id "
+                     "trigger_id event head_sha run_attempt conclusion")
+        audit_fields(prepared, "action document_sha256 repo_id workflow_run_id "
+                     "job_workflow_ref run_attempt job_workflow_sha")
+        for event in (completed, prepared):
+            digest = event["document_sha256"]
+            require(type(digest) is str and re.fullmatch(r"[0-9a-f]{64}", digest)
+                    and digest not in documents, "Audit document commitment invalid or repeated")
+            documents.add(digest)
+            require(type(event["repo_id"]) is int and event["repo_id"] == 960233419
+                    and audit_number(event["workflow_run_id"])
+                    and event["workflow_run_id"] == run_id, "Audit event repository or run mismatch")
+        require(completed["action"] == "workflows.completed_workflow_run"
+                and audit_number(completed["workflow_id"]) and completed["workflow_id"] == workflow_id
+                and audit_number(completed["trigger_id"])
+                and completed["trigger_id"] == witness["source_pr_id"]
+                and completed["event"] == "pull_request" and completed["head_sha"] == record["source_commit"]
+                and type(completed["run_attempt"]) is int and completed["run_attempt"] == 1
+                and completed["conclusion"] == "success", "Audit completed event mismatch")
+        path = ".github/workflows/" + workflow
+        require(prepared["action"] == "workflows.prepared_workflow_job"
+                and prepared["job_workflow_ref"] == f"{REPOSITORY}/{path}@refs/pull/{record['source_pr']}/merge"
+                and prepared["run_attempt"] is None and prepared["job_workflow_sha"] is None,
+                "Audit prepared event mismatch")
+        definition = proof["definition"]
+        audit_fields(definition, "databaseId event runAttempt file")
+        audit_fields(definition["file"], "path repositoryName repositoryFileUrl")
+        require(audit_number(definition["databaseId"]) and definition["databaseId"] == run_id
+                and type(definition["runAttempt"]) is int and definition["runAttempt"] == 1
+                and definition["event"] == "pull_request"
+                and definition["file"]["path"] == path
+                and definition["file"]["repositoryName"] == REPOSITORY
+                and definition["file"]["repositoryFileUrl"]
+                == f"https://github.com/{REPOSITORY}/blob/{record['source_commit']}/{path}",
+                "Audit DIRECT executed definition mismatch")
+        latest = api(f"actions/runs/{run_id}")
+        audit_run(latest, run_id, workflow_id, path, proof["check_suite_id"], record["source_commit"], head_ref)
+        require("previous_attempt_url" in latest and latest["previous_attempt_url"] is None,
+                "Audit run was retried")
+        attempt = api(f"actions/runs/{run_id}/attempts/1")
+        audit_run(attempt, run_id, workflow_id, path, proof["check_suite_id"], record["source_commit"], head_ref)
+        jobs = api(f"actions/runs/{run_id}/attempts/1/jobs?per_page=2")
+        require(type(jobs) is dict and type(jobs.get("total_count")) is int and jobs["total_count"] == 1
+                and type(jobs.get("jobs")) is list and len(jobs["jobs"]) == 1,
+                "Audit original job set ambiguous")
+        job = jobs["jobs"][0]
+        require(type(job) is dict and audit_number(job.get("id")) and job["id"] == proof["job_id"]
+                and audit_number(job.get("run_id")) and job["run_id"] == run_id
+                and type(job.get("run_attempt")) is int and job["run_attempt"] == 1
+                and job.get("name") == job_name and job.get("status") == "completed"
+                and job.get("conclusion") == "success", "Audit original job is not successful")
 
 
 def verify_checksum_release(tag, commit, api, policy):
@@ -197,6 +338,9 @@ def verify_checksum_release(tag, commit, api, policy):
     entries = git("ls-tree", "-rz", record["source_commit"], "--",
                   *(path for path, _ in policy.checksum_blobs))[1]
     require(entries == expected, "Checksum production or workflow identity mismatch")
+    if record["schema"] == 3:
+        verify_audit_witness(record, source, api, policy)
+        return "reviewed-audit-" + tag
     for run_id, workflow in ((record["source_ci_run"], "maintenance-jwt.yml"),
                              (record["checksum_ci_run"], "maintenance-wfctl.yml")):
         run = api(f"actions/runs/{run_id}")
