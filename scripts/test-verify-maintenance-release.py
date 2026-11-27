@@ -2,8 +2,10 @@
 """Exercise real Git lineage with a local origin and modeled read-only GitHub API."""
 
 import copy
+import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -645,6 +647,343 @@ class ReleaseAdmissionTests(unittest.TestCase):
                 with self.assertRaisesRegex(self.guard.Denied, "Exact maintenance source CI"):
                     self.verify()
                 self.responses[f"actions/runs/{run_id}"]["pull_requests"] = [{"number": 1108}]
+
+    def audit_fixture(self):
+        # Entirely synthetic Git/API data. Real #1126 receipts never qualify
+        # this changed source; they only informed the independently reviewed shape.
+        self.checksum_fixture()
+        self.policy.checksum_maintenance_commit = self.release
+        self.run_git("checkout", "-q", "-b", "prior-audit-anchor", self.release)
+        (self.repo / "prior-guard.txt").write_text("prior reviewed guard\n")
+        self.commit("prior reviewed maintenance guard")
+        self.audit_anchor = self.rev("HEAD")
+        self.policy.audit_maintenance_commit = self.audit_anchor
+        self.run_git("checkout", "-q", "maintenance/v0.74")
+        self.run_git("merge", "--ff-only", "prior-audit-anchor")
+        self.run_git("checkout", "-q", "-b", "checksum-audit-source", self.audit_anchor)
+        (self.repo / "new-guard.txt").write_text("new reviewed audit consumer\n")
+        self.commit("new audit consumer source")
+        self.source = self.rev("HEAD")
+        self.tree = self.rev("HEAD^{tree}")
+        self.run_git("checkout", "-q", "maintenance/v0.74")
+        self.run_git("merge", "--squash", "checksum-audit-source")
+        self.commit("new audit consumer squash")
+        self.release = self.rev("HEAD")
+        self.run_git("tag", "v0.74.10")
+        self.followup_pr = 1300
+        repository = {"full_name": self.guard.REPOSITORY, "id": 960233419}
+        self.responses["pulls/1300"] = {
+            "number": 1300, "id": 71300, "merged": True,
+            "merge_commit_sha": self.release,
+            "base": {"ref": "maintenance/v0.74", "repo": repository},
+            "head": {"sha": self.source, "ref": "checksum-audit-source", "repo": repository}}
+        proofs = {}
+        roles = (("jwt", 47, 379002120, "maintenance-jwt.yml", "JWT maintenance regressions"),
+                 ("checksum", 48, 421197648, "maintenance-wfctl.yml",
+                  "wfctl checksum regressions (not full runtime acceptance)"))
+        for role, run_id, workflow_id, workflow, job_name in roles:
+            path = ".github/workflows/" + workflow
+            latest = {"id": run_id, "repository": repository,
+                      "head_repository": repository, "head_sha": self.source,
+                      "head_branch": "checksum-audit-source", "path": path,
+                      "event": "pull_request", "status": "completed", "conclusion": "success",
+                      "run_attempt": 1, "previous_attempt_url": None,
+                      "workflow_id": workflow_id, "check_suite_id": run_id + 1000,
+                      "pull_requests": []}
+            self.responses[f"actions/runs/{run_id}"] = copy.deepcopy(latest)
+            self.responses[f"actions/runs/{run_id}/attempts/1"] = copy.deepcopy(latest)
+            self.responses[f"actions/runs/{run_id}/attempts/1/jobs?per_page=2"] = {
+                "total_count": 1, "jobs": [{"id": run_id + 2000, "run_id": run_id,
+                "run_attempt": 1, "name": job_name, "status": "completed", "conclusion": "success"}]}
+            completed = {
+                "action": "workflows.completed_workflow_run",
+                "document_sha256": hashlib.sha256(b"github-audit-document-id-v1\0"
+                                                   + f"synthetic-completed-{run_id}".encode()).hexdigest(),
+                "repo_id": 960233419, "workflow_run_id": run_id,
+                "workflow_id": workflow_id, "trigger_id": 71300,
+                "event": "pull_request", "head_sha": self.source,
+                "run_attempt": 1, "conclusion": "success"}
+            prepared = {
+                "action": "workflows.prepared_workflow_job",
+                "document_sha256": hashlib.sha256(b"github-audit-document-id-v1\0"
+                                                   + f"synthetic-prepared-{run_id}".encode()).hexdigest(),
+                "repo_id": 960233419, "workflow_run_id": run_id,
+                "job_workflow_ref": self.guard.REPOSITORY + "/" + path + "@refs/pull/1300/merge",
+                "run_attempt": None, "job_workflow_sha": None}
+            definition = {"databaseId": run_id, "event": "pull_request", "runAttempt": 1,
+                          "file": {"path": path, "repositoryName": self.guard.REPOSITORY,
+                          "repositoryFileUrl": "https://github.com/" + self.guard.REPOSITORY
+                          + "/blob/" + self.source + "/" + path}}
+            proofs[role] = {"check_suite_id": run_id + 1000, "job_id": run_id + 2000,
+                            "completed": completed, "prepared": prepared, "definition": definition}
+        self.record = dict(self.record, schema=3, tag="v0.74.10", source_pr=1300,
+                           release_commit=self.release, source_commit=self.source,
+                           release_tree=self.tree, source_ci_run=47, checksum_ci_run=48,
+                           audit_witness={"kind": "org-audit-direct-v1", "source_pr_id": 71300,
+                           "capture": {"complete": True, "captured_at": "2026-01-01T00:00:00Z",
+                                       "completed_pages": 1, "prepared_pages": 4}, "runs": proofs})
+        self.assertLessEqual(len(json.dumps(self.record, separators=(",", ":")).encode()), 4096)
+        self.audit_record(self.record)
+        self.run_git("push", "-q", "origin", "main", "maintenance/v0.74",
+                     "checksum-audit-source:refs/pull/1300/head", "refs/tags/v0.74.10")
+        self.env.update(TAG_NAME="v0.74.10", GITHUB_REF="refs/tags/v0.74.10", GITHUB_SHA=self.release)
+        self.run_git("checkout", "-q", "--detach", self.release)
+
+    def audit_record(self, record, raw=None):
+        self.run_git("checkout", "-q", "main")
+        path = self.repo / ".github/release-admissions/v0.74.10.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(raw if raw is not None else json.dumps(record, separators=(",", ":")))
+        self.commit("synthetic independently approved audit witness")
+
+    def update_audit_record(self, record, raw=None):
+        self.audit_record(record, raw)
+        self.run_git("push", "-q", "origin", "main")
+        self.run_git("checkout", "-q", "--detach", self.release)
+
+    def test_audit_witness_accepts_complete_direct_definition_with_empty_associations(self):
+        self.audit_fixture()
+        try:
+            result = self.verify()
+        except self.guard.Denied as error:
+            self.fail("Complete independently approved DIRECT witness rejected: " + str(error))
+        self.assertEqual(result, "reviewed-audit-v0.74.10")
+
+    def deny_audit_record(self, path, value, remove=False):
+        changed = copy.deepcopy(self.record)
+        node = changed
+        for key in path[:-1]:
+            node = node[key]
+        if remove:
+            del node[path[-1]]
+        else:
+            node[path[-1]] = value
+        self.update_audit_record(changed)
+        with self.assertRaises(self.guard.Denied):
+            self.verify()
+
+    def test_audit_mode_is_explicit_and_legacy_associations_stay_required(self):
+        self.audit_fixture()
+        for path, value in ((("schema",), 2), (("schema",), True),
+                            (("audit_witness", "kind"), "other-mode"),
+                            (("audit_witness",), None)):
+            with self.subTest(path=path, value=value):
+                self.deny_audit_record(path, value)
+        old = dict(self.record, schema=2)
+        del old["audit_witness"]
+        self.update_audit_record(old)
+        with self.assertRaisesRegex(self.guard.Denied, "Exact maintenance source CI"):
+            self.verify()
+        for run_id in (47, 48):
+            self.responses[f"actions/runs/{run_id}"]["pull_requests"] = [{"number": 1300}]
+        self.assertEqual(self.verify(), "reviewed-v0.74.10")
+
+    def test_audit_capture_is_bounded_strict_and_cannot_claim_private_fields(self):
+        self.audit_fixture()
+        cases = ((("audit_witness", "capture", "complete"), False),
+                 (("audit_witness", "capture", "complete"), 1),
+                 (("audit_witness", "capture", "completed_pages"), True),
+                 (("audit_witness", "capture", "prepared_pages"), 0),
+                 (("audit_witness", "capture", "captured_at"), "2026-02-30T00:00:00Z"),
+                 (("audit_witness", "capture", "captured_at"), "2026-01-01"),
+                 (("audit_witness", "source_pr_id"), "71300"),
+                 (("audit_witness", "source_pr_id"), 1300),
+                 (("audit_witness", "source_pr_id"), True),
+                 (("audit_witness", "capture", "token_id"), "synthetic-private-field"))
+        for path, value in cases:
+            with self.subTest(path=path, value=value):
+                self.deny_audit_record(path, value)
+        raw = json.dumps(self.record, separators=(",", ":"))
+        duplicate = raw.replace('"kind":', '"kind":"org-audit-direct-v1","kind":', 1)
+        self.update_audit_record(self.record, raw=duplicate)
+        with self.assertRaisesRegex(self.guard.Denied, "duplicate keys"):
+            self.verify()
+        self.update_audit_record(self.record, raw=raw + " " * (4097 - len(raw)))
+        with self.assertRaisesRegex(self.guard.Denied, "too large"):
+            self.verify()
+
+    def test_audit_completed_and_prepared_events_bind_both_roles(self):
+        self.audit_fixture()
+        for role in ("jwt", "checksum"):
+            prefix = ("audit_witness", "runs", role)
+            cases = (("completed", "trigger_id", 1300),
+                     ("completed", "trigger_id", True),
+                     ("completed", "workflow_id", 1),
+                     ("completed", "workflow_run_id", 1),
+                     ("completed", "repo_id", True),
+                     ("completed", "event", "push"),
+                     ("completed", "head_sha", self.audit_anchor),
+                     ("completed", "run_attempt", True),
+                     ("completed", "conclusion", "failure"),
+                     ("prepared", "action", "workflows.completed_workflow_run"),
+                     ("prepared", "workflow_run_id", 1),
+                     ("prepared", "repo_id", 1),
+                     ("prepared", "job_workflow_ref", "GoCodeAlone/workflow/.github/workflows/maintenance-jwt.yml@refs/heads/maintenance/v0.74"),
+                     ("prepared", "run_attempt", 1),
+                     ("prepared", "job_workflow_sha", self.source),
+                     ("prepared", "document_id", "synthetic-private-id"))
+            for event, field, value in cases:
+                with self.subTest(role=role, event=event, field=field, value=value):
+                    self.deny_audit_record(prefix + (event, field), value)
+
+    def test_audit_direct_definition_rejects_mutable_foreign_swapped_or_stale_files(self):
+        self.audit_fixture()
+        for role in ("jwt", "checksum"):
+            prefix = ("audit_witness", "runs", role, "definition")
+            path = self.record["audit_witness"]["runs"][role]["definition"]["file"]["path"]
+            cases = ((("databaseId",), True), (("runAttempt",), True),
+                     (("runAttempt",), 2), (("event",), "push"),
+                     (("file", "repositoryName"), "other/workflow"),
+                     (("file", "path"), ".github/workflows/other.yml"),
+                     (("file", "repositoryFileUrl"), "https://github.com/GoCodeAlone/workflow/blob/main/" + path),
+                     (("file", "repositoryFileUrl"), "https://github.com/GoCodeAlone/workflow/blob/" + self.audit_anchor + "/" + path),
+                     (("file", "repositoryFileUrl"), "https://github.com/other/workflow/blob/" + self.source + "/" + path))
+            for tail, value in cases:
+                with self.subTest(role=role, field=tail, value=value):
+                    self.deny_audit_record(prefix + tail, value)
+        self.deny_audit_record(("audit_witness", "runs", "jwt"),
+                               self.record["audit_witness"]["runs"]["checksum"])
+
+    def test_audit_commitments_and_job_suite_ids_are_distinct_and_typed(self):
+        self.audit_fixture()
+        for role in ("jwt", "checksum"):
+            prefix = ("audit_witness", "runs", role)
+            for tail, value in ((("check_suite_id",), True), (("job_id",), "2047"),
+                                (("completed", "document_sha256"), "not-a-digest"),
+                                (("prepared", "document_sha256"), None)):
+                with self.subTest(role=role, field=tail):
+                    self.deny_audit_record(prefix + tail, value)
+        jwt = self.record["audit_witness"]["runs"]["jwt"]
+        for tail, value in ((("check_suite_id",), jwt["check_suite_id"]),
+                            (("job_id",), jwt["job_id"]),
+                            (("prepared", "document_sha256"), jwt["completed"]["document_sha256"])):
+            with self.subTest(field=tail):
+                self.deny_audit_record(("audit_witness", "runs", "checksum") + tail, value)
+
+    def test_audit_latest_and_original_attempt_must_both_remain_exact_success(self):
+        self.audit_fixture()
+        original = copy.deepcopy(self.responses)
+        for run_id in (47, 48):
+            for suffix in ("", "/attempts/1"):
+                endpoint = f"actions/runs/{run_id}" + suffix
+                cases = (("id", True), ("workflow_id", 1), ("check_suite_id", 1),
+                         ("head_sha", self.audit_anchor), ("head_branch", "other-source"),
+                         ("run_attempt", 2), ("run_attempt", True),
+                         ("status", "in_progress"), ("conclusion", "failure"),
+                         ("event", "push"), ("path", ".github/workflows/other.yml"),
+                         ("repository", {"full_name": self.guard.REPOSITORY, "id": 1}),
+                         ("head_repository", {"full_name": "other/workflow", "id": 960233419}))
+                for field, value in cases:
+                    with self.subTest(endpoint=endpoint, field=field, value=value):
+                        self.responses = copy.deepcopy(original)
+                        self.responses[endpoint][field] = value
+                        with self.assertRaisesRegex(self.guard.Denied, "Audit"):
+                            self.verify()
+                self.responses = copy.deepcopy(original)
+                self.responses[endpoint] = None
+                with self.assertRaisesRegex(self.guard.Denied, "Audit"):
+                    self.verify()
+            self.responses = copy.deepcopy(original)
+            self.responses[f"actions/runs/{run_id}"]["previous_attempt_url"] = "synthetic-prior-attempt"
+            with self.assertRaisesRegex(self.guard.Denied, "Audit"):
+                self.verify()
+
+    def test_audit_single_successful_original_job_is_required_for_null_attempt_join(self):
+        self.audit_fixture()
+        original = copy.deepcopy(self.responses)
+        for run_id in (47, 48):
+            endpoint = f"actions/runs/{run_id}/attempts/1/jobs?per_page=2"
+            for field, value in (("total_count", True), ("total_count", 2), ("jobs", []),
+                                 ("jobs", [None]), ("jobs", "not-an-array")):
+                with self.subTest(run=run_id, field=field, value=value):
+                    self.responses = copy.deepcopy(original)
+                    self.responses[endpoint][field] = value
+                    with self.assertRaisesRegex(self.guard.Denied, "Audit"):
+                        self.verify()
+            for field, value in (("id", True), ("run_id", 1), ("run_attempt", True),
+                                 ("run_attempt", 2), ("name", "other job"),
+                                 ("status", "in_progress"), ("conclusion", "failure")):
+                with self.subTest(run=run_id, field=field, value=value):
+                    self.responses = copy.deepcopy(original)
+                    self.responses[endpoint]["jobs"][0][field] = value
+                    with self.assertRaisesRegex(self.guard.Denied, "Audit"):
+                        self.verify()
+
+    def test_audit_requires_new_source_and_cannot_reuse_prior_ci(self):
+        self.audit_fixture()
+        for anchor in (self.source, self.release, self.upstream):
+            with self.subTest(anchor=anchor):
+                self.policy.audit_maintenance_commit = anchor
+                with self.assertRaisesRegex(self.guard.Denied, "Audit source"):
+                    self.verify()
+        self.policy.audit_maintenance_commit = self.audit_anchor
+        self.deny_audit_record(("source_ci_run",), 43)
+        self.deny_audit_record(("checksum_ci_run",), 44)
+
+    def test_audit_candidate_local_record_cannot_replace_revoked_main_authority(self):
+        self.audit_fixture()
+        self.run_git("checkout", "-q", "main")
+        self.run_git("rm", ".github/release-admissions/v0.74.10.json")
+        self.commit("revoke synthetic witness")
+        self.run_git("push", "-q", "origin", "main")
+        self.run_git("checkout", "-q", "--detach", self.release)
+        path = self.repo / ".github/release-admissions/v0.74.10.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.record, separators=(",", ":")))
+        with self.assertRaisesRegex(self.guard.Denied, "no regular admission"):
+            self.verify()
+
+    def test_audit_api_failure_cannot_fall_back_to_current_pr_associations(self):
+        self.audit_fixture()
+        for run_id in (47, 48):
+            self.responses[f"actions/runs/{run_id}"]["pull_requests"] = [{"number": 1300}]
+        original_api = self.api
+        for run_id in (47, 48):
+            for suffix in ("", "/attempts/1", "/attempts/1/jobs?per_page=2"):
+                endpoint = f"actions/runs/{run_id}" + suffix
+                def unavailable(path, endpoint=endpoint):
+                    if path == endpoint:
+                        raise self.guard.Denied("Synthetic provider unavailable")
+                    return original_api(path)
+                with self.subTest(endpoint=endpoint):
+                    with self.assertRaisesRegex(self.guard.Denied, "unavailable"):
+                        self.guard.verify_release(self.env, unavailable, self.policy)
+
+    def test_audit_actual_cli_refuses_unadmitted_source_and_duplicate_record(self):
+        self.audit_fixture()
+        # The unmodified CLI retains real Policy constants: synthetic Git
+        # anchors must refuse. API access is closed even if reached unexpectedly.
+        # New-mode acceptance is tested above through the maintained function
+        # with explicit fixture Policy; this is not a positive real admission.
+        fixture = Path(self.temp.name)
+        binary_dir = fixture / "bin"
+        binary_dir.mkdir()
+        stub = binary_dir / "gh"
+        stub.write_text("#!" + sys.executable + "\n"
+                        "import sys\n"
+                        "print('synthetic-private-provider-detail',file=sys.stderr)\n"
+                        "sys.exit(1)\n")
+        stub.chmod(0o700)
+        env = dict(os.environ, **self.env)
+        env.update(PATH=str(binary_dir) + os.pathsep + os.environ["PATH"])
+        script = Path(__file__).with_name("verify-maintenance-release.py")
+        unadmitted = subprocess.run([sys.executable, "-B", str(script)], cwd=self.repo,
+                                    env=env, capture_output=True, text=True, timeout=45)
+        self.assertEqual(unadmitted.returncode, 1)
+        self.assertIn("Admission does not match this exact release", unadmitted.stdout)
+        self.assertEqual(unadmitted.stderr, "")
+        raw = json.dumps(self.record, separators=(",", ":"))
+        duplicate = raw.replace('"kind":', '"kind":"synthetic-private-provider-detail","kind":', 1)
+        self.update_audit_record(self.record, raw=duplicate)
+        bad = subprocess.run([sys.executable, "-B", str(script)], cwd=self.repo,
+                             env=env, capture_output=True, text=True, timeout=45)
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("Release provenance denied: Admission record has duplicate keys", bad.stdout)
+        self.assertNotIn("synthetic-private-provider-detail", bad.stdout + bad.stderr)
+        self.assertEqual(bad.stderr, "")
+        for name, result in (("unadmitted-synthetic-source", unadmitted), ("duplicate-record", bad)):
+            print(json.dumps({"cli_fixture": name, "exit": result.returncode,
+                              "stdout": result.stdout.strip(), "stderr": result.stderr}))
 
 
 if __name__ == "__main__":
