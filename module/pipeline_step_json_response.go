@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/GoCodeAlone/modular"
+	"github.com/GoCodeAlone/workflow/pipeline"
 )
 
 // JSONResponseStep writes an HTTP JSON response with a custom status code and stops the pipeline.
@@ -189,7 +190,8 @@ func (s *JSONResponseStep) resolveResponseBody(pc *PipelineContext) any {
 // resolveBodyValue resolves a single body value, supporting:
 //   - `_from` references that inject raw step output values
 //   - nested maps and slices
-//   - template strings resolved via the TemplateEngine.
+//   - literal strings without changing their JSON type
+//   - template strings resolved via the TemplateEngine, including rendered JSON.
 //
 // `_from` is treated as a special directive only when it is the sole key in a map,
 // e.g. `{"_from": "steps.fetch.rows"}`. This keeps the semantics simple and avoids
@@ -229,6 +231,11 @@ func (s *JSONResponseStep) resolveBodyValue(v any, pc *PipelineContext) (any, er
 		}
 		return result, nil
 	case string:
+		// Only rendered values use the legacy JSON object/array conversion.
+		// A literal field remains a string even when its contents look like JSON.
+		if !strings.Contains(val, "{{") && !pipeline.ContainsExpr(val) {
+			return val, nil
+		}
 		resolved, err := s.tmpl.Resolve(val, pc)
 		if err != nil {
 			return nil, err
