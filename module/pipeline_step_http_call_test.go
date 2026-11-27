@@ -978,70 +978,111 @@ func TestHTTPCallStep_OAuth2_InstanceURL(t *testing.T) {
 	}
 }
 
-// TestHTTPCallStep_OAuth2_InstanceURL_Cached verifies that instance_url persists across calls
-// and is refreshed when the token is invalidated and re-fetched.
+// oauthInstanceURLTestTransport handles fixture requests in process. It has no
+// network fallback, so these cache lifecycle checks cannot contact a real service.
+type oauthInstanceURLTestTransport func(*http.Request) (*http.Response, error)
+
+func (f oauthInstanceURLTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		defer req.Body.Close()
+	}
+	return f(req)
+}
+
+// TestHTTPCallStep_OAuth2_InstanceURL_Cached verifies that instance_url persists on
+// cache hits and is refreshed after invalidation. Repeated fixtures deliberately
+// reuse the same synthetic endpoint, with a per-invocation client identity to
+// isolate process-wide cache state.
 func TestHTTPCallStep_OAuth2_InstanceURL_Cached(t *testing.T) {
-	var tokenRequests int32
-	const instanceURL1 = "https://instance1.salesforce.com"
-	const instanceURL2 = "https://instance2.salesforce.com"
+	const tokenURL = "https://oauth-cache.example.invalid/token"
+	const apiURL = "https://oauth-cache.example.invalid/data"
+	const instanceURL1 = "https://instance1.example.invalid"
+	const instanceURL2 = "https://instance2.example.invalid"
 
-	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&tokenRequests, 1)
-		iurl := instanceURL1
-		if n > 1 {
-			iurl = instanceURL2
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"access_token": "tok",
-			"expires_in":   3600,
-			"instance_url": iurl,
+	for _, fixture := range []string{"first fixture", "reused fixture address"} {
+		t.Run(fixture, func(t *testing.T) {
+			// Keep fixture identity unique for every invocation of this test,
+			// including repeated runs that use the same synthetic endpoint.
+			clientID := "fixture-client-" + t.TempDir()
+			var tokenRequests atomic.Int32
+			client := &http.Client{Transport: oauthInstanceURLTestTransport(func(req *http.Request) (*http.Response, error) {
+				var body string
+				switch req.URL.String() {
+				case tokenURL:
+					if req.Method != http.MethodPost {
+						return nil, fmt.Errorf("fixture token method = %q, want POST", req.Method)
+					}
+					instanceURL := instanceURL1
+					if tokenRequests.Add(1) > 1 {
+						instanceURL = instanceURL2
+					}
+					body = fmt.Sprintf(`{"access_token":"fixture-token","expires_in":3600,"instance_url":%q}`, instanceURL)
+				case apiURL:
+					if req.Method != http.MethodGet || req.Header.Get("Authorization") != "Bearer fixture-token" {
+						return nil, fmt.Errorf("unexpected fixture API method or bearer token")
+					}
+					body = `{}`
+				default:
+					return nil, fmt.Errorf("unexpected fixture URL %q", req.URL.String())
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(body)),
+					Request:    req,
+				}, nil
+			})}
+
+			factory := NewHTTPCallStepFactory()
+			step, err := factory("iurl-cached", map[string]any{
+				"url": apiURL,
+				"oauth2": map[string]any{
+					"token_url":     tokenURL,
+					"client_id":     clientID,
+					"client_secret": "fixture-secret",
+				},
+			}, nil)
+			if err != nil {
+				t.Fatalf("factory error: %v", err)
+			}
+			hs := step.(*HTTPCallStep)
+			hs.httpClient = client
+
+			for _, phase := range []struct {
+				name              string
+				invalidate        bool
+				wantInstanceURL   string
+				wantTokenRequests int32
+			}{
+				{"first fetch", false, instanceURL1, 1},
+				{"cache hit", false, instanceURL1, 1},
+				{"invalidated fetch", true, instanceURL2, 2},
+			} {
+				t.Run(phase.name, func(t *testing.T) {
+					if phase.invalidate {
+						hs.oauthEntry.invalidate()
+					}
+					pc := NewPipelineContext(nil, nil)
+					result, err := hs.Execute(context.Background(), pc)
+					if err != nil {
+						t.Fatalf("execute error: %v", err)
+					}
+					if got := hs.oauthEntry.getInstanceURL(); got != phase.wantInstanceURL {
+						t.Errorf("cached instance_url = %q, want %q", got, phase.wantInstanceURL)
+					}
+					if got := pc.Current["instance_url"]; got != phase.wantInstanceURL {
+						t.Errorf("context instance_url = %v, want %q", got, phase.wantInstanceURL)
+					}
+					if got := result.Output["instance_url"]; got != phase.wantInstanceURL {
+						t.Errorf("output instance_url = %v, want %q", got, phase.wantInstanceURL)
+					}
+					if got := tokenRequests.Load(); got != phase.wantTokenRequests {
+						t.Errorf("token requests = %d, want %d", got, phase.wantTokenRequests)
+					}
+				})
+			}
 		})
-	}))
-	defer tokenSrv.Close()
-
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer apiSrv.Close()
-
-	factory := NewHTTPCallStepFactory()
-	step, err := factory("iurl-cached", map[string]any{
-		"url":    apiSrv.URL,
-		"method": "GET",
-		"oauth2": map[string]any{
-			"token_url":     tokenSrv.URL + "/token",
-			"client_id":     "cid",
-			"client_secret": "csec",
-		},
-	}, nil)
-	if err != nil {
-		t.Fatalf("factory error: %v", err)
-	}
-	hs := step.(*HTTPCallStep)
-	hs.httpClient = &http.Client{}
-
-	pc := NewPipelineContext(nil, nil)
-
-	// First call – token is fetched, instance_url = instanceURL1.
-	if _, err := step.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("first execute error: %v", err)
-	}
-	if hs.oauthEntry.getInstanceURL() != instanceURL1 {
-		t.Errorf("expected instance_url=%q after first fetch, got %q", instanceURL1, hs.oauthEntry.getInstanceURL())
-	}
-
-	// Invalidate and fetch again – instance_url should update to instanceURL2.
-	hs.oauthEntry.invalidate()
-	if _, err := step.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("second execute error: %v", err)
-	}
-	if hs.oauthEntry.getInstanceURL() != instanceURL2 {
-		t.Errorf("expected instance_url=%q after second fetch, got %q", instanceURL2, hs.oauthEntry.getInstanceURL())
-	}
-	if atomic.LoadInt32(&tokenRequests) != 2 {
-		t.Errorf("expected 2 token requests, got %d", atomic.LoadInt32(&tokenRequests))
 	}
 }
 
