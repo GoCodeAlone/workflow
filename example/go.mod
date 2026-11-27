@@ -18,7 +18,7 @@ require (
 	github.com/GoCodeAlone/modular/modules/cache v1.19.0 // indirect
 	github.com/GoCodeAlone/modular/modules/eventbus/v2 v2.12.1 // indirect
 	github.com/GoCodeAlone/modular/modules/jsonschema v1.17.0 // indirect
-	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.10.0 // indirect
+	github.com/GoCodeAlone/modular/modules/reverseproxy/v2 v2.12.0 // indirect
 	github.com/GoCodeAlone/yaegi v0.17.2 // indirect
 	github.com/IBM/sarama v1.50.3 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
