@@ -4,6 +4,8 @@ import (
 	"os"
 	"sort"
 	"testing"
+
+	"github.com/GoCodeAlone/workflow/interfaces"
 )
 
 // --- ConfigRegistry tests ---
@@ -24,6 +26,63 @@ func TestConfigRegistryGetMissing(t *testing.T) {
 	_, ok := r.Get("nonexistent")
 	if ok {
 		t.Fatal("expected key not found")
+	}
+}
+
+func TestConfigProviderPrivateRegistration(t *testing.T) {
+	r := NewConfigRegistry()
+	_ = r.Set("compute.token", "dummy", false)
+	r.Freeze()
+	grants := []interfaces.StepCredentialGrant{credentialGrant()}
+	m := NewConfigProviderModuleWithCredentials("settings", r, grants)
+	app := CreateIsolatedApp(t)
+	if err := m.Init(app); err != nil {
+		t.Fatal(err)
+	}
+	var got *ConfigRegistry
+	if err := app.GetService("config.registry", &got); err != nil || got != r {
+		t.Fatal("snapshot pointer not preserved")
+	}
+	if err := NewConfigProviderModuleWithCredentials("other", r, grants).Init(app); err == nil {
+		t.Fatal("duplicate service accepted")
+	}
+	if err := NewConfigProviderModuleWithCredentials("bad", nil, grants).Init(CreateIsolatedApp(t)); err == nil {
+		t.Fatal("nil source accepted")
+	}
+	if err := NewConfigProviderModuleWithCredentials("empty", r, nil).Init(CreateIsolatedApp(t)); err == nil {
+		t.Fatal("empty private grants accepted")
+	}
+	normal := NewConfigProviderModule("normal", map[string]any{})
+	if normal.Registry() != GetConfigRegistry() {
+		t.Fatal("default constructor changed")
+	}
+	normalApp := CreateIsolatedApp(t)
+	if err := normal.Init(normalApp); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := normalApp.GetServiceEntry(StepCredentialsService); exists {
+		t.Fatal("normal constructor authorized credentials")
+	}
+}
+
+func TestGlobalConfigRegistryCompletedMirror(t *testing.T) {
+	t.Cleanup(GetConfigRegistry().Reset)
+	r := NewConfigRegistry()
+	_ = r.Set("compute.token", "dummy-private", true)
+	r.Freeze()
+	MirrorConfigRegistry(r)
+	if v, ok := GetConfigRegistry().Get("compute.token"); !ok || v != "dummy-private" {
+		t.Fatal("mirror missing value")
+	}
+	if !GetConfigRegistry().IsSensitive("compute.token") {
+		t.Fatal("mirror lost sensitivity")
+	}
+	if err := GetConfigRegistry().Set("other", "value", false); err == nil {
+		t.Fatal("mirror not frozen")
+	}
+	GetConfigRegistry().Reset()
+	if v, ok := r.Get("compute.token"); !ok || v != "dummy-private" {
+		t.Fatal("mirror reset changed private source")
 	}
 }
 
