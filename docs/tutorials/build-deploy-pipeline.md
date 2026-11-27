@@ -342,11 +342,14 @@ WFCTL_BUILD_DRY_RUN=1 wfctl build --config infra.yaml
 
 ## 9. Retention Policy
 
-Automatically prune old images on a weekly schedule to control registry costs.
+Declare a retention policy and check whether the selected provider can enforce it.
 
 ### Goal
 
-Keep only the 20 most recent image tags in DOCR; delete untagged manifests on a cron.
+The requested policy keeps 20 recent tags and limits untagged age. DOCR and GHCR
+currently refuse pruning because scoped deletion, deployed/rollback digest
+preservation and approval of each destructive action are not enforceable. The
+configured TTL must not be translated into registry-wide garbage collection.
 
 ### Config
 
@@ -355,7 +358,7 @@ ci:
   registries:
     - name: docr
       type: do
-      path: registry.digitalocean.com/myorg
+      path: registry.digitalocean.com/myorg/my-image
       auth:
         env: DIGITALOCEAN_TOKEN
       retention:
@@ -378,12 +381,13 @@ jobs:
       - run: wfctl registry prune --registry docr
 ```
 
+The generated DOCR job currently fails closed without deleting images.
+
 ### Dry-run
 
 ```sh
-WFCTL_BUILD_DRY_RUN=1 wfctl registry prune --registry docr --config infra.yaml
-# [dry-run] doctl registry garbage-collection start --force --include-untagged-manifests
-# [dry-run] doctl registry repository list-tags (keep latest 20, preserve 'latest')
+wfctl registry prune --dry-run --registry docr --config infra.yaml
+# Returns an error: retention.untagged_ttl is unsupported. No commands/API calls run.
 ```
 
 ---
