@@ -68,15 +68,9 @@ func runInfraApplyDryRun(cfgFile, envName, format string, showSensitive bool) er
 		return err
 	}
 
-	// Treat state-load failure as empty state so dry-run works even when the
-	// remote state backend does not yet exist (e.g. a fresh config whose
-	// iac.state Spaces bucket has not been bootstrapped yet). The same
-	// first-run assumption is safe here because a missing backend yields an
-	// all-create plan — the correct preview for that scenario.
 	current, err := loadCurrentState(cfgFile, envName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "note: could not load current state (treating as empty for dry-run): %v\n", err)
-		current = nil
+		return fmt.Errorf("load current state: %w", err)
 	}
 
 	// --include: apply the same scope filter as the live apply path.

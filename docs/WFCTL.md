@@ -2377,6 +2377,12 @@ wfctl infra apply [-c CONFIG] [--env ENV] [--auto-approve] [--plan FILE]
 | `--allow-replace` | `` | Comma-separated list of resource names whose `protected: true` status is overridden for this apply (replace/delete actions only) |
 | `--plugin-dir` | _(env `WFCTL_PLUGIN_DIR` or `data/plugins`)_ | Override the plugin directory for this invocation. Useful for isolated CI smoke tests. |
 
+If current state cannot be resolved or read, `--dry-run` exits nonzero without
+emitting a table or JSON plan. This includes malformed state files and backend
+errors. Successfully loaded empty state, including an absent filesystem state
+directory, still produces a first-run plan; a load error is never treated as
+proof that no resources exist.
+
 Generic ownership checks do not replace authentication or provider IAM. They are a pre-dispatch safety gate to avoid accidental cross-owner mutation where provider plugins can read/write ownership metadata. DNS resources are excluded from this generic gate and use plugin-owned DNS policy checks during DNS intent reconciliation.
 
 #### Plugin-owned `dns intent compile`
@@ -2755,6 +2761,11 @@ Generate Markdown documentation. With a config file, this produces Mermaid-backe
 wfctl docs generate [options] <config.yaml>
 wfctl docs generate --source <repo> --out <dir> --module <module> --version <tag> --packages <list>
 ```
+
+SIGINT/SIGTERM cancels documentation generation and its active Go or Git command.
+Cancellation is fatal, not a package warning, and does not trigger cache deletion
+or recloning after an interrupted refresh. Generation stops before subsequent
+output writes; files already written are not rolled back.
 
 | Flag | Default | Description |
 |------|---------|-------------|
