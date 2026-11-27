@@ -1,0 +1,76 @@
+name: Maintenance wfctl checksum qualification
+
+on:
+  pull_request:
+    branches: ['maintenance/v0.74']
+  push:
+    branches: ['maintenance/v0.74']
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: maintenance-wfctl-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOWORK: 'off'
+  GOMAXPROCS: '2'
+  WFCTL_DIFFCACHE: ':memory:'
+  GH_TOKEN: ''
+  GITHUB_TOKEN: ''
+  RELEASES_TOKEN: ''
+
+jobs:
+  checksum:
+    name: wfctl checksum regressions (not full runtime acceptance)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record exact candidate and isolate Git configuration
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          config="$RUNNER_TEMP/wfctl-qualification.gitconfig"
+          : > "$config"
+          echo "GIT_CONFIG_GLOBAL=$config" >> "$GITHUB_ENV"
+      - name: Set up release-selected Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26.5'
+          cache: false
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+      - name: Build required UI assets
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          cd ui && npm ci && npm run build
+          cd .. && mkdir -p module/ui_dist && cp -r ui/dist/* module/ui_dist/
+      - name: Focused synthetic checksum and installer regressions
+        run: |
+          go test -p=2 -race ./cmd/wfctl -run 'Test(ChecksumAuth|LookupChecksum|ParseChecksums|VerifyChecksum|VerifyInstalledChecksum|InstallFromWfctlLockfile|InstallPluginFromManifest|DownloadURL|DownloadGitHub|ApplyPrivateAuth)' -count=1 -timeout=5m -json
+      - name: Compile wfctl
+        run: go build -p=2 -o "$RUNNER_TEMP/wfctl-qualified" ./cmd/wfctl
+      - name: Confirm source and dependency files remain unchanged
+        if: always()
+        run: git diff --exit-code HEAD -- .
+      - name: Remove owned qualification files
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/wfctl-qualified" "$RUNNER_TEMP/wfctl-qualification.gitconfig"
+# Deliberately excludes the full wfctl package and plugin runtime/socket tests.
+# Passing this focused job does not establish full-suite, hosted private-plugin,
+# release, or deployment acceptance. Existing runtime restrictions remain.

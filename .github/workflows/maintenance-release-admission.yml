@@ -1,0 +1,37 @@
+name: Maintenance release-admission policy
+
+'on':
+  pull_request:
+    branches: ['fix/v074-private-checksum-auth']
+
+permissions:
+  contents: read
+
+jobs:
+  admission:
+    name: Release-admission policy regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Record exact source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+      - name: Test release-admission boundaries without external services
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_ALLOW_PROTOCOL: file
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.hooksPath
+          GIT_CONFIG_VALUE_0: /dev/null
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+          RELEASES_TOKEN: ''
+        run: python3 -B scripts/test-verify-maintenance-release.py
