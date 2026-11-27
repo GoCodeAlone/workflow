@@ -2,6 +2,12 @@ module github.com/GoCodeAlone/workflow
 
 go 1.27.2
 
+// actionlint v1.7.12 requires the pre-rc.4 structured YAML error API.
+// Keep its effective YAML version compatible during automatic dependency updates.
+// Remove when actionlint supports the released v4 error API, then recheck
+// cigen diagnostics and an unconstrained dependency-upgrade fixture.
+replace go.yaml.in/yaml/v4 => go.yaml.in/yaml/v4 v4.0.0-rc.3
+
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
